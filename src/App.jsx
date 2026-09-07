@@ -57,9 +57,13 @@ function parseBankCSV(text, accounts) {
       if (amount === null) continue;
       let gl = '';
       let mode = 'REVIEW';
+      let finalDesc = description;
       if (/^Invoice #/i.test(category)) {
         gl = matchAccountByName('Accounts Receivable', accounts);
         mode = 'MATCH';
+        // guarda la referencia de Wave como nota visible, para vincular manualmente después
+        const m = category.match(/Invoice #(\S+)\s*\|\s*Payment from (.+)$/i);
+        if (m) finalDesc = `${description} (Wave: Factura #${m[1]} — ${m[2].replace(/\s*\+\s*\d+$/, '')})`;
       } else if (/^Refund for /i.test(category)) {
         gl = matchAccountByName(category.replace(/^Refund for /i, ''), accounts);
         mode = gl ? 'AUTO' : 'REVIEW';
@@ -67,7 +71,7 @@ function parseBankCSV(text, accounts) {
         gl = matchAccountByName(category.replace(/\s*\+\s*\d+$/, ''), accounts);
         mode = gl ? 'AUTO' : 'REVIEW';
       }
-      rows.push({ date, description, amount: Math.abs(amount), gl, mode, rawCategory: category });
+      rows.push({ date, description: finalDesc, amount, gl, mode, rawCategory: category });
     } else {
       const amount = parseAmount(cols[2]);
       if (amount === null) continue;
@@ -327,6 +331,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} glName={glName} accounts={accounts}
+            invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
           />
         )}
         {tab === 'invoices' && (
@@ -437,12 +442,17 @@ function Dashboard({ summary, transactions, invoices }) {
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, glName, accounts }) {
+function TransactionsView({ transactions, setTransactions, rules, glName, accounts, invoices, setInvoices, invoiceTotal }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState('');
   const [importError, setImportError] = useState('');
+  const [splittingId, setSplittingId] = useState(null);
+  const [splitLines, setSplitLines] = useState([]);
+  const [splitError, setSplitError] = useState('');
+  const [linkingId, setLinkingId] = useState(null);
+  const [linkInvoiceId, setLinkInvoiceId] = useState('');
 
   function importCSV() {
     const rows = parseBankCSV(csvText, accounts);
@@ -484,6 +494,49 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   }
   function removeRow(id) {
     setTransactions(prev => prev.filter(t => t.id !== id));
+  }
+
+  function openSplit(t) {
+    setSplittingId(t.id);
+    setSplitLines([{ gl: t.gl || '', amount: t.amount }, { gl: '', amount: 0 }]);
+    setSplitError('');
+  }
+  function updateSplitLine(i, field, val) {
+    setSplitLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
+  }
+  function addSplitLine() { setSplitLines(prev => [...prev, { gl: '', amount: 0 }]); }
+  function removeSplitLine(i) { setSplitLines(prev => prev.filter((_, idx) => idx !== i)); }
+  function confirmSplit() {
+    const original = transactions.find(t => t.id === splittingId);
+    if (!original) return;
+    const sum = splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    if (Math.abs(sum - original.amount) > 0.01) {
+      setSplitError(`La suma de las líneas (${money(sum)}) debe ser igual al monto original (${money(original.amount)}).`);
+      return;
+    }
+    if (splitLines.some(l => !l.gl)) { setSplitError('Cada línea necesita una cuenta.'); return; }
+    setSplitError('');
+    const newRows = splitLines.map(l => ({
+      id: uid(), date: original.date, description: original.description + ' (dividido)',
+      amount: Number(l.amount), gl: l.gl, status: 'AUTO',
+    }));
+    setTransactions(prev => [...prev.filter(t => t.id !== splittingId), ...newRows]);
+    setSplittingId(null);
+  }
+
+  function openLink(t) { setLinkingId(t.id); setLinkInvoiceId(''); }
+  function confirmLink() {
+    const t = transactions.find(x => x.id === linkingId);
+    const inv = invoices.find(i => i.id === linkInvoiceId);
+    if (!t || !inv) return;
+    setInvoices(prev => prev.map(i => {
+      if (i.id !== inv.id) return i;
+      const paid = (i.paid || 0) + t.amount;
+      const total = invoiceTotal(i);
+      return { ...i, paid, status: paid >= total ? 'Pagada' : 'Parcial' };
+    }));
+    setTransactions(prev => prev.map(x => x.id === t.id ? { ...x, description: x.description + ` [Vinculado a ${inv.number}]`, status: 'AUTO' } : x));
+    setLinkingId(null);
   }
 
   return (
@@ -562,6 +615,10 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
                   {t.status === 'REVIEW' && (
                     <button title="Confirmar" onClick={() => confirmRow(t.id)} style={iconBtn}><Check size={14} /></button>
                   )}
+                  <button title="Dividir entre varias cuentas" onClick={() => openSplit(t)} style={iconBtn}>Dividir</button>
+                  {t.gl === '1100' && (
+                    <button title="Vincular a una factura real" onClick={() => openLink(t)} style={iconBtn}>Vincular a factura</button>
+                  )}
                   <button title="Eliminar" onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
@@ -570,6 +627,58 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
         </table>
         {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay transacciones. Agrega la primera arriba.</div>}
       </Card>
+
+      {splittingId && (() => {
+        const original = transactions.find(t => t.id === splittingId);
+        if (!original) return null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+            <Card style={{ width: 420 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Dividir transacción — {money(original.amount)}</div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{original.description}</div>
+              {splitLines.map((l, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <select style={{ flex: 1 }} value={l.gl} onChange={e => updateSplitLine(i, 'gl', e.target.value)}>
+                    <option value="">Cuenta</option>
+                    {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                  </select>
+                  <input type="number" step="0.01" style={{ width: 100 }} value={l.amount} onChange={e => updateSplitLine(i, 'amount', e.target.value)} />
+                  <button onClick={() => removeSplitLine(i)} style={iconBtn}><Trash2 size={14} /></button>
+                </div>
+              ))}
+              <button onClick={addSplitLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Línea</button>
+              {splitError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{splitError}</div>}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancelar</button>
+                <button onClick={confirmSplit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirmar división</button>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {linkingId && (() => {
+        const t = transactions.find(x => x.id === linkingId);
+        if (!t) return null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+            <Card style={{ width: 380 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Vincular a factura real</div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
+              <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
+                <option value="">Selecciona la factura</option>
+                {invoices.filter(i => i.status !== 'Pagada').map(i => (
+                  <option key={i.id} value={i.id}>{i.number} — {i.client} — {money(invoiceTotal(i) - (i.paid || 0))} pendiente</option>
+                ))}
+              </select>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancelar</button>
+                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Aplicar cobro</button>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -846,7 +955,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   // Todas las líneas contables unificadas: transacciones (una cuenta cada una) + líneas de asientos manuales
   const postings = useMemo(() => {
     const list = [];
-    transactions.forEach(t => { if (t.gl) list.push({ date: t.date, gl: t.gl, amount: t.amount }); });
+    transactions.forEach(t => {
+      if (!t.gl) return;
+      const acct = accounts.find(a => a.code === t.gl);
+      // en la libreta de banco, negativo = salida, positivo = entrada.
+      // para que un gasto categorizado se vea como aumento de gasto (positivo), se invierte el signo solo ahí.
+      const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
+      list.push({ date: t.date, gl: t.gl, amount });
+    });
     journalEntries.forEach(je => {
       je.lines.forEach(l => {
         if (!l.gl) return;
@@ -899,7 +1015,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       const m = t.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
       const acct = accounts.find(g => g.code === t.gl);
-      if (acct?.type === 'Expense') map[m].expense += t.amount;
+      if (acct?.type === 'Expense') map[m].expense += Math.abs(t.amount);
     });
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
