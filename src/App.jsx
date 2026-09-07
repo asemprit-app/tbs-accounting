@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { supabase } from './supabaseClient';
 
 const GL_ACCOUNTS = [
   { code: '1010', name: 'Banco Principal', type: 'Asset' },
@@ -58,6 +57,8 @@ function parseBankCSV(text) {
   return rows;
 }
 
+const STORAGE_KEY = 'tbs_app_data_v1';
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -68,76 +69,38 @@ function suggestGL(description, rules) {
   return hit ? { gl: hit.gl, mode: hit.mode } : { gl: '', mode: 'REVIEW' };
 }
 
-function diffSync(table, prevArr, nextArr) {
-  const prevMap = new Map(prevArr.map(x => [x.id, x]));
-  const nextMap = new Map(nextArr.map(x => [x.id, x]));
-  const toDelete = prevArr.filter(x => !nextMap.has(x.id)).map(x => x.id);
-  const toInsert = nextArr.filter(x => !prevMap.has(x.id));
-  const toUpdate = nextArr.filter(x => prevMap.has(x.id) && JSON.stringify(prevMap.get(x.id)) !== JSON.stringify(x));
-  if (toDelete.length) supabase.from(table).delete().in('id', toDelete).then(({ error }) => error && console.error(table, 'delete', error));
-  if (toInsert.length) supabase.from(table).insert(toInsert).then(({ error }) => error && console.error(table, 'insert', error));
-  toUpdate.forEach(row => {
-    supabase.from(table).update(row).eq('id', row.id).then(({ error }) => error && console.error(table, 'update', error));
-  });
-}
-
 export default function App() {
   const [loaded, setLoaded] = useState(false);
-  const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState('dashboard');
-  const [transactions, setTransactionsRaw] = useState([]);
-  const [invoices, setInvoicesRaw] = useState([]);
-  const [customers, setCustomersRaw] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [rules] = useState(DEFAULT_RULES);
   const [printInvoice, setPrintInvoice] = useState(null);
 
   useEffect(() => {
-    (async () => {
-      const [t, i, c] = await Promise.all([
-        supabase.from('transactions').select('*').order('date'),
-        supabase.from('invoices').select('*').order('date'),
-        supabase.from('customers').select('*'),
-      ]);
-      if (t.error || i.error || c.error) {
-        setLoadError((t.error || i.error || c.error).message);
-      } else {
-        setTransactionsRaw((t.data || []).map(r => ({ ...r, amount: Number(r.amount) })));
-        setInvoicesRaw((i.data || []).map(r => ({ ...r, retentionPct: r.retention_pct, paid: Number(r.paid) || 0 })));
-        setCustomersRaw(c.data || []);
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        setTransactions(data.transactions || []);
+        setInvoices(data.invoices || []);
+        setCustomers(data.customers || []);
       }
-      setLoaded(true);
-    })();
+    } catch (e) { /* no data yet */ }
+    setLoaded(true);
   }, []);
 
-  const setTransactions = useCallback((updater) => {
-    setTransactionsRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      diffSync('transactions', prev, next.map(({ ...r }) => r));
-      return next;
-    });
+  const save = useCallback((next) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch (e) { console.error('storage error', e); }
   }, []);
-  const setInvoices = useCallback((updater) => {
-    setInvoicesRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      const forDb = next.map(inv => ({
-        id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
-        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
-      }));
-      const prevForDb = prev.map(inv => ({
-        id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
-        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
-      }));
-      diffSync('invoices', prevForDb, forDb);
-      return next;
-    });
-  }, []);
-  const setCustomers = useCallback((updater) => {
-    setCustomersRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      diffSync('customers', prev, next);
-      return next;
-    });
-  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    save({ transactions, invoices, customers });
+  }, [transactions, invoices, customers, loaded, save]);
 
   const glName = (code) => GL_ACCOUNTS.find(g => g.code === code)?.name || 'Sin categoría';
 
@@ -162,15 +125,6 @@ export default function App() {
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
-        {loadError && (
-          <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
-            No se pudo conectar a la base de datos: {loadError}. Revisa tu archivo .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
-          </div>
-        )}
-        {!loaded ? (
-          <div style={{ fontSize: 13, color: '#6B7280' }}>Cargando datos...</div>
-        ) : (
-        <>
         {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} />}
         {tab === 'transactions' && (
           <TransactionsView
@@ -187,8 +141,6 @@ export default function App() {
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} />}
-        </>
-        )}
       </div>
       {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} />}
     </div>
