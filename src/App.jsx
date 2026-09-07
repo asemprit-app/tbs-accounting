@@ -42,7 +42,8 @@ function parseBankCSV(text, accounts) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
-    const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    const delim = line.includes('\t') ? '\t' : ',';
+    const cols = line.split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
     if (cols.length < 3) continue;
     if (/^(date|fecha)$/i.test(cols[0])) continue; // encabezado
     const date = normalizeDate(cols[0]);
