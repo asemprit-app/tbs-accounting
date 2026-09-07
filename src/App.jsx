@@ -38,7 +38,7 @@ function matchAccountByName(text, accounts) {
   return best ? best.code : '';
 }
 
-function parseBankCSV(text, accounts) {
+function parseBankCSV(text, accounts, rules) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
@@ -70,6 +70,11 @@ function parseBankCSV(text, accounts) {
       } else {
         gl = matchAccountByName(category.replace(/\s*\+\s*\d+$/, ''), accounts);
         mode = gl ? 'AUTO' : 'REVIEW';
+      }
+      // si el nombre de categoría no dio con una cuenta, prueba las reglas por descripción antes de rendirse
+      if (!gl) {
+        const bySuggest = suggestGL(description, rules);
+        if (bySuggest.gl) { gl = bySuggest.gl; mode = bySuggest.mode; }
       }
       rows.push({ date, description: finalDesc, amount, gl, mode, rawCategory: category });
     } else {
@@ -455,7 +460,7 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
 
   function importCSV() {
-    const rows = parseBankCSV(csvText, accounts);
+    const rows = parseBankCSV(csvText, accounts, rules);
     if (rows.length === 0) {
       setImportError('No se reconoció ninguna fila válida. Formato esperado: fecha,descripción,monto — o fecha,descripción,categoría,monto (export de Wave).');
       return;
