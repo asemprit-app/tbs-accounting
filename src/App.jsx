@@ -3,17 +3,75 @@ import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Che
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 
-function parseBankCSV(text) {
+const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+
+function normalizeDate(raw) {
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // ya es ISO
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/); // ej. 2-Jan-26
+  if (m) {
+    const day = m[1].padStart(2, '0');
+    const mon = MONTHS_ES[m[2].toLowerCase()];
+    let year = m[3];
+    if (year.length === 2) year = '20' + year;
+    if (mon) return `${year}-${String(mon).padStart(2, '0')}-${day}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  return null;
+}
+
+function parseAmount(raw) {
+  let s = String(raw).trim();
+  const negative = /^\(.*\)$/.test(s);
+  s = s.replace(/[()$,]/g, '').trim();
+  const n = Number(s);
+  if (isNaN(n)) return null;
+  return negative ? -Math.abs(n) : n;
+}
+
+function matchAccountByName(text, accounts) {
+  const t = text.trim().toLowerCase();
+  let best = accounts.find(a => a.name.toLowerCase() === t);
+  if (best) return best.code;
+  best = accounts.find(a => t.includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(t));
+  return best ? best.code : '';
+}
+
+function parseBankCSV(text, accounts) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
     const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
     if (cols.length < 3) continue;
-    const [date, description, amountRaw] = cols;
-    const amount = Number(String(amountRaw).replace(/[^0-9.-]/g, ''));
-    if (!date || !description || isNaN(amount)) continue;
-    if (/^(date|fecha)$/i.test(date)) continue;
-    rows.push({ date, description, amount });
+    if (/^(date|fecha)$/i.test(cols[0])) continue; // encabezado
+    const date = normalizeDate(cols[0]);
+    const description = cols[1];
+    if (!date || !description) continue;
+
+    if (cols.length >= 4) {
+      // formato con categoría (ej. export de Wave): fecha,descripción,categoría,monto
+      const category = cols[2];
+      const amount = parseAmount(cols[3]);
+      if (amount === null) continue;
+      let gl = '';
+      let mode = 'REVIEW';
+      if (/^Invoice #/i.test(category)) {
+        gl = matchAccountByName('Accounts Receivable', accounts);
+        mode = 'MATCH';
+      } else if (/^Refund for /i.test(category)) {
+        gl = matchAccountByName(category.replace(/^Refund for /i, ''), accounts);
+        mode = gl ? 'AUTO' : 'REVIEW';
+      } else {
+        gl = matchAccountByName(category.replace(/\s*\+\s*\d+$/, ''), accounts);
+        mode = gl ? 'AUTO' : 'REVIEW';
+      }
+      rows.push({ date, description, amount: Math.abs(amount), gl, mode, rawCategory: category });
+    } else {
+      const amount = parseAmount(cols[2]);
+      if (amount === null) continue;
+      rows.push({ date, description, amount });
+    }
   }
   return rows;
 }
@@ -279,7 +337,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
@@ -386,13 +444,17 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   const [importError, setImportError] = useState('');
 
   function importCSV() {
-    const rows = parseBankCSV(csvText);
+    const rows = parseBankCSV(csvText, accounts);
     if (rows.length === 0) {
-      setImportError('No se reconoció ninguna fila válida. Formato esperado por línea: fecha,descripción,monto');
+      setImportError('No se reconoció ninguna fila válida. Formato esperado: fecha,descripción,monto — o fecha,descripción,categoría,monto (export de Wave).');
       return;
     }
     setImportError('');
     const newTx = rows.map(r => {
+      if (r.gl !== undefined) {
+        // fila con categoría (Wave) ya viene con gl/mode resueltos
+        return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl: r.gl, status: r.mode };
+      }
       const { gl, mode } = suggestGL(r.description, rules);
       return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl, status: mode };
     });
@@ -758,7 +820,78 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal }) {
   );
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts }) {
+function getPeriodRange(preset, customFrom, customTo) {
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  if (preset === 'this_month') return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
+  if (preset === 'last_month') return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
+  if (preset === 'this_quarter') { const q = Math.floor(m / 3); return { from: iso(new Date(y, q * 3, 1)), to: iso(new Date(y, q * 3 + 3, 0)) }; }
+  if (preset === 'this_year') return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
+  return { from: customFrom, to: customTo };
+}
+
+function naturalAmount(gl, amount, accounts) {
+  const acct = accounts.find(a => a.code === gl);
+  return { amount, type: acct?.type || 'Expense' };
+}
+
+function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries }) {
+  const [preset, setPreset] = useState('this_month');
+  const [customFrom, setCustomFrom] = useState(todayStr());
+  const [customTo, setCustomTo] = useState(todayStr());
+  const { from, to } = getPeriodRange(preset, customFrom, customTo);
+
+  // Todas las líneas contables unificadas: transacciones (una cuenta cada una) + líneas de asientos manuales
+  const postings = useMemo(() => {
+    const list = [];
+    transactions.forEach(t => { if (t.gl) list.push({ date: t.date, gl: t.gl, amount: t.amount }); });
+    journalEntries.forEach(je => {
+      je.lines.forEach(l => {
+        if (!l.gl) return;
+        const acct = accounts.find(a => a.code === l.gl);
+        const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
+        const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
+        const amt = isDebitSide ? (debit - credit) : (credit - debit);
+        list.push({ date: je.date, gl: l.gl, amount: amt });
+      });
+    });
+    return list;
+  }, [transactions, journalEntries, accounts]);
+
+  function balanceAsOf(gl, asOfDate) {
+    return postings.filter(p => p.gl === gl && p.date <= asOfDate).reduce((s, p) => s + p.amount, 0);
+  }
+  function activityInPeriod(gl, fromD, toD) {
+    return postings.filter(p => p.gl === gl && p.date >= fromD && p.date <= toD).reduce((s, p) => s + p.amount, 0);
+  }
+
+  const revenueAccts = accounts.filter(a => a.type === 'Revenue');
+  const expenseAccts = accounts.filter(a => a.type === 'Expense');
+  const assetAccts = accounts.filter(a => a.type === 'Asset');
+  const liabilityAccts = accounts.filter(a => a.type === 'Liability');
+  const equityAccts = accounts.filter(a => a.type === 'Equity');
+  const cashAccts = assetAccts.filter(a => /banc|bppr|cash|efectivo|caja/i.test(a.name));
+
+  // Facturas emitidas en el período cuentan como ingreso (Service Revenue) además de lo categorizado manualmente
+  const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceTotal(inv), 0);
+
+  const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const totalRevenue = revenueRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
+  const expenseRows = expenseAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const totalExpense = expenseRows.reduce((s, r) => s + r.value, 0);
+  const netIncome = totalRevenue - totalExpense;
+
+  const assetRows = assetAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
+  const totalAssets = assetRows.reduce((s, r) => s + r.value, 0);
+  const liabilityRows = liabilityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
+  const totalLiabilities = liabilityRows.reduce((s, r) => s + r.value, 0);
+  const equityRows = equityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
+  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + netIncome; // utilidad del período se suma al capital
+
+  const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
+  const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
+
   const byMonth = useMemo(() => {
     const map = {};
     transactions.forEach(t => {
@@ -773,7 +906,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts })
       map[m].revenue += invoiceTotal(inv);
     });
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceTotal]);
+  }, [transactions, invoices, invoiceTotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Mes,Ingresos,Gastos,Neto\n';
@@ -785,10 +918,90 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts })
     URL.revokeObjectURL(url);
   }
 
+  const PRESETS = [
+    ['this_month', 'Este mes'], ['last_month', 'Mes anterior'], ['this_quarter', 'Este trimestre'],
+    ['this_year', 'Este año'], ['custom', 'Personalizado'],
+  ];
+
+  const Row = ({ label, value, bold }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, fontWeight: bold ? 700 : 400 }}>
+      <span>{label}</span><span>{money(value)}</span>
+    </div>
+  );
+
   return (
     <div>
+      <h2 style={{ margin: '0 0 16px' }}>Reportes financieros</h2>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          {PRESETS.map(([id, label]) => (
+            <button key={id} onClick={() => setPreset(id)}
+              style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 13,
+                background: preset === id ? '#17365D' : '#fff', color: preset === id ? '#fff' : '#1F2933' }}>
+              {label}
+            </button>
+          ))}
+          {preset === 'custom' && (
+            <>
+              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Desde</label>
+                <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
+              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Hasta</label>
+                <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
+            </>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Período: {from} a {to}</div>
+      </Card>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
+        <Card>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Estado de Resultados)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Ingresos</div>
+          {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {invoiceRevenueInPeriod !== 0 && <Row label="Facturación (Service Revenue)" value={invoiceRevenueInPeriod} />}
+          <Row label="Total Ingresos" value={totalRevenue} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Gastos</div>
+          {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          <Row label="Total Gastos" value={totalExpense} bold />
+          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+            <Row label="Utilidad Neta" value={netIncome} bold />
+          </div>
+        </Card>
+
+        <Card>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (al {to})</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Activos</div>
+          {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          <Row label="Total Activos" value={totalAssets} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Pasivos</div>
+          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          <Row label="Total Pasivos" value={totalLiabilities} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Capital</div>
+          {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          <Row label="Utilidad del período" value={netIncome} />
+          <Row label="Total Capital" value={totalEquity} bold />
+          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+            <Row label="Pasivos + Capital" value={totalLiabilities + totalEquity} bold />
+          </div>
+        </Card>
+
+        <Card>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Cash Flow (método directo)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Cambio en cuentas de banco/efectivo</div>
+          {cashRows.map(r => <Row key={r.code} label={r.name} value={r.change} />)}
+          {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280' }}>No hay cuentas marcadas como banco/efectivo (el nombre debe incluir "banco", "cash" o similar).</div>}
+          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+            <Row label="Cambio Neto en Efectivo" value={netCashChange} bold />
+          </div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
+            Este cálculo suma directamente los movimientos de las cuentas de banco en el período — no separa aún operación/inversión/financiamiento.
+          </div>
+        </Card>
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Reportes mensuales</h2>
+        <h3 style={{ margin: 0 }}>Tendencia mensual</h3>
         <button onClick={downloadCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Descargar CSV</button>
       </div>
 
