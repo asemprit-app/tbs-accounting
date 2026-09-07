@@ -1,46 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
-
-const GL_ACCOUNTS = [
-  { code: '1010', name: 'Banco Principal', type: 'Asset' },
-  { code: '1100', name: 'Accounts Receivable', type: 'Asset' },
-  { code: '2020', name: 'Tarjeta de Crédito', type: 'Liability' },
-  { code: '4000', name: 'Service Revenue', type: 'Revenue' },
-  { code: '5010', name: 'Bank Service Charges', type: 'Expense' },
-  { code: '6040', name: 'Meals and Entertainment', type: 'Expense' },
-  { code: '6050', name: 'Office Supplies', type: 'Expense' },
-  { code: '6060', name: 'Business Material', type: 'Expense' },
-  { code: '6070', name: 'Repairs & Maintenance', type: 'Expense' },
-  { code: '6090', name: 'Uniforms', type: 'Expense' },
-  { code: '6100', name: 'Vehicle - Toll', type: 'Expense' },
-  { code: '6120', name: 'Education & Training', type: 'Expense' },
-  { code: '6160', name: 'Professional Fees', type: 'Expense' },
-  { code: '6170', name: 'Rent Expense', type: 'Expense' },
-  { code: '6200', name: 'Telephone', type: 'Expense' },
-  { code: '6210', name: 'Travel Expense', type: 'Expense' },
-  { code: '6220', name: 'Utilities', type: 'Expense' },
-  { code: '6900', name: 'Other Expenses', type: 'Expense' },
-];
-
-const DEFAULT_RULES = [
-  { id: 'r1', keyword: 'IRS', gl: '2250', mode: 'AUTO' },
-  { id: 'r2', keyword: 'CHASE CREDIT', gl: '2020', mode: 'MATCH' },
-  { id: 'r3', keyword: 'PAYROLL', gl: '5000', mode: 'AUTO' },
-  { id: 'r4', keyword: 'RESTAURANT', gl: '6040', mode: 'AUTO' },
-  { id: 'r5', keyword: 'OFFICE', gl: '6050', mode: 'AUTO' },
-  { id: 'r6', keyword: 'TRANF ATHM', gl: '1100', mode: 'MATCH' },
-  { id: 'r7', keyword: 'EFT DEPOSIT', gl: '1100', mode: 'MATCH' },
-  { id: 'r8', keyword: 'USATAXPYMT', gl: '2250', mode: 'AUTO' },
-  { id: 'r9', keyword: 'UNIFORM', gl: '6090', mode: 'AUTO' },
-  { id: 'r10', keyword: 'RENT', gl: '6170', mode: 'AUTO' },
-  { id: 'r11', keyword: 'TELEPHONE', gl: '6200', mode: 'AUTO' },
-  { id: 'r12', keyword: 'TRAVEL', gl: '6210', mode: 'AUTO' },
-  { id: 'r13', keyword: 'ELECTRIC', gl: '6220', mode: 'AUTO' },
-  { id: 'r14', keyword: 'WATER', gl: '6220', mode: 'AUTO' },
-  { id: 'r15', keyword: 'BANK FEE', gl: '5010', mode: 'AUTO' },
-  { id: 'r16', keyword: 'TOLL', gl: '6100', mode: 'AUTO' },
-];
+import { supabase } from './supabaseClient';
 
 function parseBankCSV(text) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
@@ -57,8 +18,6 @@ function parseBankCSV(text) {
   return rows;
 }
 
-const STORAGE_KEY = 'tbs_app_data_v1';
-
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -69,40 +28,210 @@ function suggestGL(description, rules) {
   return hit ? { gl: hit.gl, mode: hit.mode } : { gl: '', mode: 'REVIEW' };
 }
 
+function diffSync(table, prevArr, nextArr, clientId) {
+  diffSyncByKey(table, 'id', prevArr, nextArr, clientId);
+}
+
+function diffSyncByKey(table, key, prevArr, nextArr, clientId) {
+  const prevMap = new Map(prevArr.map(x => [x[key], x]));
+  const nextMap = new Map(nextArr.map(x => [x[key], x]));
+  const toDelete = prevArr.filter(x => !nextMap.has(x[key])).map(x => x[key]);
+  const toInsert = nextArr.filter(x => !prevMap.has(x[key])).map(x => ({ ...x, client_id: clientId }));
+  const toUpdate = nextArr.filter(x => prevMap.has(x[key]) && JSON.stringify(prevMap.get(x[key])) !== JSON.stringify(x));
+  if (toDelete.length) supabase.from(table).delete().in(key, toDelete).then(({ error }) => error && console.error(table, 'delete', error));
+  if (toInsert.length) supabase.from(table).insert(toInsert).then(({ error }) => error && console.error(table, 'insert', error));
+  toUpdate.forEach(row => {
+    supabase.from(table).update(row).eq(key, row[key]).then(({ error }) => error && console.error(table, 'update', error));
+  });
+}
+
 export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = loading, null = logged out
+  const [profile, setProfile] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [selectedClientId, setSelectedClientId] = useState(null);
+  const [authError, setAuthError] = useState('');
+  const [authForm, setAuthForm] = useState({ email: '', password: '' });
+  const [authBusy, setAuthBusy] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setProfile(null); return; }
+    (async () => {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+      if (!error) {
+        setProfile(data);
+        if (data.role === 'staff') {
+          const { data: cl } = await supabase.from('clients').select('*').order('name');
+          setClients(cl || []);
+          if (cl && cl.length) setSelectedClientId(cl[0].id);
+        } else {
+          setSelectedClientId(data.client_id);
+        }
+      }
+    })();
+  }, [session]);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setAuthBusy(true); setAuthError('');
+    const { error } = await supabase.auth.signInWithPassword({ email: authForm.email, password: authForm.password });
+    if (error) setAuthError(error.message);
+    setAuthBusy(false);
+  }
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setProfile(null); setSelectedClientId(null); setClients([]);
+  }
+
+  if (session === undefined) {
+    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Cargando…</div>;
+  }
+
+  if (!session) {
+    return (
+      <div style={{ minHeight: '640px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8' }}>
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 28, width: 320 }}>
+          <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D', marginBottom: 16 }}>TBS Accounting — Entrar</div>
+          <form onSubmit={handleLogin}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Correo</label>
+            <input type="email" required style={{ width: '100%', marginBottom: 10 }} value={authForm.email} onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))} />
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Contraseña</label>
+            <input type="password" required style={{ width: '100%', marginBottom: 16 }} value={authForm.password} onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))} />
+            {authError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
+            <button type="submit" disabled={authBusy} style={{ width: '100%', background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '10px', cursor: 'pointer' }}>
+              {authBusy ? 'Entrando…' : 'Entrar'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (!profile || !selectedClientId) {
+    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Preparando tu espacio de trabajo…</div>;
+  }
+
+  return (
+    <Workspace
+      key={selectedClientId}
+      clientId={selectedClientId}
+      isStaff={profile.role === 'staff'}
+      clients={clients}
+      selectedClientId={selectedClientId}
+      onSwitchClient={setSelectedClientId}
+      onLogout={handleLogout}
+      userEmail={session.user.email}
+    />
+  );
+}
+
+function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail }) {
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState('dashboard');
-  const [transactions, setTransactions] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [rules] = useState(DEFAULT_RULES);
+  const [transactions, setTransactionsRaw] = useState([]);
+  const [invoices, setInvoicesRaw] = useState([]);
+  const [customers, setCustomersRaw] = useState([]);
+  const [accounts, setAccountsRaw] = useState([]);
+  const [rules, setRulesRaw] = useState([]);
+  const [journalEntries, setJournalEntriesRaw] = useState([]);
+  const [reconciliations, setReconciliationsRaw] = useState([]);
   const [printInvoice, setPrintInvoice] = useState(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const data = JSON.parse(raw);
-        setTransactions(data.transactions || []);
-        setInvoices(data.invoices || []);
-        setCustomers(data.customers || []);
+    (async () => {
+      const [t, i, c, a, r, j, rec] = await Promise.all([
+        supabase.from('transactions').select('*').eq('client_id', clientId).order('date'),
+        supabase.from('invoices').select('*').eq('client_id', clientId).order('date'),
+        supabase.from('customers').select('*').eq('client_id', clientId),
+        supabase.from('accounts').select('*').eq('client_id', clientId).order('code'),
+        supabase.from('rules').select('*').eq('client_id', clientId),
+        supabase.from('journal_entries').select('*').eq('client_id', clientId).order('date'),
+        supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
+      ]);
+      const firstErr = [t, i, c, a, r, j, rec].find(x => x.error);
+      if (firstErr) {
+        setLoadError(firstErr.error.message);
+      } else {
+        setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount) })));
+        setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0 })));
+        setCustomersRaw(c.data || []);
+        setAccountsRaw(a.data || []);
+        setRulesRaw(r.data || []);
+        setJournalEntriesRaw(j.data || []);
+        setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end })));
       }
-    } catch (e) { /* no data yet */ }
-    setLoaded(true);
+      setLoaded(true);
+    })();
   }, []);
 
-  const save = useCallback((next) => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch (e) { console.error('storage error', e); }
+  const setTransactions = useCallback((updater) => {
+    setTransactionsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      diffSync('transactions', prev, next.map(({ ...r }) => r), clientId);
+      return next;
+    });
+  }, []);
+  const setInvoices = useCallback((updater) => {
+    setInvoicesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const forDb = next.map(inv => ({
+        id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
+        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+      }));
+      const prevForDb = prev.map(inv => ({
+        id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
+        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+      }));
+      diffSync('invoices', prevForDb, forDb, clientId);
+      return next;
+    });
+  }, []);
+  const setCustomers = useCallback((updater) => {
+    setCustomersRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      diffSync('customers', prev, next, clientId);
+      return next;
+    });
+  }, []);
+  const setAccounts = useCallback((updater) => {
+    setAccountsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      diffSyncByKey('accounts', 'code', prev, next, clientId);
+      return next;
+    });
+  }, []);
+  const setRules = useCallback((updater) => {
+    setRulesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      diffSync('rules', prev, next, clientId);
+      return next;
+    });
+  }, []);
+  const setJournalEntries = useCallback((updater) => {
+    setJournalEntriesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      diffSync('journal_entries', prev, next, clientId);
+      return next;
+    });
+  }, []);
+  const setReconciliations = useCallback((updater) => {
+    setReconciliationsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const forDb = next.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status }));
+      const prevForDb = prev.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status }));
+      diffSync('reconciliations', prevForDb, forDb, clientId);
+      return next;
+    });
   }, []);
 
-  useEffect(() => {
-    if (!loaded) return;
-    save({ transactions, invoices, customers });
-  }, [transactions, invoices, customers, loaded, save]);
-
-  const glName = (code) => GL_ACCOUNTS.find(g => g.code === code)?.name || 'Sin categoría';
+  const glName = (code) => accounts.find(g => g.code === code)?.name || 'Sin categoría';
 
   const summary = useMemo(() => {
     const month = todayStr().slice(0, 7);
@@ -123,12 +252,22 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
-      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} />
+      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onLogout={onLogout} userEmail={userEmail} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
+        {loadError && (
+          <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+            No se pudo conectar a la base de datos: {loadError}. Revisa tu archivo .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
+          </div>
+        )}
+        {!loaded ? (
+          <div style={{ fontSize: 13, color: '#6B7280' }}>Cargando datos...</div>
+        ) : (
+        <>
         {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} />}
         {tab === 'transactions' && (
           <TransactionsView
-            transactions={transactions} setTransactions={setTransactions} rules={rules} glName={glName}
+            transactions={transactions} setTransactions={setTransactions} rules={rules} glName={glName} accounts={accounts}
           />
         )}
         {tab === 'invoices' && (
@@ -140,24 +279,40 @@ export default function App() {
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} />}
+        {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
+        {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
+        {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
+        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} accounts={accounts} />}
+        </>
+        )}
       </div>
       {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} />}
     </div>
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail }) {
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transacciones', icon: Receipt, badge: reviewCount },
     { id: 'invoices', label: 'Facturas', icon: FileText },
     { id: 'customers', label: 'Clientes', icon: Users },
     { id: 'reports', label: 'Reportes', icon: BarChart3 },
+    { id: 'accounts', label: 'Plan de Cuentas', icon: BookOpen },
+    { id: 'rules', label: 'Reglas', icon: ListChecks },
+    { id: 'journal', label: 'Asientos', icon: FileText },
+    { id: 'reconciliation', label: 'Reconciliación', icon: Landmark },
   ];
   return (
-    <div style={{ width: 200, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0 }}>
-      <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 20px' }}>TBS Accounting</div>
+    <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>TBS Accounting</div>
+      {isStaff && (
+        <select value={selectedClientId} onChange={e => onSwitchClient(e.target.value)}
+          style={{ margin: '0 10px 16px', fontSize: 12, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      )}
       {items.map(it => {
         const Icon = it.icon;
         const active = tab === it.id;
@@ -178,6 +333,11 @@ function Sidebar({ tab, setTab, reviewCount }) {
           </div>
         );
       })}
+      <div style={{ flex: 1 }} />
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, fontSize: 12 }}>
+        <div style={{ opacity: 0.8, marginBottom: 6, wordBreak: 'break-all' }}>{userEmail}</div>
+        <div onClick={onLogout} style={{ cursor: 'pointer', opacity: 0.9 }}>Cerrar sesión</div>
+      </div>
     </div>
   );
 }
@@ -218,7 +378,7 @@ function Dashboard({ summary, transactions, invoices }) {
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, glName }) {
+function TransactionsView({ transactions, setTransactions, rules, glName, accounts }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -329,7 +489,7 @@ function TransactionsView({ transactions, setTransactions, rules, glName }) {
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
                     <option value="">Sin categoría</option>
-                    {GL_ACCOUNTS.map(g => <option key={g.code} value={g.code}>{g.code} — {g.name}</option>)}
+                    {accounts.map(g => <option key={g.code} value={g.code}>{g.code} — {g.name}</option>)}
                   </select>
                 </td>
                 <td style={{ padding: '6px 4px' }}>
@@ -598,13 +758,13 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal }) {
   );
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal }) {
+function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts }) {
   const byMonth = useMemo(() => {
     const map = {};
     transactions.forEach(t => {
       const m = t.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
-      const acct = GL_ACCOUNTS.find(g => g.code === t.gl);
+      const acct = accounts.find(g => g.code === t.gl);
       if (acct?.type === 'Expense') map[m].expense += t.amount;
     });
     invoices.forEach(inv => {
@@ -667,6 +827,324 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal }) {
           </tbody>
         </table>
         {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Agrega transacciones y facturas para ver el reporte.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function ChartOfAccountsView({ accounts, setAccounts }) {
+  const [form, setForm] = useState({ code: '', name: '', type: 'Expense' });
+  const [error, setError] = useState('');
+  const [editingCode, setEditingCode] = useState(null);
+
+  function addAccount() {
+    if (!form.code.trim() || !form.name.trim()) { setError('Ingresa código y nombre.'); return; }
+    if (accounts.some(a => a.code === form.code.trim())) { setError('Ese código ya existe.'); return; }
+    setError('');
+    setAccounts(prev => [...prev, { code: form.code.trim(), name: form.name.trim(), type: form.type }]);
+    setForm({ code: '', name: '', type: 'Expense' });
+  }
+  function updateAccount(code, field, value) {
+    setAccounts(prev => prev.map(a => a.code === code ? { ...a, [field]: value } : a));
+  }
+  function removeAccount(code) {
+    setAccounts(prev => prev.filter(a => a.code !== code));
+  }
+
+  const types = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
+  const grouped = types.map(t => ({ type: t, rows: accounts.filter(a => a.type === t).sort((a, b) => a.code.localeCompare(b.code)) }));
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 16px' }}>Plan de Cuentas</h2>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Código</label>
+            <input style={{ width: 90 }} placeholder="6300" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Nombre</label>
+            <input style={{ width: '100%' }} placeholder="Nombre de la cuenta" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tipo</label>
+            <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+              {types.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <button onClick={addAccount} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            <Plus size={15} /> Agregar cuenta
+          </button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+      </Card>
+
+      {grouped.map(g => g.rows.length > 0 && (
+        <Card key={g.type} style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>{g.type}</div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            <tbody>
+              {g.rows.map(a => (
+                <tr key={a.code} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                  <td style={{ padding: '6px 4px', width: 80 }}>{a.code}</td>
+                  <td style={{ padding: '6px 4px' }}>
+                    {editingCode === a.code ? (
+                      <input style={{ width: '100%' }} value={a.name} onChange={e => updateAccount(a.code, 'name', e.target.value)} onBlur={() => setEditingCode(null)} autoFocus />
+                    ) : (
+                      <span onClick={() => setEditingCode(a.code)} style={{ cursor: 'pointer' }}>{a.name}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '6px 4px', width: 40 }}>
+                    <button onClick={() => removeAccount(a.code)} style={iconBtn}><Trash2 size={14} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ))}
+      {accounts.length === 0 && <Card><div style={{ fontSize: 13, color: '#6B7280' }}>No hay cuentas todavía.</div></Card>}
+    </div>
+  );
+}
+
+function RulesView({ rules, setRules, accounts }) {
+  const [form, setForm] = useState({ keyword: '', gl: '', mode: 'AUTO' });
+  const [error, setError] = useState('');
+
+  function addRule() {
+    if (!form.keyword.trim() || !form.gl) { setError('Ingresa la palabra clave y la cuenta.'); return; }
+    setError('');
+    setRules(prev => [...prev, { id: uid(), keyword: form.keyword.trim().toUpperCase(), gl: form.gl, mode: form.mode }]);
+    setForm({ keyword: '', gl: '', mode: 'AUTO' });
+  }
+  function removeRule(id) {
+    setRules(prev => prev.filter(r => r.id !== id));
+  }
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 16px' }}>Reglas de categorización</h2>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+          Cuando la descripción de una transacción contenga esta palabra, se categoriza sola con la cuenta que elijas.
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Palabra clave</label>
+            <input style={{ width: '100%' }} placeholder="Ej. NETFLIX" value={form.keyword} onChange={e => setForm(f => ({ ...f, keyword: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Cuenta</label>
+            <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
+              <option value="">Selecciona</option>
+              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Modo</label>
+            <select value={form.mode} onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}>
+              <option value="AUTO">AUTO</option>
+              <option value="MATCH">MATCH</option>
+              <option value="REVIEW">REVIEW</option>
+            </select>
+          </div>
+          <button onClick={addRule} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            <Plus size={15} /> Agregar regla
+          </button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+      </Card>
+      <Card>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>Palabra clave</th><th style={{ padding: '6px 4px' }}>Cuenta</th><th style={{ padding: '6px 4px' }}>Modo</th><th></th>
+          </tr></thead>
+          <tbody>
+            {rules.map(r => (
+              <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px' }}>{r.keyword}</td>
+                <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
+                <td style={{ padding: '6px 4px' }}><StatusBadge status={r.mode} /></td>
+                <td style={{ padding: '6px 4px' }}><button onClick={() => removeRule(r.id)} style={iconBtn}><Trash2 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay reglas todavía.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(blankJE());
+  const [error, setError] = useState('');
+
+  function blankJE() {
+    return { date: todayStr(), memo: '', lines: [{ gl: '', debit: '', credit: '', desc: '' }, { gl: '', debit: '', credit: '', desc: '' }] };
+  }
+  function updateLine(i, field, val) {
+    setForm(f => { const lines = f.lines.slice(); lines[i] = { ...lines[i], [field]: val }; return { ...f, lines }; });
+  }
+  function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { gl: '', debit: '', credit: '', desc: '' }] })); }
+  function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
+
+  const totalDebit = form.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+  const totalCredit = form.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+  const balanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
+
+  function saveJE() {
+    if (form.lines.some(l => !l.gl)) { setError('Cada línea necesita una cuenta.'); return; }
+    if (!balanced) { setError('El asiento no balancea: Débito y Crédito deben ser iguales y mayores a cero.'); return; }
+    setError('');
+    setJournalEntries(prev => [...prev, { ...form, id: uid() }]);
+    setForm(blankJE());
+    setShowForm(false);
+  }
+  function removeJE(id) {
+    setJournalEntries(prev => prev.filter(j => j.id !== id));
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Asientos contables (Journal Entries)</h2>
+        <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+          <Plus size={15} /> Nuevo asiento
+        </button>
+      </div>
+
+      {showForm && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Fecha</label>
+              <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Memo</label>
+              <input style={{ width: '100%' }} placeholder="Descripción general del asiento" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
+            </div>
+          </div>
+
+          {form.lines.map((l, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <select style={{ width: 200 }} value={l.gl} onChange={e => updateLine(i, 'gl', e.target.value)}>
+                <option value="">Cuenta</option>
+                {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              </select>
+              <input style={{ flex: 1 }} placeholder="Descripción de la línea" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
+              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Débito" value={l.debit} onChange={e => updateLine(i, 'debit', e.target.value)} />
+              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Crédito" value={l.credit} onChange={e => updateLine(i, 'credit', e.target.value)} />
+              <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
+            </div>
+          ))}
+          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Línea</button>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, marginBottom: 12 }}>
+            <span>Total débito: <strong>{money(totalDebit)}</strong></span>
+            <span>Total crédito: <strong>{money(totalCredit)}</strong></span>
+            <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? 'Balanceado' : 'No balancea'}</span>
+          </div>
+          {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+          <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Guardar asiento</button>
+        </Card>
+      )}
+
+      <Card>
+        {journalEntries.slice().reverse().map(je => (
+          <div key={je.id} style={{ borderBottom: '1px solid #F0F1F3', padding: '8px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600 }}>
+              <span>{je.date} — {je.memo || 'Sin memo'}</span>
+              <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
+            </div>
+            {je.lines.map((l, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280', paddingLeft: 12 }}>
+                <span>{l.gl} — {l.desc}</span>
+                <span>{l.debit ? `Db ${money(l.debit)}` : `Cr ${money(l.credit)}`}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        {journalEntries.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No hay asientos manuales todavía.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function ReconciliationView({ reconciliations, setReconciliations, transactions, accounts }) {
+  const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
+  const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
+  const [error, setError] = useState('');
+
+  function ledgerBalanceFor(gl, periodEnd) {
+    return transactions.filter(t => t.gl === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
+  }
+
+  function runReconciliation() {
+    if (!form.gl || !form.statementBalance) { setError('Selecciona la cuenta e ingresa el saldo del estado de cuenta.'); return; }
+    setError('');
+    const ledgerBalance = ledgerBalanceFor(form.gl, form.periodEnd);
+    const statementBalance = Number(form.statementBalance);
+    const difference = Number((statementBalance - ledgerBalance).toFixed(2));
+    const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
+    setReconciliations(prev => [...prev, {
+      id: uid(), gl: form.gl, periodEnd: form.periodEnd, statementBalance, ledgerBalance, difference, status,
+    }]);
+    setForm({ gl: '', periodEnd: todayStr(), statementBalance: '' });
+  }
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 16px' }}>Reconciliación bancaria</h2>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+          Ingresa el saldo real del estado de cuenta al cierre del período. El sistema lo compara automáticamente contra el saldo calculado en tus transacciones.
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Cuenta</label>
+            <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
+              <option value="">Selecciona</option>
+              {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Corte al</label>
+            <input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Saldo del estado de cuenta</label>
+            <input type="number" step="0.01" style={{ width: 140 }} value={form.statementBalance} onChange={e => setForm(f => ({ ...f, statementBalance: e.target.value }))} />
+          </div>
+          <button onClick={runReconciliation} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Reconciliar</button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+      </Card>
+      <Card>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>Cuenta</th><th style={{ padding: '6px 4px' }}>Corte</th>
+            <th style={{ padding: '6px 4px' }}>Estado de cuenta</th><th style={{ padding: '6px 4px' }}>Libro</th>
+            <th style={{ padding: '6px 4px' }}>Diferencia</th><th style={{ padding: '6px 4px' }}>Estado</th>
+          </tr></thead>
+          <tbody>
+            {reconciliations.slice().reverse().map(r => (
+              <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
+                <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
+                <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
+                <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
+                <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
+                <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'AUTO' : 'REVIEW'} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {reconciliations.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay reconciliaciones todavía.</div>}
       </Card>
     </div>
   );
