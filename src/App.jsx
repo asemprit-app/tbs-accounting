@@ -211,6 +211,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [journalEntries, setJournalEntriesRaw] = useState([]);
   const [reconciliations, setReconciliationsRaw] = useState([]);
   const [printInvoice, setPrintInvoice] = useState(null);
+  const [statementClient, setStatementClient] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -346,7 +347,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
           />
         )}
         {tab === 'customers' && (
-          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} />
+          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} onPrintStatement={setStatementClient} />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
@@ -357,6 +358,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         )}
       </div>
       {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} />}
+      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} onClose={() => setStatementClient(null)} />}
     </div>
   );
 }
@@ -889,7 +891,7 @@ function InvoicePrintModal({ inv, total, onClose }) {
   );
 }
 
-function CustomersView({ customers, setCustomers, invoices, invoiceTotal }) {
+function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrintStatement }) {
   const [name, setName] = useState('');
   function addCustomer() {
     if (!name.trim()) return;
@@ -918,19 +920,62 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal }) {
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Cliente</th><th style={{ padding: '6px 4px' }}>Balance abierto (A/R)</th>
+            <th style={{ padding: '6px 4px' }}>Cliente</th><th style={{ padding: '6px 4px' }}>Balance abierto (A/R)</th><th></th>
           </tr></thead>
           <tbody>
             {allNames.map(n => (
               <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{n}</td>
                 <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
+                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Estado de cuenta</button></td>
               </tr>
             ))}
           </tbody>
         </table>
         {allNames.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay clientes todavía.</div>}
       </Card>
+    </div>
+  );
+}
+
+function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
+  const rows = invoices.filter(i => i.client === client).sort((a, b) => a.date.localeCompare(b.date));
+  const totalInvoiced = rows.reduce((s, i) => s + invoiceTotal(i), 0);
+  const totalPaid = rows.reduce((s, i) => s + (i.paid || 0), 0);
+  const balance = totalInvoiced - totalPaid;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 560, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Estado de cuenta — {client}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Imprimir / PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+        <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Estado de cuenta al {todayStr()}</div>
+          <div style={{ fontSize: 13, marginBottom: 16 }}>Cliente: <strong>{client}</strong></div>
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
+            <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
+              <th style={{ padding: '4px 0' }}>Factura</th><th>Fecha</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Pagado</th><th style={{ textAlign: 'right' }}>Balance</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(i => (
+                <tr key={i.id}>
+                  <td style={{ padding: '4px 0' }}>{i.number}</td><td>{i.date}</td>
+                  <td style={{ textAlign: 'right' }}>{money(invoiceTotal(i))}</td>
+                  <td style={{ textAlign: 'right' }}>{money(i.paid || 0)}</td>
+                  <td style={{ textAlign: 'right' }}>{money(invoiceTotal(i) - (i.paid || 0))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'right' }}>Balance total: {money(balance)}</div>
+        </div>
+      </div>
+      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
@@ -1121,6 +1166,85 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </div>
         </Card>
       </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
+        <Card>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/R Aging (Cuentas por Cobrar)</div>
+          {(() => {
+            const buckets = ['Current', '1-30', '31-60', '61-90', '90+'];
+            const byClient = {};
+            const todayD = new Date(todayStr());
+            invoices.filter(i => i.status !== 'Pagada').forEach(inv => {
+              const bal = invoiceTotal(inv) - (inv.paid || 0);
+              if (bal <= 0) return;
+              const days = Math.floor((todayD - new Date(inv.date)) / 86400000);
+              const bucket = days <= 0 ? 'Current' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+              byClient[inv.client] = byClient[inv.client] || { Current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+              byClient[inv.client][bucket] += bal;
+            });
+            const clients = Object.keys(byClient);
+            const totals = buckets.reduce((acc, b) => ({ ...acc, [b]: clients.reduce((s, c) => s + byClient[c][b], 0) }), {});
+            return (
+              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'right', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>Cliente</th>
+                  {buckets.map(b => <th key={b} style={{ padding: '4px' }}>{b}</th>)}
+                </tr></thead>
+                <tbody>
+                  {clients.map(c => (
+                    <tr key={c} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                      <td style={{ padding: '4px', textAlign: 'left' }}>{c}</td>
+                      {buckets.map(b => <td key={b} style={{ padding: '4px', textAlign: 'right' }}>{byClient[c][b] ? money(byClient[c][b]) : '—'}</td>)}
+                    </tr>
+                  ))}
+                  {clients.length === 0 && <tr><td colSpan={6} style={{ padding: 8, color: '#6B7280' }}>No hay facturas abiertas.</td></tr>}
+                </tbody>
+                {clients.length > 0 && (
+                  <tfoot><tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                    <td style={{ padding: '4px' }}>Total</td>
+                    {buckets.map(b => <td key={b} style={{ padding: '4px', textAlign: 'right' }}>{money(totals[b])}</td>)}
+                  </tr></tfoot>
+                )}
+              </table>
+            );
+          })()}
+        </Card>
+
+        <Card>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Cuentas por Pagar)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Saldo actual de tus cuentas de pasivo (tarjetas, nómina y taxes por pagar)</div>
+          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} />)}
+          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+            <Row label="Total A/P" value={-totalLiabilities} bold />
+          </div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
+            Esto refleja tus cuentas de pasivo tal como están hoy; el sistema todavía no rastrea facturas de proveedores individuales.
+          </div>
+        </Card>
+      </div>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Facturas Abiertas (Open Invoices)</div>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>Factura</th><th style={{ padding: '6px 4px' }}>Cliente</th><th style={{ padding: '6px 4px' }}>Fecha</th>
+            <th style={{ padding: '6px 4px' }}>Total</th><th style={{ padding: '6px 4px' }}>Balance</th><th style={{ padding: '6px 4px' }}>Estado</th>
+          </tr></thead>
+          <tbody>
+            {invoices.filter(i => i.status !== 'Pagada').sort((a, b) => a.date.localeCompare(b.date)).map(i => (
+              <tr key={i.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px' }}>{i.number}</td>
+                <td style={{ padding: '6px 4px' }}>{i.client}</td>
+                <td style={{ padding: '6px 4px' }}>{i.date}</td>
+                <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(i))}</td>
+                <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(i) - (i.paid || 0))}</td>
+                <td style={{ padding: '6px 4px' }}>{i.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {invoices.filter(i => i.status !== 'Pagada').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay facturas abiertas.</div>}
+      </Card>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0 }}>Tendencia mensual</h3>
