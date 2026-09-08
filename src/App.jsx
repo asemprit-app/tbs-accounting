@@ -512,7 +512,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', amountMin: '', amountMax: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amountMin: '', amountMax: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
@@ -528,6 +528,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.gl && !filters.gl.startsWith('__uncat') && t.gl !== filters.gl) return false;
       if (filters.sourceGL === '__unassigned__' && t.sourceGL) return false;
       if (filters.sourceGL && filters.sourceGL !== '__unassigned__' && t.sourceGL !== filters.sourceGL) return false;
+      if (filters.status && t.status !== filters.status) return false;
       const abs = Math.abs(t.amount);
       if (filters.amountMin && abs < Number(filters.amountMin)) return false;
       if (filters.amountMax && abs > Number(filters.amountMax)) return false;
@@ -535,7 +536,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       return true;
     });
   }, [transactions, filters, search]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.amountMin || filters.amountMax || search.trim();
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amountMin || filters.amountMax || search.trim();
 
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
@@ -782,12 +783,19 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="__unassigned__">Unassigned</option>
               {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Status</label>
+            <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
+              <option value="">All</option>
+              <option value="AUTO">AUTO</option>
+              <option value="MATCH">MATCH</option>
+              <option value="REVIEW">REVIEW</option>
+            </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Min. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMin} onChange={e => setFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Max. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
