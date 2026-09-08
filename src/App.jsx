@@ -373,7 +373,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} />}
         {tab === 'transactions' && (
           <TransactionsView
-            transactions={transactions} setTransactions={setTransactions} rules={rules} glName={glName} accounts={accounts}
+            transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
           />
         )}
@@ -486,7 +486,7 @@ function Dashboard({ summary, transactions, invoices }) {
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, glName, accounts, invoices, setInvoices, invoiceTotal }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -500,6 +500,8 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' });
+  const [search, setSearch] = useState('');
+  const [dismissedSuggestions, setDismissedSuggestions] = useState([]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -510,10 +512,44 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
       const abs = Math.abs(t.amount);
       if (filters.amountMin && abs < Number(filters.amountMin)) return false;
       if (filters.amountMax && abs > Number(filters.amountMax)) return false;
+      if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
       return true;
     });
-  }, [transactions, filters]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.amountMin || filters.amountMax;
+  }, [transactions, filters, search]);
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.amountMin || filters.amountMax || search.trim();
+
+  function normalizeDesc(d) {
+    return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
+  }
+  const ruleSuggestions = useMemo(() => {
+    const groups = {};
+    transactions.forEach(t => {
+      if (!t.gl) return;
+      const key = normalizeDesc(t.description);
+      if (key.length < 4) return;
+      groups[key] = groups[key] || {};
+      groups[key][t.gl] = (groups[key][t.gl] || 0) + 1;
+    });
+    const suggestions = [];
+    Object.entries(groups).forEach(([key, byGl]) => {
+      Object.entries(byGl).forEach(([gl, count]) => {
+        if (count < 4) return;
+        const alreadyRule = rules.some(r => key.includes(r.keyword.toUpperCase()) || r.keyword.toUpperCase().includes(key));
+        if (alreadyRule) return;
+        if (dismissedSuggestions.includes(key + '|' + gl)) return;
+        suggestions.push({ key, gl, count });
+      });
+    });
+    return suggestions.sort((a, b) => b.count - a.count);
+  }, [transactions, rules, dismissedSuggestions]);
+
+  function createRuleFromSuggestion(s) {
+    setRules(prev => [...prev, { id: uid(), keyword: s.key, gl: s.gl, mode: 'AUTO' }]);
+    setDismissedSuggestions(prev => [...prev, s.key + '|' + s.gl]);
+  }
+  function dismissSuggestion(s) {
+    setDismissedSuggestions(prev => [...prev, s.key + '|' + s.gl]);
+  }
 
   function importCSV() {
     const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
@@ -662,6 +698,10 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Buscar en descripción</label>
+            <input style={{ width: '100%' }} placeholder="Ej. STARBUCKS, NICOLE VALENTIN..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Desde</label>
             <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hasta</label>
@@ -677,11 +717,29 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto máx.</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
           {filtersActive && (
-            <button onClick={() => setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' })} style={iconBtn}>Limpiar filtros</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Limpiar filtros</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} de {transactions.length} transacciones</div>}
       </Card>
+
+      {ruleSuggestions.length > 0 && (
+        <Card style={{ marginBottom: 20, borderColor: '#B7E4C7' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Sugerencias de reglas ({ruleSuggestions.length})</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+            Estos patrones se repitieron 4 veces o más con la misma categoría. Crea la regla para que futuras transacciones parecidas se categoricen solas.
+          </div>
+          {ruleSuggestions.map(s => (
+            <div key={s.key + s.gl} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 13 }}>
+              <span>"{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} veces)</span></span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => createRuleFromSuggestion(s)} style={iconBtn}>Crear regla</button>
+                <button onClick={() => dismissSuggestion(s)} style={iconBtn}><X size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
 
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
