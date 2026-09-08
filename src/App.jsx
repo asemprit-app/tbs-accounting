@@ -502,6 +502,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' });
   const [search, setSearch] = useState('');
   const [dismissedSuggestions, setDismissedSuggestions] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [bulkGL, setBulkGL] = useState('');
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -542,6 +544,25 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     });
     return suggestions.sort((a, b) => b.count - a.count);
   }, [transactions, rules, dismissedSuggestions]);
+
+  function toggleSelect(id) {
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function toggleSelectAll() {
+    const visibleIds = filteredTransactions.map(t => t.id);
+    const allSelected = visibleIds.every(id => selected.includes(id)) && visibleIds.length > 0;
+    setSelected(allSelected ? selected.filter(id => !visibleIds.includes(id)) : Array.from(new Set([...selected, ...visibleIds])));
+  }
+  function applyBulkCategory() {
+    if (!bulkGL || selected.length === 0) return;
+    setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, gl: bulkGL, status: 'AUTO' } : t));
+    setSelected([]);
+    setBulkGL('');
+  }
+  function deleteSelected() {
+    setTransactions(prev => prev.filter(t => !selected.includes(t.id)));
+    setSelected([]);
+  }
 
   function createRuleFromSuggestion(s) {
     setRules(prev => [...prev, { id: uid(), keyword: s.key, gl: s.gl, mode: 'AUTO' }]);
@@ -741,10 +762,30 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         </Card>
       )}
 
+      {selected.length > 0 && (
+        <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} seleccionadas</span>
+            <select value={bulkGL} onChange={e => setBulkGL(e.target.value)}>
+              <option value="">Elegir cuenta...</option>
+              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+            <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Aplicar categoría</button>
+            <button onClick={deleteSelected} style={iconBtn}>Eliminar seleccionadas</button>
+            <button onClick={() => setSelected([])} style={iconBtn}>Cancelar selección</button>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+              <th style={{ padding: '6px 4px' }}>
+                <input type="checkbox"
+                  checked={filteredTransactions.length > 0 && filteredTransactions.every(t => selected.includes(t.id))}
+                  onChange={toggleSelectAll} />
+              </th>
               <th style={{ padding: '6px 4px' }}>Fecha</th>
               <th style={{ padding: '6px 4px' }}>Descripción</th>
               <th style={{ padding: '6px 4px' }}>Monto</th>
@@ -755,7 +796,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           </thead>
           <tbody>
             {filteredTransactions.slice().reverse().map(t => (
-              <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+              <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: selected.includes(t.id) ? '#F0F5FA' : 'transparent' }}>
+                <td style={{ padding: '6px 4px' }}>
+                  <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggleSelect(t.id)} />
+                </td>
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
                 <td style={{ padding: '6px 4px' }}>{t.description}</td>
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
