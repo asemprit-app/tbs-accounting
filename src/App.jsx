@@ -247,12 +247,13 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [rules, setRulesRaw] = useState([]);
   const [journalEntries, setJournalEntriesRaw] = useState([]);
   const [reconciliations, setReconciliationsRaw] = useState([]);
+  const [dismissedSuggestions, setDismissedSuggestionsRaw] = useState([]);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [statementClient, setStatementClient] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [t, i, c, a, r, j, rec] = await Promise.all([
+      const [t, i, c, a, r, j, rec, ds] = await Promise.all([
         supabase.from('transactions').select('*').eq('client_id', clientId).order('date'),
         supabase.from('invoices').select('*').eq('client_id', clientId).order('date'),
         supabase.from('customers').select('*').eq('client_id', clientId),
@@ -260,8 +261,9 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         supabase.from('rules').select('*').eq('client_id', clientId),
         supabase.from('journal_entries').select('*').eq('client_id', clientId).order('date'),
         supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
+        supabase.from('dismissed_suggestions').select('*').eq('client_id', clientId),
       ]);
-      const firstErr = [t, i, c, a, r, j, rec].find(x => x.error);
+      const firstErr = [t, i, c, a, r, j, rec, ds].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
@@ -272,6 +274,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         setRulesRaw(r.data || []);
         setJournalEntriesRaw(j.data || []);
         setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end })));
+        setDismissedSuggestionsRaw((ds.data || []).map(row => row.suggestion_key));
       }
       setLoaded(true);
     })();
@@ -336,6 +339,14 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
       return next;
     });
   }, []);
+  const setDismissedSuggestions = useCallback((updater) => {
+    setDismissedSuggestionsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const toDb = arr => arr.map(key => ({ id: key, suggestion_key: key }));
+      diffSync('dismissed_suggestions', toDb(prev), toDb(next), clientId);
+      return next;
+    });
+  }, []);
 
   const glName = (code) => accounts.find(g => g.code === code)?.name || 'Uncategorized';
 
@@ -375,6 +386,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
+            dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
           />
         )}
         {tab === 'invoices' && (
@@ -486,7 +498,7 @@ function Dashboard({ summary, transactions, invoices }) {
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -501,7 +513,6 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [importCardGL, setImportCardGL] = useState('');
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' });
   const [search, setSearch] = useState('');
-  const [dismissedSuggestions, setDismissedSuggestions] = useState([]);
   const [selected, setSelected] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
 
@@ -945,7 +956,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
   function saveInvoice() {
-    if (!form.client.trim()) { setError('Enter the customer's name.'); return; }
+    if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
     setError('');
     const inv = { ...form, id: uid(), number: 'FAC-' + (invoices.length + 1001) };
@@ -1663,7 +1674,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
 
   function saveJE() {
     if (form.lines.some(l => !l.gl)) { setError('Each line needs an account.'); return; }
-    if (!balanced) { setError('The entry doesn't balance: Debit and Credit must be equal and greater than zero.'); return; }
+    if (!balanced) { setError("The entry doesn't balance: Debit and Credit must be equal and greater than zero."); return; }
     setError('');
     setJournalEntries(prev => [...prev, { ...form, id: uid() }]);
     setForm(blankJE());
@@ -1712,7 +1723,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
           <div style={{ display: 'flex', gap: 16, fontSize: 13, marginBottom: 12 }}>
             <span>Total debit: <strong>{money(totalDebit)}</strong></span>
             <span>Total credit: <strong>{money(totalCredit)}</strong></span>
-            <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? 'Balanced' : 'Doesn't balance'}</span>
+            <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? "Balanced" : "Doesn't balance"}</span>
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save entry</button>
