@@ -505,7 +505,8 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
     return transactions.filter(t => {
       if (filters.dateFrom && t.date < filters.dateFrom) return false;
       if (filters.dateTo && t.date > filters.dateTo) return false;
-      if (filters.gl && t.gl !== filters.gl) return false;
+      if (filters.gl === '__uncat__' && t.gl) return false;
+      if (filters.gl && filters.gl !== '__uncat__' && t.gl !== filters.gl) return false;
       const abs = Math.abs(t.amount);
       if (filters.amountMin && abs < Number(filters.amountMin)) return false;
       if (filters.amountMax && abs > Number(filters.amountMax)) return false;
@@ -668,6 +669,7 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Categoría</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
               <option value="">Todas</option>
+              <option value="__uncat__">Sin categoría</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto mín.</label>
