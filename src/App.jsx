@@ -499,6 +499,20 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' });
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      if (filters.dateFrom && t.date < filters.dateFrom) return false;
+      if (filters.dateTo && t.date > filters.dateTo) return false;
+      if (filters.gl && t.gl !== filters.gl) return false;
+      const abs = Math.abs(t.amount);
+      if (filters.amountMin && abs < Number(filters.amountMin)) return false;
+      if (filters.amountMax && abs > Number(filters.amountMax)) return false;
+      return true;
+    });
+  }, [transactions, filters]);
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.amountMin || filters.amountMax;
 
   function importCSV() {
     const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
@@ -645,6 +659,28 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
 
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Desde</label>
+            <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hasta</label>
+            <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Categoría</label>
+            <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
+              <option value="">Todas</option>
+              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto mín.</label>
+            <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMin} onChange={e => setFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto máx.</label>
+            <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
+          {filtersActive && (
+            <button onClick={() => setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' })} style={iconBtn}>Limpiar filtros</button>
+          )}
+        </div>
+        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} de {transactions.length} transacciones</div>}
+      </Card>
+
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead>
@@ -658,7 +694,7 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
             </tr>
           </thead>
           <tbody>
-            {transactions.slice().reverse().map(t => (
+            {filteredTransactions.slice().reverse().map(t => (
               <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
                 <td style={{ padding: '6px 4px' }}>{t.description}</td>
@@ -686,7 +722,7 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
             ))}
           </tbody>
         </table>
-        {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay transacciones. Agrega la primera arriba.</div>}
+        {filteredTransactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No hay transacciones. Agrega la primera arriba.' : 'Ninguna transacción coincide con estos filtros.'}</div>}
       </Card>
 
       {splittingId && (() => {
