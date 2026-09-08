@@ -127,16 +127,10 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
-function ReportHeader({ businessName, reportName, periodStart, periodEnd }) {
+function ReportHeader({ businessName, reportName }) {
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: '#FFFFFF', color: '#1B2333', width: '100%', boxSizing: 'border-box', marginBottom: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 22 }}>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 11, letterSpacing: '0.02em', color: '#8A93A3', marginBottom: 3 }}>Report period</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1B2333' }}>{periodStart} — {periodEnd}</div>
-        </div>
-      </div>
-      <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 18, marginTop: 10 }}>
         <div style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontSize: 26, fontWeight: 600, color: '#14213D', lineHeight: 1.15, marginBottom: 6 }}>
           {businessName}
         </div>
@@ -1646,7 +1640,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
   function downloadReportCSV() {
     const { title, header, rows } = getReportData(selectedReport);
-    let csv = title + '\n' + header.join(',') + '\n';
+    let csv = businessName + '\n' + title + '\n\n' + header.join(',') + '\n';
     rows.forEach(r => { csv += r.map(v => typeof v === 'number' ? v.toFixed(2) : `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n'; });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
