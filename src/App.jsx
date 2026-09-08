@@ -1376,16 +1376,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const [customTo, setCustomTo] = useState(todayStr());
   const { from, to } = getPeriodRange(preset, customFrom, customTo);
 
-  // All unified accounting lines: transactions (one account each) + manual journal entry lines
+  // All unified accounting lines: transactions (one category each) + their source bank/card account +
+  // manual journal entry lines. A single bank transaction affects TWO accounts: the category it was
+  // coded to (Meals, Office Supplies...) AND the bank/card it moved through (sourceGL) — both need to
+  // count, or a bank/card's own balance would miss almost everything categorized to an expense.
   const postings = useMemo(() => {
     const list = [];
     transactions.forEach(t => {
-      if (!t.gl) return;
-      const acct = accounts.find(a => a.code === t.gl);
-      // in the bank register, negative = outflow, positive = inflow.
-      // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
-      const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
-      list.push({ date: t.date, gl: t.gl, amount });
+      if (t.gl) {
+        const acct = accounts.find(a => a.code === t.gl);
+        // in the bank register, negative = outflow, positive = inflow.
+        // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
+        const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
+        list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction' });
+      }
+      if (t.sourceGL && t.sourceGL !== t.gl) {
+        list.push({ date: t.date, gl: t.sourceGL, amount: t.amount, source: 'Transaction' });
+      }
     });
     journalEntries.forEach(je => {
       je.lines.forEach(l => {
@@ -1394,7 +1401,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
         const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
         const amt = isDebitSide ? (debit - credit) : (credit - debit);
-        list.push({ date: je.date, gl: l.gl, amount: amt });
+        list.push({ date: je.date, gl: l.gl, amount: amt, source: 'Journal Entry' });
       });
     });
     return list;
@@ -1537,7 +1544,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Cash Flow (direct method)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Cambio en cuentas of banco/efectivo</div>
-          {cashRows.map(r => <Row key={r.code} label={r.name} value={r.change} />)}
+          {cashRows.map(r => <Row key={r.code} label={r.name} value={r.change} gl={r.code} mode="period" />)}
           {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280' }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Net Change in Cash" value={netCashChange} bold />
@@ -1673,12 +1680,19 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         const { gl, label, mode } = drillDown;
         const items = [];
         transactions.forEach(t => {
-          if (t.gl !== gl) return;
+          const matchesCategory = t.gl === gl;
+          const matchesSource = t.sourceGL === gl && t.sourceGL !== t.gl;
+          if (!matchesCategory && !matchesSource) return;
           if (mode === 'period' && (t.date < from || t.date > to)) return;
           if (mode === 'asOf' && t.date > to) return;
-          const acct = accounts.find(a => a.code === gl);
-          const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
-          items.push({ id: t.id, date: t.date, description: t.description, amount, type: 'Transaction' });
+          let amount;
+          if (matchesCategory) {
+            const acct = accounts.find(a => a.code === gl);
+            amount = acct?.type === 'Expense' ? -t.amount : t.amount;
+          } else {
+            amount = t.amount; // as the source bank/card, the amount is already the natural change
+          }
+          items.push({ id: t.id + (matchesSource ? '-src' : ''), date: t.date, description: t.description, amount, type: 'Transaction' });
         });
         journalEntries.forEach(je => {
           je.lines.forEach(l => {
