@@ -1372,6 +1372,8 @@ function naturalAmount(gl, amount, accounts) {
 
 function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries }) {
   const [preset, setPreset] = useState('this_month');
+  const [selectedReport, setSelectedReport] = useState('pnl');
+  const [showExportPreview, setShowExportPreview] = useState(false);
   const [customFrom, setCustomFrom] = useState(todayStr());
   const [customTo, setCustomTo] = useState(todayStr());
   const { from, to } = getPeriodRange(preset, customFrom, customTo);
@@ -1477,6 +1479,92 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const cfGrossInflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount > 0).reduce((s, p) => s + p.amount, 0);
   const cfGrossOutflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount < 0).reduce((s, p) => s + p.amount, 0);
 
+  const openInvoicesForExport = invoices.filter(i => i.status !== 'Paid').sort((a, b) => a.date.localeCompare(b.date));
+
+  const REPORT_OPTIONS = [
+    ['pnl', 'P&L (Income Statement)'],
+    ['balance_sheet', 'Balance Sheet'],
+    ['cash_flow', 'Cash Flow'],
+    ['ap', 'A/P (Accounts Payable)'],
+    ['open_invoices', 'Open Invoices'],
+  ];
+
+  function getReportData(key) {
+    if (key === 'pnl') {
+      const rows = [
+        ...revenueRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ...(invoiceRevenueInPeriod !== 0 ? [['', 'Invoicing (Service Revenue)', invoiceRevenueInPeriod]] : []),
+        ['', 'Total Revenue', totalRevenue],
+        ...expenseRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Expenses', totalExpense],
+        ['', 'Net Income', netIncome],
+      ];
+      return { title: `P&L — ${from} to ${to}`, header: ['Code', 'Account', 'Amount'], rows };
+    }
+    if (key === 'balance_sheet') {
+      const rows = [
+        ...assetRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Assets', totalAssets],
+        ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Liabilities', totalLiabilities],
+        ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Period Income', netIncome],
+        ['', 'Total Equity', totalEquity],
+      ];
+      return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
+    }
+    if (key === 'cash_flow') {
+      const rows = [
+        ['', 'OPERATING ACTIVITIES', ''],
+        ...cfSalesRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Sales', cfTotalSales],
+        ...cfPurchaseRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Purchases', cfTotalPurchases],
+        ...cfPayrollRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Payroll', cfTotalPayroll],
+        ['', 'Net Cash from Operating Activities', cfOperating],
+        ['', 'INVESTING ACTIVITIES', ''],
+        ...cfInvestingRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Net Cash from Investing Activities', cfInvesting],
+        ['', 'FINANCING ACTIVITIES', ''],
+        ...cfFinancingRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Net Cash from Financing Activities', cfFinancing],
+        ['', 'OVERVIEW', ''],
+        ...cfStartingRows.map(r => [r.code, r.name, r.value]),
+        ['', 'Total Starting Balance', cfTotalStarting],
+        ...cfEndingRows.map(r => [r.code, r.name, r.value]),
+        ['', 'Total Ending Balance', cfTotalEnding],
+        ['', 'Gross Cash Inflow', cfGrossInflow],
+        ['', 'Gross Cash Outflow', cfGrossOutflow],
+        ['', 'Net Cash Change', netCashChange],
+      ];
+      return { title: `Cash Flow — ${from} to ${to}`, header: ['Code', 'Line', 'Amount'], rows };
+    }
+    if (key === 'ap') {
+      const rows = [
+        ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, -r.value]),
+        ['', 'Total A/P', -totalLiabilities],
+      ];
+      return { title: `A/P — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
+    }
+    if (key === 'open_invoices') {
+      const rows = openInvoicesForExport.map(i => [i.number, i.client, i.date, invoiceTotal(i), invoiceTotal(i) - (i.paid || 0), i.status]);
+      return { title: `Open Invoices — as of ${todayStr()}`, header: ['Invoice #', 'Customer', 'Date', 'Total', 'Balance', 'Status'], rows };
+    }
+    return { title: '', header: [], rows: [] };
+  }
+
+  function downloadReportCSV() {
+    const { title, header, rows } = getReportData(selectedReport);
+    let csv = title + '\n' + header.join(',') + '\n';
+    rows.forEach(r => { csv += r.map(v => typeof v === 'number' ? v.toFixed(2) : `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n'; });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${selectedReport}_${from}_to_${to}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const byMonth = useMemo(() => {
     const map = {};
     transactions.forEach(t => {
@@ -1544,6 +1632,19 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           )}
         </div>
         <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
+      </Card>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Report</label>
+            <select value={selectedReport} onChange={e => setSelectedReport(e.target.value)}>
+              {REPORT_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </div>
+          <button onClick={() => setShowExportPreview(true)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Download PDF</button>
+          <button onClick={downloadReportCSV} style={iconBtn}>Download CSV</button>
+        </div>
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
@@ -1824,6 +1925,47 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                 <span>Total</span><span>{money(total)}</span>
               </div>
             </Card>
+          </div>
+        );
+      })()}
+
+      {showExportPreview && (() => {
+        const { title, header, rows } = getReportData(selectedReport);
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+            <div style={{ background: '#fff', width: 640, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }} className="print-hide">
+                <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+                  <button onClick={() => setShowExportPreview(false)} style={iconBtn}><X size={14} /></button>
+                </div>
+              </div>
+              <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D' }}>TBS Accounting</div>
+                <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>{title}</div>
+                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
+                    {header.map(h => <th key={h} style={{ padding: '4px 6px', textAlign: h === header[header.length - 1] ? 'right' : 'left' }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r, i) => {
+                      const isTotal = typeof r[1] === 'string' && /^Total|^Net |ACTIVITIES$|OVERVIEW$/.test(r[1]);
+                      return (
+                        <tr key={i} style={{ fontWeight: isTotal ? 700 : 400, borderTop: isTotal ? '1px solid #E2E5E9' : 'none' }}>
+                          {r.map((cell, ci) => (
+                            <td key={ci} style={{ padding: '4px 6px', textAlign: ci === r.length - 1 && typeof cell === 'number' ? 'right' : 'left' }}>
+                              {typeof cell === 'number' ? money(cell) : cell}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
           </div>
         );
       })()}
