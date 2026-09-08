@@ -1850,8 +1850,8 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     setForm({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   }
 
-  function refreshReconciliation(r) {
-    const ledgerBalance = ledgerBalanceFor(r.gl, r.periodEnd);
+  function refreshReconciliation(r, ledgerBalanceOverride) {
+    const ledgerBalance = ledgerBalanceOverride !== undefined ? ledgerBalanceOverride : ledgerBalanceFor(r.gl, r.periodEnd);
     const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
     setReconciliations(prev => prev.map(x => x.id === r.id ? { ...x, ledgerBalance, difference, status } : x));
@@ -1943,7 +1943,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const r = reconciliations.find(x => x.id === reviewingId);
         if (!r) return null;
         const periodTx = transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd).sort((a, b) => a.date.localeCompare(b.date));
-        const liveLedger = periodTx.reduce((s, t) => s + t.amount, 0);
+        const liveLedger = periodTx.filter(t => verified.includes(t.id)).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
@@ -1954,12 +1954,12 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
-                <span>Book (live): <strong>{money(liveLedger)}</strong></span>
+                <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{verified.length} of {periodTx.length} verified</span>
               </div>
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
-                Check off each transaction that matches your bank statement exactly. Edit the date, amount, or account on any that don't match, then click Recalculate.
+                Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don't match, then check it once it's correct, and click Recalculate to save.
               </div>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
@@ -1989,7 +1989,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               {periodTx.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
-                <button onClick={() => { refreshReconciliation(r); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+                <button onClick={() => { refreshReconciliation(r, liveLedger); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
               </div>
             </Card>
           </div>
