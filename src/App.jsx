@@ -524,9 +524,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
   const ruleSuggestions = useMemo(() => {
+    const arAccount = accounts.find(a => a.name.toLowerCase().includes('accounts receivable'));
     const groups = {};
     transactions.forEach(t => {
       if (!t.gl) return;
+      if (arAccount && t.gl === arAccount.code) return; // los pagos de factura se vinculan individualmente, no se agrupan en regla
       const key = normalizeDesc(t.description);
       if (key.length < 4) return;
       groups[key] = groups[key] || {};
@@ -543,7 +545,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       });
     });
     return suggestions.sort((a, b) => b.count - a.count);
-  }, [transactions, rules, dismissedSuggestions]);
+  }, [transactions, rules, dismissedSuggestions, accounts]);
 
   function toggleSelect(id) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
