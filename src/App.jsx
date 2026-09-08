@@ -382,7 +382,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
           <div style={{ fontSize: 13, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
-        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} />}
+        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} />}
         {tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
@@ -468,13 +468,39 @@ function Card({ children, style }) {
   return <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 16, ...style }}>{children}</div>;
 }
 
-function Dashboard({ summary, transactions, invoices }) {
+function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) {
   const cards = [
     { label: 'Bank (net recorded)', value: money(summary.cash) },
     { label: 'Open A/R', value: money(summary.arOpen) },
     { label: 'Revenue this month', value: money(summary.revenueMTD) },
     { label: 'Transactions in Review', value: summary.review },
   ];
+  const byMonth = useMemo(() => {
+    const map = {};
+    transactions.forEach(t => {
+      const m = t.date.slice(0, 7);
+      map[m] = map[m] || { revenue: 0, expense: 0 };
+      const acct = accounts.find(g => g.code === t.gl);
+      if (acct?.type === 'Expense') map[m].expense += Math.abs(t.amount);
+    });
+    invoices.forEach(inv => {
+      const m = inv.date.slice(0, 7);
+      map[m] = map[m] || { revenue: 0, expense: 0 };
+      map[m].revenue += invoiceTotal(inv);
+    });
+    return Object.entries(map).sort();
+  }, [transactions, invoices, invoiceTotal, accounts]);
+
+  function downloadCSV() {
+    let csv = 'Month,Revenue,Expenses,Net\n';
+    byMonth.forEach(([m, v]) => { csv += `${m},${v.revenue.toFixed(2)},${v.expense.toFixed(2)},${(v.revenue - v.expense).toFixed(2)}\n`; });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'monthly_trend.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Dashboard</h2>
@@ -486,7 +512,7 @@ function Dashboard({ summary, transactions, invoices }) {
           </Card>
         ))}
       </div>
-      <Card>
+      <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Recent activity</div>
         {transactions.slice(-5).reverse().map(t => (
           <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: '1px solid #F0F1F3' }}>
@@ -495,6 +521,48 @@ function Dashboard({ summary, transactions, invoices }) {
           </div>
         ))}
         {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No transactions yet. Go to the Transactions tab to add one.</div>}
+      </Card>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ margin: 0 }}>Monthly trend</h3>
+        <button onClick={downloadCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Download CSV</button>
+      </div>
+
+      {byMonth.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ height: 240 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={byMonth.map(([m, v]) => ({ mes: m, Revenue: Number(v.revenue.toFixed(2)), Expenses: Number(v.expense.toFixed(2)) }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F0F1F3" />
+                <XAxis dataKey="mes" fontSize={12} />
+                <YAxis fontSize={12} />
+                <Tooltip formatter={(v) => money(v)} />
+                <Legend />
+                <Bar dataKey="Revenue" fill="#0F6E56" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Expenses" fill="#D85A30" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>Month</th><th style={{ padding: '6px 4px' }}>Revenue</th><th style={{ padding: '6px 4px' }}>Expenses</th><th style={{ padding: '6px 4px' }}>Net</th>
+          </tr></thead>
+          <tbody>
+            {byMonth.map(([m, v]) => (
+              <tr key={m} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px' }}>{m}</td>
+                <td style={{ padding: '6px 4px' }}>{money(v.revenue)}</td>
+                <td style={{ padding: '6px 4px' }}>{money(v.expense)}</td>
+                <td style={{ padding: '6px 4px', fontWeight: 600 }}>{money(v.revenue - v.expense)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the trend.</div>}
       </Card>
     </div>
   );
@@ -1818,48 +1886,6 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </tbody>
         </table>
         {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
-      </Card>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0 }}>Monthly trend</h3>
-        <button onClick={downloadCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Download CSV</button>
-      </div>
-
-      {byMonth.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <div style={{ height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byMonth.map(([m, v]) => ({ mes: m, Revenue: Number(v.revenue.toFixed(2)), Expenses: Number(v.expense.toFixed(2)) }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F0F1F3" />
-                <XAxis dataKey="mes" fontSize={12} />
-                <YAxis fontSize={12} />
-                <Tooltip formatter={(v) => money(v)} />
-                <Legend />
-                <Bar dataKey="Revenue" fill="#0F6E56" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Expenses" fill="#D85A30" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Month</th><th style={{ padding: '6px 4px' }}>Revenue</th><th style={{ padding: '6px 4px' }}>Expenses</th><th style={{ padding: '6px 4px' }}>Net</th>
-          </tr></thead>
-          <tbody>
-            {byMonth.map(([m, v]) => (
-              <tr key={m} style={{ borderBottom: '1px solid #F0F1F3' }}>
-                <td style={{ padding: '6px 4px' }}>{m}</td>
-                <td style={{ padding: '6px 4px' }}>{money(v.revenue)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(v.expense)}</td>
-                <td style={{ padding: '6px 4px', fontWeight: 600 }}>{money(v.revenue - v.expense)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the report.</div>}
       </Card>
 
       {drillDown && (() => {
