@@ -512,7 +512,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', amountMin: '', amountMax: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
@@ -526,6 +526,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.gl === '__uncat_income__' && (t.gl || t.amount < 0)) return false;
       if (filters.gl === '__uncat_expense__' && (t.gl || t.amount >= 0)) return false;
       if (filters.gl && !filters.gl.startsWith('__uncat') && t.gl !== filters.gl) return false;
+      if (filters.sourceGL === '__unassigned__' && t.sourceGL) return false;
+      if (filters.sourceGL && filters.sourceGL !== '__unassigned__' && t.sourceGL !== filters.sourceGL) return false;
       const abs = Math.abs(t.amount);
       if (filters.amountMin && abs < Number(filters.amountMin)) return false;
       if (filters.amountMax && abs > Number(filters.amountMax)) return false;
@@ -533,7 +535,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       return true;
     });
   }, [transactions, filters, search]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.amountMin || filters.amountMax || search.trim();
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.amountMin || filters.amountMax || search.trim();
 
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
@@ -774,12 +776,18 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="__uncat_expense__">Uncategorized Expenses</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
+            <select value={filters.sourceGL} onChange={e => setFilters(f => ({ ...f, sourceGL: e.target.value }))}>
+              <option value="">All</option>
+              <option value="__unassigned__">Unassigned</option>
+              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Min. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMin} onChange={e => setFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Max. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
