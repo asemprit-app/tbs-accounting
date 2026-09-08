@@ -388,6 +388,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
             dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
+            journalEntries={journalEntries}
           />
         )}
         {tab === 'invoices' && (
@@ -499,7 +500,7 @@ function Dashboard({ summary, transactions, invoices }) {
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -538,6 +539,37 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }, [transactions, filters, search]);
   const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amountMin || filters.amountMax || search.trim();
 
+  function jeNaturalAmount(gl, line) {
+    const acct = accounts.find(a => a.code === gl);
+    const debit = Number(line.debit) || 0, credit = Number(line.credit) || 0;
+    const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
+    return isDebitSide ? (debit - credit) : (credit - debit);
+  }
+  // Journal Entries se muestran mezcladas en esta pantalla solo para que se vean junto al resto de la actividad
+  // de la cuenta (como en Wave) — pero se siguen editando desde la pestaña Journal Entries, no aquí.
+  const journalEntryRows = useMemo(() => {
+    const rows = [];
+    (journalEntries || []).forEach(je => {
+      je.lines.forEach((l, idx) => {
+        if (!l.gl) return;
+        rows.push({
+          id: `je-${je.id}-${idx}`, date: je.date,
+          description: `Journal Entry — ${je.memo || l.desc || 'no memo'}`,
+          amount: jeNaturalAmount(l.gl, l), gl: l.gl, sourceGL: null, isJE: true,
+        });
+      });
+    });
+    return rows.filter(r => {
+      if (filters.dateFrom && r.date < filters.dateFrom) return false;
+      if (filters.dateTo && r.date > filters.dateTo) return false;
+      if (search.trim() && !r.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
+      return true;
+    });
+  }, [journalEntries, filters.dateFrom, filters.dateTo, search, accounts]);
+
+  const combinedRows = useMemo(() => {
+    return [...filteredTransactions, ...journalEntryRows].sort((a, b) => a.date.localeCompare(b.date));
+  }, [filteredTransactions, journalEntryRows]);
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -858,7 +890,18 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             </tr>
           </thead>
           <tbody>
-            {filteredTransactions.slice().reverse().map(t => (
+            {combinedRows.slice().reverse().map(t => t.isJE ? (
+              <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: '#FAF7FF' }}>
+                <td style={{ padding: '6px 4px' }}></td>
+                <td style={{ padding: '6px 4px' }}>{t.date}</td>
+                <td style={{ padding: '6px 4px' }}>{t.description} <span style={{ fontSize: 10, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
+                <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
+                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>—</td>
+                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>{glName(t.gl)}</td>
+                <td style={{ padding: '6px 4px' }}><StatusBadge status="JOURNAL ENTRY" /></td>
+                <td style={{ padding: '6px 4px' }}></td>
+              </tr>
+            ) : (
               <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: selected.includes(t.id) ? '#F0F5FA' : 'transparent' }}>
                 <td style={{ padding: '6px 4px' }}>
                   <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggleSelect(t.id)} />
@@ -895,7 +938,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             ))}
           </tbody>
         </table>
-        {filteredTransactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
+        {combinedRows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
       </Card>
 
       {splittingId && (() => {
@@ -970,6 +1013,8 @@ function StatusBadge({ status }) {
     AUTO: { bg: '#EAF3DE', color: '#27500A' },
     MATCH: { bg: '#E6F1FB', color: '#0C447C' },
     REVIEW: { bg: '#FAEEDA', color: '#854F0B' },
+    APPROVED: { bg: '#EAF3DE', color: '#27500A' },
+    'JOURNAL ENTRY': { bg: '#EFE6FB', color: '#5B2C9E' },
   };
   const s = styles[status] || styles.REVIEW;
   return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
@@ -1947,7 +1992,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
-                <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'AUTO' : 'REVIEW'} /></td>
+                <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'APPROVED' : 'REVIEW'} /></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
                   <button onClick={() => deleteOne(r.id)} style={iconBtn}><Trash2 size={14} /></button>
