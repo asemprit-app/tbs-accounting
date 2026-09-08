@@ -53,7 +53,7 @@ function matchAccountByName(text, accounts) {
     const alias = accounts.find(a => a.name === CATEGORY_ALIASES[key]);
     if (alias) return alias.code;
   }
-  // tercer intento: comparar por palabras significativas compartidas
+  // third attempt: compare by shared significant words
   const words = t.split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOPWORDS.has(w));
   if (words.length === 0) return '';
   let bestScore = 0, bestCode = '';
@@ -78,7 +78,7 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
     if (!date || !description) continue;
 
     if (cols.length >= 4) {
-      // formato con categoría (ej. export de Wave): fecha,descripción,categoría,monto
+      // category format (e.g. Wave export): date,description,category,amount
       const category = cols[2];
       let amount = parseAmount(cols[3]);
       if (amount === null) continue;
@@ -88,11 +88,11 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
       if (/^Invoice #/i.test(category)) {
         gl = matchAccountByName('Accounts Receivable', accounts);
         mode = 'MATCH';
-        // guarda la referencia de Wave como nota visible, para vincular manualmente después
+        // store the Wave reference as a visible note, for manual linking later
         const m = category.match(/Invoice #(\S+)\s*\|\s*Payment from (.+)$/i);
-        if (m) finalDesc = `${description} (Wave: Factura #${m[1]} — ${m[2].replace(/\s*\+\s*\d+$/, '')})`;
+        if (m) finalDesc = `${description} (Wave: Invoice #${m[1]} — ${m[2].replace(/\s*\+\s*\d+$/, '')})`;
       } else if (/^Transfer (from|to)\s+/i.test(category) && source === 'card' && cardGL) {
-        // en un import de tarjeta, un "Transfer" es un pago hacia/desde la tarjeta misma
+        // on a card import, a "Transfer" is a payment to/from the card itself
         gl = cardGL;
         mode = 'MATCH';
       } else if (/^Refund for /i.test(category)) {
@@ -102,13 +102,13 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
         gl = matchAccountByName(category.replace(/\s*\+\s*\d+$/, ''), accounts);
         mode = gl ? 'AUTO' : 'REVIEW';
       }
-      // si el nombre de categoría no dio con una cuenta, prueba las reglas por descripción antes de rendirse
+      // if the category name didn't match an account, try the description rules before giving up
       if (!gl) {
         const bySuggest = suggestGL(description, rules);
         if (bySuggest.gl) { gl = bySuggest.gl; mode = bySuggest.mode; }
       }
-      // en tarjeta de crédito, un cargo (gasto) llega positivo — hay que invertirlo para que
-      // el signo interno sea consistente (negativo = gasto), igual que en el formato de banco.
+      // on a credit card, a charge (expense) arrives positive — it needs to be inverted so
+      // the internal sign stays consistent (negative = expense), same as the bank format.
       if (source === 'card' && gl) {
         const acct = accounts.find(a => a.code === gl);
         if (acct?.type === 'Expense') amount = -amount;
@@ -195,22 +195,22 @@ export default function App() {
   }
 
   if (session === undefined) {
-    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Cargando…</div>;
+    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Loading…</div>;
   }
 
   if (!session) {
     return (
       <div style={{ minHeight: '640px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8' }}>
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 28, width: 320 }}>
-          <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D', marginBottom: 16 }}>TBS Accounting — Entrar</div>
+          <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D', marginBottom: 16 }}>TBS Accounting — Sign In</div>
           <form onSubmit={handleLogin}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Correo</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Email</label>
             <input type="email" required style={{ width: '100%', marginBottom: 10 }} value={authForm.email} onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))} />
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Contraseña</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Password</label>
             <input type="password" required style={{ width: '100%', marginBottom: 16 }} value={authForm.password} onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))} />
             {authError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
             <button type="submit" disabled={authBusy} style={{ width: '100%', background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '10px', cursor: 'pointer' }}>
-              {authBusy ? 'Entrando…' : 'Entrar'}
+              {authBusy ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
         </div>
@@ -219,7 +219,7 @@ export default function App() {
   }
 
   if (!profile || !selectedClientId) {
-    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Preparando tu espacio de trabajo…</div>;
+    return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Preparing your workspace…</div>;
   }
 
   return (
@@ -337,13 +337,13 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
     });
   }, []);
 
-  const glName = (code) => accounts.find(g => g.code === code)?.name || 'Sin categoría';
+  const glName = (code) => accounts.find(g => g.code === code)?.name || 'Uncategorized';
 
   const summary = useMemo(() => {
     const month = todayStr().slice(0, 7);
     const revenueMTD = invoices.filter(i => i.date.slice(0, 7) === month)
       .reduce((s, i) => s + invoiceTotal(i), 0);
-    const arOpen = invoices.filter(i => i.status !== 'Pagada')
+    const arOpen = invoices.filter(i => i.status !== 'Paid')
       .reduce((s, i) => s + invoiceTotal(i) - (i.paid || 0), 0);
     const cash = transactions.reduce((s, t) => s + (t.gl === '1010' ? t.amount : 0), 0);
     const review = transactions.filter(t => t.status === 'REVIEW').length;
@@ -363,11 +363,11 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
-            No se pudo conectar a la base de datos: {loadError}. Revisa tu archivo .env (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
+            Could not connect to the database: {loadError}. Check your .env file (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
           </div>
         )}
         {!loaded ? (
-          <div style={{ fontSize: 13, color: '#6B7280' }}>Cargando datos...</div>
+          <div style={{ fontSize: 13, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
         {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} />}
@@ -403,14 +403,14 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
 function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail }) {
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'transactions', label: 'Transacciones', icon: Receipt, badge: reviewCount },
-    { id: 'invoices', label: 'Facturas', icon: FileText },
-    { id: 'customers', label: 'Clientes', icon: Users },
-    { id: 'reports', label: 'Reportes', icon: BarChart3 },
-    { id: 'accounts', label: 'Plan de Cuentas', icon: BookOpen },
-    { id: 'rules', label: 'Reglas', icon: ListChecks },
-    { id: 'journal', label: 'Asientos', icon: FileText },
-    { id: 'reconciliation', label: 'Reconciliación', icon: Landmark },
+    { id: 'transactions', label: 'Transactions', icon: Receipt, badge: reviewCount },
+    { id: 'invoices', label: 'Invoices', icon: FileText },
+    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
+    { id: 'accounts', label: 'Chart of Accounts', icon: BookOpen },
+    { id: 'rules', label: 'Rules', icon: ListChecks },
+    { id: 'journal', label: 'Journal Entries', icon: FileText },
+    { id: 'reconciliation', label: 'Reconciliation', icon: Landmark },
   ];
   return (
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
@@ -444,7 +444,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
       <div style={{ flex: 1 }} />
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, fontSize: 12 }}>
         <div style={{ opacity: 0.8, marginBottom: 6, wordBreak: 'break-all' }}>{userEmail}</div>
-        <div onClick={onLogout} style={{ cursor: 'pointer', opacity: 0.9 }}>Cerrar sesión</div>
+        <div onClick={onLogout} style={{ cursor: 'pointer', opacity: 0.9 }}>Sign out</div>
       </div>
     </div>
   );
@@ -456,10 +456,10 @@ function Card({ children, style }) {
 
 function Dashboard({ summary, transactions, invoices }) {
   const cards = [
-    { label: 'Banco (neto registrado)', value: money(summary.cash) },
-    { label: 'A/R abierto', value: money(summary.arOpen) },
-    { label: 'Ingresos este mes', value: money(summary.revenueMTD) },
-    { label: 'Transacciones en Review', value: summary.review },
+    { label: 'Bank (net recorded)', value: money(summary.cash) },
+    { label: 'Open A/R', value: money(summary.arOpen) },
+    { label: 'Revenue this month', value: money(summary.revenueMTD) },
+    { label: 'Transactions in Review', value: summary.review },
   ];
   return (
     <div>
@@ -473,14 +473,14 @@ function Dashboard({ summary, transactions, invoices }) {
         ))}
       </div>
       <Card>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>Actividad reciente</div>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Recent activity</div>
         {transactions.slice(-5).reverse().map(t => (
           <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: '1px solid #F0F1F3' }}>
             <span>{t.date} — {t.description}</span>
             <span>{money(t.amount)}</span>
           </div>
         ))}
-        {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>Sin transacciones todavía. Ve a la pestaña Transacciones para agregar.</div>}
+        {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No transactions yet. Go to the Transactions tab to add one.</div>}
       </Card>
     </div>
   );
@@ -528,7 +528,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     const groups = {};
     transactions.forEach(t => {
       if (!t.gl) return;
-      if (arAccount && t.gl === arAccount.code) return; // los pagos de factura se vinculan individualmente, no se agrupan en regla
+      if (arAccount && t.gl === arAccount.code) return; // invoice payments are linked individually, they aren't grouped into a rule
       const key = normalizeDesc(t.description);
       if (key.length < 4) return;
       groups[key] = groups[key] || {};
@@ -577,13 +577,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   function importCSV() {
     const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
     if (rows.length === 0) {
-      setImportError('No se reconoció ninguna fila válida. Formato esperado: fecha,descripción,monto — o fecha,descripción,categoría,monto (export de Wave).');
+      setImportError('No valid rows were recognized. Expected format: date,description,amount — or date,description,category,amount (Wave export).');
       return;
     }
     setImportError('');
     const newTx = rows.map(r => {
       if (r.gl !== undefined) {
-        // fila con categoría (Wave) ya viene con gl/mode resueltos
+        // category row (Wave) already comes with gl/mode resolved
         return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl: r.gl, status: r.mode };
       }
       const { gl, mode } = suggestGL(r.description, rules);
@@ -596,7 +596,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
 
   function addTransaction() {
     if (!form.description.trim() || !form.amount || isNaN(Number(form.amount))) {
-      setError('Ingresa una descripción y un monto válido.');
+      setError('Enter a description and a valid amount.');
       return;
     }
     setError('');
@@ -631,13 +631,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     if (!original) return;
     const sum = splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
     if (Math.abs(sum - original.amount) > 0.01) {
-      setSplitError(`La suma de las líneas (${money(sum)}) debe ser igual al monto original (${money(original.amount)}).`);
+      setSplitError(`The sum of the lines (${money(sum)}) must equal the original amount (${money(original.amount)}).`);
       return;
     }
-    if (splitLines.some(l => !l.gl)) { setSplitError('Cada línea necesita una cuenta.'); return; }
+    if (splitLines.some(l => !l.gl)) { setSplitError('Each line needs an account.'); return; }
     setSplitError('');
     const newRows = splitLines.map(l => ({
-      id: uid(), date: original.date, description: original.description + ' (dividido)',
+      id: uid(), date: original.date, description: original.description + ' (split)',
       amount: Number(l.amount), gl: l.gl, status: 'AUTO',
     }));
     setTransactions(prev => [...prev.filter(t => t.id !== splittingId), ...newRows]);
@@ -653,35 +653,35 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (i.id !== inv.id) return i;
       const paid = (i.paid || 0) + t.amount;
       const total = invoiceTotal(i);
-      return { ...i, paid, status: paid >= total ? 'Pagada' : 'Parcial' };
+      return { ...i, paid, status: paid >= total ? 'Paid' : 'Partial' };
     }));
-    setTransactions(prev => prev.map(x => x.id === t.id ? { ...x, description: x.description + ` [Vinculado a ${inv.number}]`, status: 'AUTO' } : x));
+    setTransactions(prev => prev.map(x => x.id === t.id ? { ...x, description: x.description + ` [Vinculado to ${inv.number}]`, status: 'AUTO' } : x));
     setLinkingId(null);
   }
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Transacciones</h2>
-        <button onClick={() => setShowImport(s => !s)} style={{ ...iconBtn, padding: '8px 14px' }}>Importar CSV del banco</button>
+        <h2 style={{ margin: 0 }}>Transactions</h2>
+        <button onClick={() => setShowImport(s => !s)} style={{ ...iconBtn, padding: '8px 14px' }}>Import bank CSV</button>
       </div>
 
       {showImport && (
         <Card style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>
-            Pega el contenido del CSV: una fila por línea, formato <code>fecha,descripción,monto</code> (monto negativo = salida, positivo = entrada) —
-            o <code>fecha,descripción,categoría,monto</code> (export de Wave).
+            Paste the CSV content: one row per line, format <code>date,description,amount</code> (negative amount = outflow, positive = inflow) —
+            or <code>date,description,category,amount</code> (Wave export).
           </div>
           <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 10 }}>
             <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="radio" checked={importSource === 'bank'} onChange={() => setImportSource('bank')} /> Banco (gastos negativos)
+              <input type="radio" checked={importSource === 'bank'} onChange={() => setImportSource('bank')} /> Bank (expenses negative)
             </label>
             <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="radio" checked={importSource === 'card'} onChange={() => setImportSource('card')} /> Tarjeta de crédito (gastos positivos)
+              <input type="radio" checked={importSource === 'card'} onChange={() => setImportSource('card')} /> Credit card (expenses positive)
             </label>
             {importSource === 'card' && (
               <select value={importCardGL} onChange={e => setImportCardGL(e.target.value)}>
-                <option value="">¿Cuál tarjeta es esta?</option>
+                <option value="">Which card is this?</option>
                 {accounts.filter(a => a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
               </select>
             )}
@@ -691,7 +691,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             value={csvText} onChange={e => setCsvText(e.target.value)} />
           {importError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{importError}</div>}
           <div style={{ marginTop: 8 }}>
-            <button onClick={importCSV} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Importar y categorizar</button>
+            <button onClick={importCSV} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Import and categorize</button>
           </div>
         </Card>
       )}
@@ -699,21 +699,21 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Fecha</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Descripción</label>
-            <input style={{ width: '100%' }} placeholder="Ej. RESTAURANTE GUSTO SEVILLA" value={form.description}
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Description</label>
+            <input style={{ width: '100%' }} placeholder="E.g. RESTAURANT GUSTO SEVILLA" value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
             <input type="number" step="0.01" style={{ width: 120 }} placeholder="0.00" value={form.amount}
               onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
           </div>
           <button onClick={addTransaction} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-            <Plus size={15} /> Agregar
+            <Plus size={15} /> Add
           </button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
@@ -722,41 +722,41 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Buscar en descripción</label>
-            <input style={{ width: '100%' }} placeholder="Ej. STARBUCKS, NICOLE VALENTIN..." value={search} onChange={e => setSearch(e.target.value)} />
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
+            <input style={{ width: '100%' }} placeholder="E.g. STARBUCKS, NICOLE VALENTIN..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Desde</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
             <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hasta</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
             <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Categoría</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Category</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
-              <option value="">Todas</option>
-              <option value="__uncat__">Sin categoría</option>
+              <option value="">All</option>
+              <option value="__uncat__">Uncategorized</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto mín.</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Min. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMin} onChange={e => setFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Monto máx.</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Max. amount</label>
             <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Limpiar filtros</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
-        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} de {transactions.length} transacciones</div>}
+        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
       </Card>
 
       {ruleSuggestions.length > 0 && (
         <Card style={{ marginBottom: 20, borderColor: '#B7E4C7' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Sugerencias de reglas ({ruleSuggestions.length})</div>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Sugerencias of reglas ({ruleSuggestions.length})</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
-            Estos patrones se repitieron 4 veces o más con la misma categoría. Crea la regla para que futuras transacciones parecidas se categoricen solas.
+            These patterns repeated 4 or more times with the same category. Create the rule so similar future transactions get categorized automatically.
           </div>
           {ruleSuggestions.map(s => (
             <div key={s.key + s.gl} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 13 }}>
-              <span>"{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} veces)</span></span>
+              <span>"{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} times)</span></span>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => createRuleFromSuggestion(s)} style={iconBtn}>Crear regla</button>
+                <button onClick={() => createRuleFromSuggestion(s)} style={iconBtn}>Create rule</button>
                 <button onClick={() => dismissSuggestion(s)} style={iconBtn}><X size={14} /></button>
               </div>
             </div>
@@ -767,14 +767,14 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       {selected.length > 0 && (
         <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} seleccionadas</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
             <select value={bulkGL} onChange={e => setBulkGL(e.target.value)}>
-              <option value="">Elegir cuenta...</option>
+              <option value="">Choose account...</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select>
-            <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Aplicar categoría</button>
-            <button onClick={deleteSelected} style={iconBtn}>Eliminar seleccionadas</button>
-            <button onClick={() => setSelected([])} style={iconBtn}>Cancelar selección</button>
+            <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
+            <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
+            <button onClick={() => setSelected([])} style={iconBtn}>Cancel selection</button>
           </div>
         </Card>
       )}
@@ -788,11 +788,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                   checked={filteredTransactions.length > 0 && filteredTransactions.every(t => selected.includes(t.id))}
                   onChange={toggleSelectAll} />
               </th>
-              <th style={{ padding: '6px 4px' }}>Fecha</th>
-              <th style={{ padding: '6px 4px' }}>Descripción</th>
-              <th style={{ padding: '6px 4px' }}>Monto</th>
-              <th style={{ padding: '6px 4px' }}>Categoría</th>
-              <th style={{ padding: '6px 4px' }}>Estado</th>
+              <th style={{ padding: '6px 4px' }}>Date</th>
+              <th style={{ padding: '6px 4px' }}>Description</th>
+              <th style={{ padding: '6px 4px' }}>Amount</th>
+              <th style={{ padding: '6px 4px' }}>Category</th>
+              <th style={{ padding: '6px 4px' }}>Status</th>
               <th style={{ padding: '6px 4px' }}></th>
             </tr>
           </thead>
@@ -807,7 +807,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
-                    <option value="">Sin categoría</option>
+                    <option value="">Uncategorized</option>
                     {accounts.map(g => <option key={g.code} value={g.code}>{g.code} — {g.name}</option>)}
                   </select>
                 </td>
@@ -816,19 +816,19 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {t.status === 'REVIEW' && (
-                    <button title="Confirmar" onClick={() => confirmRow(t.id)} style={iconBtn}><Check size={14} /></button>
+                    <button title="Confirm" onClick={() => confirmRow(t.id)} style={iconBtn}><Check size={14} /></button>
                   )}
-                  <button title="Dividir entre varias cuentas" onClick={() => openSplit(t)} style={iconBtn}>Dividir</button>
+                  <button title="Split across multiple accounts" onClick={() => openSplit(t)} style={iconBtn}>Split</button>
                   {t.gl === '1100' && (
-                    <button title="Vincular a una factura real" onClick={() => openLink(t)} style={iconBtn}>Vincular a factura</button>
+                    <button title="Link to a real invoice" onClick={() => openLink(t)} style={iconBtn}>Link to invoice</button>
                   )}
-                  <button title="Eliminar" onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
+                  <button title="Delete" onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filteredTransactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No hay transacciones. Agrega la primera arriba.' : 'Ninguna transacción coincide con estos filtros.'}</div>}
+        {filteredTransactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
       </Card>
 
       {splittingId && (() => {
@@ -837,23 +837,23 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 420 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Dividir transacción — {money(original.amount)}</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Split transaction — {money(original.amount)}</div>
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{original.description}</div>
               {splitLines.map((l, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <select style={{ flex: 1 }} value={l.gl} onChange={e => updateSplitLine(i, 'gl', e.target.value)}>
-                    <option value="">Cuenta</option>
+                    <option value="">Account</option>
                     {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
                   </select>
                   <input type="number" step="0.01" style={{ width: 100 }} value={l.amount} onChange={e => updateSplitLine(i, 'amount', e.target.value)} />
                   <button onClick={() => removeSplitLine(i)} style={iconBtn}><Trash2 size={14} /></button>
                 </div>
               ))}
-              <button onClick={addSplitLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Línea</button>
+              <button onClick={addSplitLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Line</button>
               {splitError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{splitError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancelar</button>
-                <button onClick={confirmSplit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirmar división</button>
+                <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancel</button>
+                <button onClick={confirmSplit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirm split</button>
               </div>
             </Card>
           </div>
@@ -866,27 +866,27 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 380 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Vincular a factura real</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Link to invoice real</div>
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
               <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
-                <option value="">Selecciona la factura</option>
+                <option value="">Select the invoice</option>
                 {(() => {
-                  const openInv = invoices.filter(i => i.status !== 'Pagada');
+                  const openInv = invoices.filter(i => i.status !== 'Paid');
                   const byClient = {};
                   openInv.forEach(i => { (byClient[i.client] = byClient[i.client] || []).push(i); });
                   const clientNames = Object.keys(byClient).sort((a, b) => a.localeCompare(b));
                   return clientNames.map(client => (
                     <optgroup key={client} label={client}>
                       {byClient[client].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(i => (
-                        <option key={i.id} value={i.id}>{i.number} — {money(invoiceTotal(i) - (i.paid || 0))} pendiente</option>
+                        <option key={i.id} value={i.id}>{i.number} — {money(invoiceTotal(i) - (i.paid || 0))} outstanding</option>
                       ))}
                     </optgroup>
                   ));
                 })()}
               </select>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancelar</button>
-                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Aplicar cobro</button>
+                <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancel</button>
+                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply payment</button>
               </div>
             </Card>
           </div>
@@ -918,20 +918,20 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
 
   function applyPayment(inv) {
     const amt = Number(payAmount);
-    if (!amt || amt <= 0) { setPayError('Ingresa un monto válido.'); return; }
+    if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return; }
     setPayError('');
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
       const paid = (i.paid || 0) + amt;
       const total = invoiceTotal(i);
-      return { ...i, paid, status: paid >= total ? 'Pagada' : 'Parcial' };
+      return { ...i, paid, status: paid >= total ? 'Paid' : 'Partial' };
     }));
     setPayingId(null);
     setPayAmount('');
   }
 
   function blankInvoice() {
-    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pendiente', paid: 0 };
+    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0 };
   }
 
   function updateLine(i, field, val) {
@@ -945,8 +945,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
   function saveInvoice() {
-    if (!form.client.trim()) { setError('Ingresa el nombre del cliente.'); return; }
-    if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Cada línea necesita descripción y precio.'); return; }
+    if (!form.client.trim()) { setError('Enter the customer's name.'); return; }
+    if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
     setError('');
     const inv = { ...form, id: uid(), number: 'FAC-' + (invoices.length + 1001) };
     setInvoices(prev => [...prev, inv]);
@@ -957,9 +957,9 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Facturas</h2>
+        <h2 style={{ margin: 0 }}>Invoices</h2>
         <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-          <Plus size={15} /> Nueva factura
+          <Plus size={15} /> New invoice
         </button>
       </div>
 
@@ -967,30 +967,30 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Cliente</label>
-              <input style={{ width: '100%' }} value={form.client} onChange={e => setForm(f => ({ ...f, client: e.target.value }))} placeholder="Nombre del cliente" />
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Customer</label>
+              <input style={{ width: '100%' }} value={form.client} onChange={e => setForm(f => ({ ...f, client: e.target.value }))} placeholder="Customer name" />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Fecha</label>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
           </div>
 
           {form.lines.map((l, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <input style={{ flex: 1 }} placeholder="Descripción del servicio" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
-              <input type="number" style={{ width: 70 }} placeholder="Cant." value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} />
-              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Precio" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} />
+              <input style={{ flex: 1 }} placeholder="Service description" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
+              <input type="number" style={{ width: 70 }} placeholder="Qty." value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} />
+              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Price" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} />
               <span style={{ width: 90, fontSize: 13, textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
               <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
             </div>
           ))}
-          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Línea</button>
+          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={form.retention} onChange={e => setForm(f => ({ ...f, retention: e.target.checked }))} />
-              Aplicar retención
+              Apply withholding
             </label>
             {form.retention && (
               <input type="number" style={{ width: 60 }} value={form.retentionPct} onChange={e => setForm(f => ({ ...f, retentionPct: e.target.value }))} />
@@ -1000,7 +1000,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
 
           <div style={{ fontWeight: 700, marginBottom: 12 }}>Total: {money(invoiceTotal(form))}</div>
           {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-          <button onClick={saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Guardar factura</button>
+          <button onClick={saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save invoice</button>
         </Card>
       )}
 
@@ -1009,10 +1009,10 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
               <th style={{ padding: '6px 4px' }}>No.</th>
-              <th style={{ padding: '6px 4px' }}>Cliente</th>
-              <th style={{ padding: '6px 4px' }}>Fecha</th>
+              <th style={{ padding: '6px 4px' }}>Customer</th>
+              <th style={{ padding: '6px 4px' }}>Date</th>
               <th style={{ padding: '6px 4px' }}>Total</th>
-              <th style={{ padding: '6px 4px' }}>Estado</th>
+              <th style={{ padding: '6px 4px' }}>Status</th>
               <th style={{ padding: '6px 4px' }}></th>
             </tr>
           </thead>
@@ -1023,18 +1023,18 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
                 <td style={{ padding: '6px 4px' }}>{inv.client}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.date}</td>
                 <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(inv))}</td>
-                <td style={{ padding: '6px 4px' }}>{inv.status}{inv.paid ? ` (${money(inv.paid)} pagado)` : ''}</td>
+                <td style={{ padding: '6px 4px' }}>{inv.status}{inv.paid ? ` (${money(inv.paid)} paid)` : ''}</td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   <button onClick={() => onPrint(inv)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> PDF</button>
-                  {inv.status !== 'Pagada' && (
-                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Aplicar cobro</button>
+                  {inv.status !== 'Paid' && (
+                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {invoices.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay facturas todavía.</div>}
+        {invoices.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No invoices yet.</div>}
       </Card>
 
       {payingId && (() => {
@@ -1044,14 +1044,14 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 320 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Aplicar cobro — {inv.number}</div>
-              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>Balance pendiente: {money(balance)}</div>
-              <input type="number" step="0.01" style={{ width: '100%', marginBottom: 8 }} placeholder="Monto cobrado"
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Apply payment — {inv.number}</div>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>Outstanding balance: {money(balance)}</div>
+              <input type="number" step="0.01" style={{ width: '100%', marginBottom: 8 }} placeholder="Amount cobrado"
                 value={payAmount} onChange={e => setPayAmount(e.target.value)} />
               {payError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 8 }}>{payError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setPayingId(null)} style={iconBtn}>Cancelar</button>
-                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirmar</button>
+                <button onClick={() => setPayingId(null)} style={iconBtn}>Cancel</button>
+                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirm</button>
               </div>
             </Card>
           </div>
@@ -1067,19 +1067,19 @@ function InvoicePrintModal({ inv, total, onClose }) {
       className="no-print-overlay">
       <div style={{ background: '#fff', width: 480, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Factura {inv.number}</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Invoice {inv.number}</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Guardar como PDF</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
         <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Factura {inv.number} — {inv.date}</div>
-          <div style={{ fontSize: 13, marginBottom: 16 }}>Cliente: <strong>{inv.client}</strong></div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Invoice {inv.number} — {inv.date}</div>
+          <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{inv.client}</strong></div>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-              <th style={{ padding: '4px 0' }}>Descripción</th><th>Cant.</th><th>Precio</th><th style={{ textAlign: 'right' }}>Monto</th>
+              <th style={{ padding: '4px 0' }}>Description</th><th>Qty.</th><th>Price</th><th style={{ textAlign: 'right' }}>Amount</th>
             </tr></thead>
             <tbody>
               {inv.lines.map((l, i) => (
@@ -1088,7 +1088,7 @@ function InvoicePrintModal({ inv, total, onClose }) {
               ))}
             </tbody>
           </table>
-          {inv.retention && <div style={{ fontSize: 13, textAlign: 'right' }}>Retención ({inv.retentionPct}%) aplicada</div>}
+          {inv.retention && <div style={{ fontSize: 13, textAlign: 'right' }}>Withholding ({inv.retentionPct}%) applied</div>}
           <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'right', marginTop: 8 }}>Total: {money(total)}</div>
         </div>
       </div>
@@ -1116,29 +1116,29 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Clientes</h2>
+      <h2 style={{ margin: '0 0 16px' }}>Customers</h2>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input style={{ flex: 1 }} placeholder="Nombre del cliente nuevo" value={name} onChange={e => setName(e.target.value)} />
-          <button onClick={addCustomer} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Agregar</button>
+          <input style={{ flex: 1 }} placeholder="New customer name" value={name} onChange={e => setName(e.target.value)} />
+          <button onClick={addCustomer} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add</button>
         </div>
       </Card>
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Cliente</th><th style={{ padding: '6px 4px' }}>Balance abierto (A/R)</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
           </tr></thead>
           <tbody>
             {allNames.map(n => (
               <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{n}</td>
                 <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
-                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Estado de cuenta</button></td>
+                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Status of cuenta</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-        {allNames.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay clientes todavía.</div>}
+        {allNames.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No customers yet.</div>}
       </Card>
     </div>
   );
@@ -1153,7 +1153,7 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
       <div style={{ background: '#fff', width: 560, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Estado de cuenta — {client}</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Status of cuenta — {client}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Imprimir / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
@@ -1161,11 +1161,11 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
         </div>
         <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Estado de cuenta al {todayStr()}</div>
-          <div style={{ fontSize: 13, marginBottom: 16 }}>Cliente: <strong>{client}</strong></div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Status of cuenta al {todayStr()}</div>
+          <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-              <th style={{ padding: '4px 0' }}>Factura</th><th>Fecha</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Pagado</th><th style={{ textAlign: 'right' }}>Balance</th>
+              <th style={{ padding: '4px 0' }}>Invoice</th><th>Date</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Balance</th>
             </tr></thead>
             <tbody>
               {rows.map(i => (
@@ -1178,7 +1178,7 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'right' }}>Balance total: {money(balance)}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'right' }}>Total balance: {money(balance)}</div>
         </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
@@ -1208,14 +1208,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const [customTo, setCustomTo] = useState(todayStr());
   const { from, to } = getPeriodRange(preset, customFrom, customTo);
 
-  // Todas las líneas contables unificadas: transacciones (una cuenta cada una) + líneas de asientos manuales
+  // All unified accounting lines: transactions (one account each) + manual journal entry lines
   const postings = useMemo(() => {
     const list = [];
     transactions.forEach(t => {
       if (!t.gl) return;
       const acct = accounts.find(a => a.code === t.gl);
-      // en la libreta de banco, negativo = salida, positivo = entrada.
-      // para que un gasto categorizado se vea como aumento de gasto (positivo), se invierte el signo solo ahí.
+      // in the bank register, negative = outflow, positive = inflow.
+      // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
       const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
       list.push({ date: t.date, gl: t.gl, amount });
     });
@@ -1246,7 +1246,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const equityAccts = accounts.filter(a => a.type === 'Equity');
   const cashAccts = assetAccts.filter(a => /banc|bppr|cash|efectivo|caja/i.test(a.name));
 
-  // Facturas emitidas en el período cuentan como ingreso (Service Revenue) además de lo categorizado manualmente
+  // Invoices issued in the period count as revenue (Service Revenue) in addition to what's manually categorized
   const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceTotal(inv), 0);
 
   const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
@@ -1260,7 +1260,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const liabilityRows = liabilityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
   const totalLiabilities = liabilityRows.reduce((s, r) => s + r.value, 0);
   const equityRows = equityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
-  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + netIncome; // utilidad del período se suma al capital
+  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + netIncome; // period income is added to equity
 
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
@@ -1282,18 +1282,18 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   }, [transactions, invoices, invoiceTotal, accounts]);
 
   function downloadCSV() {
-    let csv = 'Mes,Ingresos,Gastos,Neto\n';
+    let csv = 'Month,Revenue,Expenses,Net\n';
     byMonth.forEach(([m, v]) => { csv += `${m},${v.revenue.toFixed(2)},${v.expense.toFixed(2)},${(v.revenue - v.expense).toFixed(2)}\n`; });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const to = document.createElement('a');
     a.href = url; a.download = 'reporte_mensual.csv'; a.click();
     URL.revokeObjectURL(url);
   }
 
   const PRESETS = [
-    ['this_month', 'Este mes'], ['last_month', 'Mes anterior'], ['this_quarter', 'Este trimestre'],
-    ['this_year', 'Este año'], ['custom', 'Personalizado'],
+    ['this_month', 'This month'], ['last_month', 'Last month'], ['this_quarter', 'This quarter'],
+    ['this_year', 'This year'], ['custom', 'Custom'],
   ];
 
   const Row = ({ label, value, bold }) => (
@@ -1304,7 +1304,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Reportes financieros</h2>
+      <h2 style={{ margin: '0 0 16px' }}>Financial Reports</h2>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -1317,70 +1317,70 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           ))}
           {preset === 'custom' && (
             <>
-              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Desde</label>
+              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
                 <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
-              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Hasta</label>
+              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
                 <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
             </>
           )}
         </div>
-        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Período: {from} a {to}</div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Estado de Resultados)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Ingresos</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Status of Resultados)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
-          {invoiceRevenueInPeriod !== 0 && <Row label="Facturación (Service Revenue)" value={invoiceRevenueInPeriod} />}
-          <Row label="Total Ingresos" value={totalRevenue} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Gastos</div>
+          {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} />}
+          <Row label="Total Revenue" value={totalRevenue} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
           {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
-          <Row label="Total Gastos" value={totalExpense} bold />
+          <Row label="Total Expenses" value={totalExpense} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
-            <Row label="Utilidad Neta" value={netIncome} bold />
+            <Row label="Net Income" value={netIncome} bold />
           </div>
         </Card>
 
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (al {to})</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Activos</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (as of {to})</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Assets</div>
           {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
-          <Row label="Total Activos" value={totalAssets} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Pasivos</div>
+          <Row label="Total Assets" value={totalAssets} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Liabilities</div>
           {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
-          <Row label="Total Pasivos" value={totalLiabilities} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Capital</div>
+          <Row label="Total Liabilities" value={totalLiabilities} bold />
+          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
           {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
-          <Row label="Utilidad del período" value={netIncome} />
-          <Row label="Total Capital" value={totalEquity} bold />
+          <Row label="Period income" value={netIncome} />
+          <Row label="Total Equity" value={totalEquity} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
-            <Row label="Pasivos + Capital" value={totalLiabilities + totalEquity} bold />
+            <Row label="Liabilities + Equity" value={totalLiabilities + totalEquity} bold />
           </div>
         </Card>
 
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>Cash Flow (método directo)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Cambio en cuentas de banco/efectivo</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Cash Flow (direct method)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Cambio en cuentas of banco/efectivo</div>
           {cashRows.map(r => <Row key={r.code} label={r.name} value={r.change} />)}
-          {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280' }}>No hay cuentas marcadas como banco/efectivo (el nombre debe incluir "banco", "cash" o similar).</div>}
+          {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280' }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
-            <Row label="Cambio Neto en Efectivo" value={netCashChange} bold />
+            <Row label="Net Change in Cash" value={netCashChange} bold />
           </div>
           <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
-            Este cálculo suma directamente los movimientos de las cuentas de banco en el período — no separa aún operación/inversión/financiamiento.
+            This calculation directly sums your bank account movements for the period — it doesn't yet separate operating/investing/financing activities.
           </div>
         </Card>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/R Aging (Cuentas por Cobrar)</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/R Aging (Accounts Receivable)</div>
           {(() => {
             const buckets = ['Current', '1-30', '31-60', '61-90', '90+'];
             const byClient = {};
             const todayD = new Date(todayStr());
-            invoices.filter(i => i.status !== 'Pagada').forEach(inv => {
+            invoices.filter(i => i.status !== 'Paid').forEach(inv => {
               const bal = invoiceTotal(inv) - (inv.paid || 0);
               if (bal <= 0) return;
               const days = Math.floor((todayD - new Date(inv.date)) / 86400000);
@@ -1393,7 +1393,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             return (
               <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'right', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Cliente</th>
+                  <th style={{ textAlign: 'left', padding: '4px' }}>Customer</th>
                   {buckets.map(b => <th key={b} style={{ padding: '4px' }}>{b}</th>)}
                 </tr></thead>
                 <tbody>
@@ -1403,7 +1403,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                       {buckets.map(b => <td key={b} style={{ padding: '4px', textAlign: 'right' }}>{byClient[c][b] ? money(byClient[c][b]) : '—'}</td>)}
                     </tr>
                   ))}
-                  {clients.length === 0 && <tr><td colSpan={6} style={{ padding: 8, color: '#6B7280' }}>No hay facturas abiertas.</td></tr>}
+                  {clients.length === 0 && <tr><td colSpan={6} style={{ padding: 8, color: '#6B7280' }}>No open invoices.</td></tr>}
                 </tbody>
                 {clients.length > 0 && (
                   <tfoot><tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
@@ -1417,27 +1417,27 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         </Card>
 
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Cuentas por Pagar)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Saldo actual de tus cuentas de pasivo (tarjetas, nómina y taxes por pagar)</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Accounts Payable)</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Current balance of your liability accounts (cards, payroll, and taxes payable)</div>
           {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} />)}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Total A/P" value={-totalLiabilities} bold />
           </div>
           <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
-            Esto refleja tus cuentas de pasivo tal como están hoy; el sistema todavía no rastrea facturas de proveedores individuales.
+            This reflects your liability accounts as they stand today; the system doesn't yet track individual vendor bills.
           </div>
         </Card>
       </div>
 
       <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>Facturas Abiertas (Open Invoices)</div>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Open Invoices</div>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Factura</th><th style={{ padding: '6px 4px' }}>Cliente</th><th style={{ padding: '6px 4px' }}>Fecha</th>
-            <th style={{ padding: '6px 4px' }}>Total</th><th style={{ padding: '6px 4px' }}>Balance</th><th style={{ padding: '6px 4px' }}>Estado</th>
+            <th style={{ padding: '6px 4px' }}>Invoice</th><th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Date</th>
+            <th style={{ padding: '6px 4px' }}>Total</th><th style={{ padding: '6px 4px' }}>Balance</th><th style={{ padding: '6px 4px' }}>Status</th>
           </tr></thead>
           <tbody>
-            {invoices.filter(i => i.status !== 'Pagada').sort((a, b) => a.date.localeCompare(b.date)).map(i => (
+            {invoices.filter(i => i.status !== 'Paid').sort((a, b) => a.date.localeCompare(b.date)).map(i => (
               <tr key={i.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{i.number}</td>
                 <td style={{ padding: '6px 4px' }}>{i.client}</td>
@@ -1449,26 +1449,26 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             ))}
           </tbody>
         </table>
-        {invoices.filter(i => i.status !== 'Pagada').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay facturas abiertas.</div>}
+        {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
       </Card>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0 }}>Tendencia mensual</h3>
-        <button onClick={downloadCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Descargar CSV</button>
+        <h3 style={{ margin: 0 }}>Monthly trend</h3>
+        <button onClick={downloadCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Download CSV</button>
       </div>
 
       {byMonth.length > 0 && (
         <Card style={{ marginBottom: 16 }}>
           <div style={{ height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byMonth.map(([m, v]) => ({ mes: m, Ingresos: Number(v.revenue.toFixed(2)), Gastos: Number(v.expense.toFixed(2)) }))}>
+              <BarChart data={byMonth.map(([m, v]) => ({ mes: m, Revenue: Number(v.revenue.toFixed(2)), Expenses: Number(v.expense.toFixed(2)) }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F0F1F3" />
                 <XAxis dataKey="mes" fontSize={12} />
                 <YAxis fontSize={12} />
                 <Tooltip formatter={(v) => money(v)} />
                 <Legend />
-                <Bar dataKey="Ingresos" fill="#0F6E56" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Gastos" fill="#D85A30" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Revenue" fill="#0F6E56" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Expenses" fill="#D85A30" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1478,7 +1478,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Mes</th><th style={{ padding: '6px 4px' }}>Ingresos</th><th style={{ padding: '6px 4px' }}>Gastos</th><th style={{ padding: '6px 4px' }}>Neto</th>
+            <th style={{ padding: '6px 4px' }}>Month</th><th style={{ padding: '6px 4px' }}>Revenue</th><th style={{ padding: '6px 4px' }}>Expenses</th><th style={{ padding: '6px 4px' }}>Net</th>
           </tr></thead>
           <tbody>
             {byMonth.map(([m, v]) => (
@@ -1491,7 +1491,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             ))}
           </tbody>
         </table>
-        {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Agrega transacciones y facturas para ver el reporte.</div>}
+        {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the report.</div>}
       </Card>
     </div>
   );
@@ -1503,8 +1503,8 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
   const [editingCode, setEditingCode] = useState(null);
 
   function addAccount() {
-    if (!form.code.trim() || !form.name.trim()) { setError('Ingresa código y nombre.'); return; }
-    if (accounts.some(a => a.code === form.code.trim())) { setError('Ese código ya existe.'); return; }
+    if (!form.code.trim() || !form.name.trim()) { setError('Enter a code and name.'); return; }
+    if (accounts.some(a => a.code === form.code.trim())) { setError('That code already exists.'); return; }
     setError('');
     setAccounts(prev => [...prev, { code: form.code.trim(), name: form.name.trim(), type: form.type }]);
     setForm({ code: '', name: '', type: 'Expense' });
@@ -1521,25 +1521,25 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Plan de Cuentas</h2>
+      <h2 style={{ margin: '0 0 16px' }}>Chart of Accounts</h2>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Código</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Code</label>
             <input style={{ width: 90 }} placeholder="6300" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Nombre</label>
-            <input style={{ width: '100%' }} placeholder="Nombre de la cuenta" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Name</label>
+            <input style={{ width: '100%' }} placeholder="Account name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tipo</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Type</label>
             <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
               {types.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <button onClick={addAccount} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-            <Plus size={15} /> Agregar cuenta
+            <Plus size={15} /> Add cuenta
           </button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
@@ -1569,7 +1569,7 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
           </table>
         </Card>
       ))}
-      {accounts.length === 0 && <Card><div style={{ fontSize: 13, color: '#6B7280' }}>No hay cuentas todavía.</div></Card>}
+      {accounts.length === 0 && <Card><div style={{ fontSize: 13, color: '#6B7280' }}>No accounts yet.</div></Card>}
     </div>
   );
 }
@@ -1579,7 +1579,7 @@ function RulesView({ rules, setRules, accounts }) {
   const [error, setError] = useState('');
 
   function addRule() {
-    if (!form.keyword.trim() || !form.gl) { setError('Ingresa la palabra clave y la cuenta.'); return; }
+    if (!form.keyword.trim() || !form.gl) { setError('Enter the keyword and the account.'); return; }
     setError('');
     setRules(prev => [...prev, { id: uid(), keyword: form.keyword.trim().toUpperCase(), gl: form.gl, mode: form.mode }]);
     setForm({ keyword: '', gl: '', mode: 'AUTO' });
@@ -1590,25 +1590,25 @@ function RulesView({ rules, setRules, accounts }) {
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Reglas de categorización</h2>
+      <h2 style={{ margin: '0 0 16px' }}>Categorization Rules</h2>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
-          Cuando la descripción de una transacción contenga esta palabra, se categoriza sola con la cuenta que elijas.
+          When to transaction's description contains this word, it will be categorized automatically with the account you choose.
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Palabra clave</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Keyword</label>
             <input style={{ width: '100%' }} placeholder="Ej. NETFLIX" value={form.keyword} onChange={e => setForm(f => ({ ...f, keyword: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Cuenta</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
-              <option value="">Selecciona</option>
+              <option value="">Select</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Modo</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Mode</label>
             <select value={form.mode} onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}>
               <option value="AUTO">AUTO</option>
               <option value="MATCH">MATCH</option>
@@ -1616,7 +1616,7 @@ function RulesView({ rules, setRules, accounts }) {
             </select>
           </div>
           <button onClick={addRule} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-            <Plus size={15} /> Agregar regla
+            <Plus size={15} /> Add regla
           </button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
@@ -1624,7 +1624,7 @@ function RulesView({ rules, setRules, accounts }) {
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Palabra clave</th><th style={{ padding: '6px 4px' }}>Cuenta</th><th style={{ padding: '6px 4px' }}>Modo</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Keyword</th><th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Mode</th><th></th>
           </tr></thead>
           <tbody>
             {rules.map(r => (
@@ -1637,7 +1637,7 @@ function RulesView({ rules, setRules, accounts }) {
             ))}
           </tbody>
         </table>
-        {rules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay reglas todavía.</div>}
+        {rules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No rules yet.</div>}
       </Card>
     </div>
   );
@@ -1662,8 +1662,8 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   const balanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
 
   function saveJE() {
-    if (form.lines.some(l => !l.gl)) { setError('Cada línea necesita una cuenta.'); return; }
-    if (!balanced) { setError('El asiento no balancea: Débito y Crédito deben ser iguales y mayores a cero.'); return; }
+    if (form.lines.some(l => !l.gl)) { setError('Each line needs an account.'); return; }
+    if (!balanced) { setError('The entry doesn't balance: Debit and Credit must be equal and greater than zero.'); return; }
     setError('');
     setJournalEntries(prev => [...prev, { ...form, id: uid() }]);
     setForm(blankJE());
@@ -1676,9 +1676,9 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Asientos contables (Journal Entries)</h2>
+        <h2 style={{ margin: 0 }}>Journal Entries</h2>
         <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-          <Plus size={15} /> Nuevo asiento
+          <Plus size={15} /> New entry
         </button>
       </div>
 
@@ -1686,36 +1686,36 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Fecha</label>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
             <div style={{ flex: 1 }}>
               <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Memo</label>
-              <input style={{ width: '100%' }} placeholder="Descripción general del asiento" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
+              <input style={{ width: '100%' }} placeholder="Description general del asiento" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
             </div>
           </div>
 
           {form.lines.map((l, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
               <select style={{ width: 200 }} value={l.gl} onChange={e => updateLine(i, 'gl', e.target.value)}>
-                <option value="">Cuenta</option>
+                <option value="">Account</option>
                 {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
               </select>
-              <input style={{ flex: 1 }} placeholder="Descripción de la línea" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
-              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Débito" value={l.debit} onChange={e => updateLine(i, 'debit', e.target.value)} />
-              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Crédito" value={l.credit} onChange={e => updateLine(i, 'credit', e.target.value)} />
+              <input style={{ flex: 1 }} placeholder="Line description" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
+              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Debit" value={l.debit} onChange={e => updateLine(i, 'debit', e.target.value)} />
+              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Credit" value={l.credit} onChange={e => updateLine(i, 'credit', e.target.value)} />
               <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
             </div>
           ))}
-          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Línea</button>
+          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
 
           <div style={{ display: 'flex', gap: 16, fontSize: 13, marginBottom: 12 }}>
-            <span>Total débito: <strong>{money(totalDebit)}</strong></span>
-            <span>Total crédito: <strong>{money(totalCredit)}</strong></span>
-            <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? 'Balanceado' : 'No balancea'}</span>
+            <span>Total debit: <strong>{money(totalDebit)}</strong></span>
+            <span>Total credit: <strong>{money(totalCredit)}</strong></span>
+            <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? 'Balanced' : 'Doesn't balance'}</span>
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-          <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Guardar asiento</button>
+          <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save entry</button>
         </Card>
       )}
 
@@ -1723,7 +1723,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
         {journalEntries.slice().reverse().map(je => (
           <div key={je.id} style={{ borderBottom: '1px solid #F0F1F3', padding: '8px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600 }}>
-              <span>{je.date} — {je.memo || 'Sin memo'}</span>
+              <span>{je.date} — {je.memo || 'No memo'}</span>
               <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
             </div>
             {je.lines.map((l, i) => (
@@ -1734,7 +1734,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
             ))}
           </div>
         ))}
-        {journalEntries.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No hay asientos manuales todavía.</div>}
+        {journalEntries.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No manual entries yet.</div>}
       </Card>
     </div>
   );
@@ -1750,7 +1750,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   function runReconciliation() {
-    if (!form.gl || !form.statementBalance) { setError('Selecciona la cuenta e ingresa el saldo del estado de cuenta.'); return; }
+    if (!form.gl || !form.statementBalance) { setError('Select the account and enter the statement balance.'); return; }
     setError('');
     const ledgerBalance = ledgerBalanceFor(form.gl, form.periodEnd);
     const statementBalance = Number(form.statementBalance);
@@ -1764,37 +1764,37 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Reconciliación bancaria</h2>
+      <h2 style={{ margin: '0 0 16px' }}>Bank Reconciliation</h2>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
-          Ingresa el saldo real del estado de cuenta al cierre del período. El sistema lo compara automáticamente contra el saldo calculado en tus transacciones.
+          Enter the real statement balance at period close. The system automatically compares it against the balance calculated from your transactions.
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Cuenta</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
-              <option value="">Selecciona</option>
+              <option value="">Select</option>
               {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Corte al</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>As of</label>
             <input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Saldo del estado de cuenta</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Saldo del estado of cuenta</label>
             <input type="number" step="0.01" style={{ width: 140 }} value={form.statementBalance} onChange={e => setForm(f => ({ ...f, statementBalance: e.target.value }))} />
           </div>
-          <button onClick={runReconciliation} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Reconciliar</button>
+          <button onClick={runReconciliation} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Reconcile</button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Cuenta</th><th style={{ padding: '6px 4px' }}>Corte</th>
-            <th style={{ padding: '6px 4px' }}>Estado de cuenta</th><th style={{ padding: '6px 4px' }}>Libro</th>
-            <th style={{ padding: '6px 4px' }}>Diferencia</th><th style={{ padding: '6px 4px' }}>Estado</th>
+            <th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Corte</th>
+            <th style={{ padding: '6px 4px' }}>Status of cuenta</th><th style={{ padding: '6px 4px' }}>Book</th>
+            <th style={{ padding: '6px 4px' }}>Difference</th><th style={{ padding: '6px 4px' }}>Status</th>
           </tr></thead>
           <tbody>
             {reconciliations.slice().reverse().map(r => (
@@ -1809,7 +1809,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             ))}
           </tbody>
         </table>
-        {reconciliations.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No hay reconciliaciones todavía.</div>}
+        {reconciliations.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No reconciliations yet.</div>}
       </Card>
     </div>
   );
