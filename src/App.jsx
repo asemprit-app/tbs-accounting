@@ -824,9 +824,19 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
               <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
                 <option value="">Selecciona la factura</option>
-                {invoices.filter(i => i.status !== 'Pagada').map(i => (
-                  <option key={i.id} value={i.id}>{i.number} — {i.client} — {money(invoiceTotal(i) - (i.paid || 0))} pendiente</option>
-                ))}
+                {(() => {
+                  const openInv = invoices.filter(i => i.status !== 'Pagada');
+                  const byClient = {};
+                  openInv.forEach(i => { (byClient[i.client] = byClient[i.client] || []).push(i); });
+                  const clientNames = Object.keys(byClient).sort((a, b) => a.localeCompare(b));
+                  return clientNames.map(client => (
+                    <optgroup key={client} label={client}>
+                      {byClient[client].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(i => (
+                        <option key={i.id} value={i.id}>{i.number} — {money(invoiceTotal(i) - (i.paid || 0))} pendiente</option>
+                      ))}
+                    </optgroup>
+                  ));
+                })()}
               </select>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancelar</button>
