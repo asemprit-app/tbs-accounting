@@ -516,6 +516,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
+  const [bulkSourceGL, setBulkSourceGL] = useState('');
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -622,6 +623,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
 
   function updateGL(id, gl) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, gl, status: 'AUTO' } : t));
+  }
+  function updateSourceGL(id, sourceGL) {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t));
+  }
+  function applyBulkAccount() {
+    if (!bulkSourceGL || selected.length === 0) return;
+    setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, sourceGL: bulkSourceGL } : t));
+    setSelected([]);
+    setBulkSourceGL('');
   }
   function confirmRow(id) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: t.gl ? 'AUTO' : 'REVIEW' } : t));
@@ -802,6 +812,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select>
             <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
+            <select value={bulkSourceGL} onChange={e => setBulkSourceGL(e.target.value)}>
+              <option value="">Choose account...</option>
+              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+            <button onClick={applyBulkAccount} disabled={!bulkSourceGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Set account</button>
             <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
             <button onClick={() => setSelected([])} style={iconBtn}>Cancel selection</button>
           </div>
@@ -835,7 +850,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
                 <td style={{ padding: '6px 4px' }}>{t.description}</td>
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
-                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>{t.sourceGL ? glName(t.sourceGL) : '—'}</td>
+                <td style={{ padding: '6px 4px' }}>
+                  <select value={t.sourceGL || ''} onChange={e => updateSourceGL(t.id, e.target.value)}>
+                    <option value="">—</option>
+                    {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                  </select>
+                </td>
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
                     <option value="">Uncategorized</option>
