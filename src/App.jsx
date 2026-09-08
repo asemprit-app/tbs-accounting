@@ -1245,7 +1245,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
               <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{n}</td>
                 <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
-                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Status of cuenta</button></td>
+                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button></td>
               </tr>
             ))}
           </tbody>
@@ -1265,7 +1265,7 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
       <div style={{ background: '#fff', width: 560, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Status of cuenta — {client}</div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Statement — {client}</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Imprimir / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
@@ -1273,7 +1273,7 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
         </div>
         <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Status of cuenta al {todayStr()}</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Statement as of {todayStr()}</div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
@@ -1398,8 +1398,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     byMonth.forEach(([m, v]) => { csv += `${m},${v.revenue.toFixed(2)},${v.expense.toFixed(2)},${(v.revenue - v.expense).toFixed(2)}\n`; });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
-    const to = document.createElement('a');
-    a.href = url; a.download = 'reporte_mensual.csv'; a.click();
+    const a = document.createElement('a');
+    a.href = url; a.download = 'monthly_report.csv'; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -1408,8 +1408,15 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     ['this_year', 'This year'], ['custom', 'Custom'],
   ];
 
-  const Row = ({ label, value, bold }) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, fontWeight: bold ? 700 : 400 }}>
+  const [drillDown, setDrillDown] = useState(null); // { gl, label, mode: 'period' | 'asOf' }
+
+  const Row = ({ label, value, bold, gl, mode }) => (
+    <div
+      onClick={gl ? () => setDrillDown({ gl, label, mode }) : undefined}
+      style={{
+        display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, fontWeight: bold ? 700 : 400,
+        cursor: gl ? 'pointer' : 'default', color: gl ? '#0C447C' : 'inherit', textDecoration: gl ? 'underline' : 'none',
+      }}>
       <span>{label}</span><span>{money(value)}</span>
     </div>
   );
@@ -1443,11 +1450,11 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Status of Resultados)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
-          {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} />}
           <Row label="Total Revenue" value={totalRevenue} bold />
           <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
-          {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           <Row label="Total Expenses" value={totalExpense} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Net Income" value={netIncome} bold />
@@ -1457,13 +1464,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (as of {to})</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Assets</div>
-          {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Assets" value={totalAssets} bold />
           <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Liabilities</div>
-          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Liabilities" value={totalLiabilities} bold />
           <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
-          {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} />)}
+          {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Period income" value={netIncome} />
           <Row label="Total Equity" value={totalEquity} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
@@ -1531,7 +1538,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Accounts Payable)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Current balance of your liability accounts (cards, payroll, and taxes payable)</div>
-          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} />)}
+          {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} gl={r.code} mode="asOf" />)}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Total A/P" value={-totalLiabilities} bold />
           </div>
@@ -1605,6 +1612,66 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         </table>
         {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the report.</div>}
       </Card>
+
+      {drillDown && (() => {
+        const { gl, label, mode } = drillDown;
+        const items = [];
+        transactions.forEach(t => {
+          if (t.gl !== gl) return;
+          if (mode === 'period' && (t.date < from || t.date > to)) return;
+          if (mode === 'asOf' && t.date > to) return;
+          const acct = accounts.find(a => a.code === gl);
+          const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
+          items.push({ id: t.id, date: t.date, description: t.description, amount, type: 'Transaction' });
+        });
+        journalEntries.forEach(je => {
+          je.lines.forEach(l => {
+            if (l.gl !== gl) return;
+            if (mode === 'period' && (je.date < from || je.date > to)) return;
+            if (mode === 'asOf' && je.date > to) return;
+            const acct = accounts.find(a => a.code === gl);
+            const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
+            const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
+            const amount = isDebitSide ? (debit - credit) : (credit - debit);
+            items.push({ id: `je-${je.id}`, date: je.date, description: `Journal Entry — ${je.memo || l.desc || 'no memo'}`, amount, type: 'Journal Entry' });
+          });
+        });
+        items.sort((a, b) => a.date.localeCompare(b.date));
+        const total = items.reduce((s, i) => s + i.amount, 0);
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+            <Card style={{ width: 640, maxHeight: '85vh', overflow: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ fontWeight: 600 }}>{label}</div>
+                <button onClick={() => setDrillDown(null)} style={iconBtn}><X size={14} /></button>
+              </div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+                {mode === 'period' ? `Activity from ${from} to ${to}` : `Balance as of ${to}`} — {items.length} item{items.length === 1 ? '' : 's'}
+              </div>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+                  <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
+                  <th style={{ padding: '4px' }}>Source</th><th style={{ padding: '4px', textAlign: 'right' }}>Amount</th>
+                </tr></thead>
+                <tbody>
+                  {items.map(i => (
+                    <tr key={i.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                      <td style={{ padding: '4px' }}>{i.date}</td>
+                      <td style={{ padding: '4px' }}>{i.description}</td>
+                      <td style={{ padding: '4px' }}>{i.type}</td>
+                      <td style={{ padding: '4px', textAlign: 'right' }}>{money(i.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {items.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions or journal entries behind this number.</div>}
+              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 10, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 13 }}>
+                <span>Total</span><span>{money(total)}</span>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }
