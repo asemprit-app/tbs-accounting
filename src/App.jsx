@@ -1027,6 +1027,23 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
   const [payingId, setPayingId] = useState(null);
   const [payAmount, setPayAmount] = useState('');
   const [payError, setPayError] = useState('');
+  const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
+
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      if (filters.search.trim()) {
+        const q = filters.search.trim().toUpperCase();
+        if (!inv.number.toUpperCase().includes(q) && !inv.client.toUpperCase().includes(q)) return false;
+      }
+      if (filters.dateFrom && inv.date < filters.dateFrom) return false;
+      if (filters.dateTo && inv.date > filters.dateTo) return false;
+      if (filters.status && inv.status !== filters.status) return false;
+      return true;
+    });
+  }, [invoices, filters]);
+  const filtersActive = filters.search.trim() || filters.dateFrom || filters.dateTo || filters.status;
+  const filteredTotal = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv), 0);
+  const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
   function applyPayment(inv) {
     const amt = Number(payAmount);
@@ -1116,6 +1133,36 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
         </Card>
       )}
 
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search (invoice # or customer)</label>
+            <input style={{ width: '100%' }} placeholder="E.g. 3133, Bivona's..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} />
+          </div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
+            <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
+            <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Status</label>
+            <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
+              <option value="">All</option>
+              <option value="Pending">Pending</option>
+              <option value="Partial">Partial</option>
+              <option value="Paid">Paid</option>
+            </select></div>
+          {filtersActive && (
+            <button onClick={() => setFilters({ search: '', dateFrom: '', dateTo: '', status: '' })} style={iconBtn}>Clear filters</button>
+          )}
+        </div>
+        {filtersActive && (
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10, display: 'flex', gap: 16 }}>
+            <span>{filteredInvoices.length} of {invoices.length} invoices</span>
+            <span>Total: <strong>{money(filteredTotal)}</strong></span>
+            <span>Outstanding balance: <strong>{money(filteredBalance)}</strong></span>
+          </div>
+        )}
+      </Card>
+
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead>
@@ -1129,7 +1176,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
             </tr>
           </thead>
           <tbody>
-            {invoices.slice().reverse().map(inv => (
+            {filteredInvoices.slice().reverse().map(inv => (
               <tr key={inv.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{inv.number}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.client}</td>
@@ -1145,8 +1192,17 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
               </tr>
             ))}
           </tbody>
+          {filteredInvoices.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                <td colSpan={3} style={{ padding: '6px 4px' }}>Total ({filteredInvoices.length})</td>
+                <td style={{ padding: '6px 4px' }}>{money(filteredTotal)}</td>
+                <td colSpan={2} style={{ padding: '6px 4px' }}>Outstanding: {money(filteredBalance)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
-        {invoices.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No invoices yet.</div>}
+        {filteredInvoices.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{invoices.length === 0 ? 'No invoices yet.' : 'No invoices match these filters.'}</div>}
       </Card>
 
       {payingId && (() => {
