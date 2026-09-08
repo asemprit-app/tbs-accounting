@@ -403,7 +403,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
-        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} />}
+        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries} />}
         </>
         )}
       </div>
@@ -1807,7 +1807,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   );
 }
 
-function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts }) {
+function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts, journalEntries }) {
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
@@ -1832,9 +1832,29 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     setSelected(prev => prev.filter(x => x !== id));
   }
 
-  // la cuenta de origen (sourceGL) es la que refleja de verdad qué banco/tarjeta movió el dinero
+  // la cuenta de origen (sourceGL) es la que refleja de verdad qué banco/tarjeta movió el dinero;
+  // además, cualquier journal entry manual que toque esta misma cuenta también debe contar
+  function jeAmountFor(gl, line) {
+    const acct = accounts.find(a => a.code === gl);
+    const debit = Number(line.debit) || 0, credit = Number(line.credit) || 0;
+    const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
+    return isDebitSide ? (debit - credit) : (credit - debit);
+  }
+  function jePostingsFor(gl, periodEnd) {
+    const list = [];
+    journalEntries.forEach(je => {
+      if (je.date > periodEnd) return;
+      je.lines.forEach(l => {
+        if (l.gl !== gl) return;
+        list.push({ id: `je-${je.id}-${l.gl}`, date: je.date, description: `Journal Entry — ${je.memo || l.desc || 'no memo'}`, amount: jeAmountFor(gl, l), isJE: true });
+      });
+    });
+    return list;
+  }
   function ledgerBalanceFor(gl, periodEnd) {
-    return transactions.filter(t => t.sourceGL === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
+    const txTotal = transactions.filter(t => t.sourceGL === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
+    const jeTotal = jePostingsFor(gl, periodEnd).reduce((s, p) => s + p.amount, 0);
+    return txTotal + jeTotal;
   }
 
   function runReconciliation() {
@@ -1942,7 +1962,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
       {reviewingId && (() => {
         const r = reconciliations.find(x => x.id === reviewingId);
         if (!r) return null;
-        const periodTx = transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd).sort((a, b) => a.date.localeCompare(b.date));
+        const periodTx = [
+          ...transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd),
+          ...jePostingsFor(r.gl, r.periodEnd),
+        ].sort((a, b) => a.date.localeCompare(b.date));
         const liveLedger = periodTx.filter(t => verified.includes(t.id)).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
         return (
@@ -1973,15 +1996,26 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   {periodTx.map(t => (
                     <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: verified.includes(t.id) ? '#EAF3DE' : 'transparent' }}>
                       <td style={{ padding: '4px' }}><input type="checkbox" checked={verified.includes(t.id)} onChange={() => toggleVerified(t.id)} /></td>
-                      <td style={{ padding: '4px' }}><input type="date" style={{ width: 130 }} value={t.date} onChange={e => editTxDate(t.id, e.target.value)} /></td>
-                      <td style={{ padding: '4px' }}>{t.description}</td>
-                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={t.amount} onChange={e => editTxAmount(t.id, e.target.value)} /></td>
-                      <td style={{ padding: '4px' }}>
-                        <select value={t.sourceGL || ''} onChange={e => editTxAccount(t.id, e.target.value)}>
-                          <option value="">—</option>
-                          {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
-                        </select>
-                      </td>
+                      {t.isJE ? (
+                        <>
+                          <td style={{ padding: '4px' }}>{t.date}</td>
+                          <td style={{ padding: '4px' }}>{t.description} <span style={{ fontSize: 10, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
+                          <td style={{ padding: '4px' }}>{money(t.amount)}</td>
+                          <td style={{ padding: '4px', color: '#6B7280', fontSize: 12 }}>—</td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: '4px' }}><input type="date" style={{ width: 130 }} value={t.date} onChange={e => editTxDate(t.id, e.target.value)} /></td>
+                          <td style={{ padding: '4px' }}>{t.description}</td>
+                          <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={t.amount} onChange={e => editTxAmount(t.id, e.target.value)} /></td>
+                          <td style={{ padding: '4px' }}>
+                            <select value={t.sourceGL || ''} onChange={e => editTxAccount(t.id, e.target.value)}>
+                              <option value="">—</option>
+                              {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                            </select>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
