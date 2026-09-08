@@ -1813,6 +1813,24 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [error, setError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
   const [verified, setVerified] = useState([]);
+  const [selected, setSelected] = useState([]);
+
+  function toggleSelect(id) {
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function toggleSelectAll() {
+    const ids = reconciliations.map(r => r.id);
+    const allSelected = ids.length > 0 && ids.every(id => selected.includes(id));
+    setSelected(allSelected ? [] : ids);
+  }
+  function deleteSelected() {
+    setReconciliations(prev => prev.filter(r => !selected.includes(r.id)));
+    setSelected([]);
+  }
+  function deleteOne(id) {
+    setReconciliations(prev => prev.filter(r => r.id !== id));
+    setSelected(prev => prev.filter(x => x !== id));
+  }
 
   // la cuenta de origen (sourceGL) es la que refleja de verdad qué banco/tarjeta movió el dinero
   function ledgerBalanceFor(gl, periodEnd) {
@@ -1874,24 +1892,40 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
+      {selected.length > 0 && (
+        <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
+            <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
+            <button onClick={() => setSelected([])} style={iconBtn}>Cancel selection</button>
+          </div>
+        </Card>
+      )}
       <Card style={{ marginBottom: 20 }}>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>
+              <input type="checkbox" checked={reconciliations.length > 0 && reconciliations.every(r => selected.includes(r.id))} onChange={toggleSelectAll} />
+            </th>
             <th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>As of</th>
             <th style={{ padding: '6px 4px' }}>Statement</th><th style={{ padding: '6px 4px' }}>Book</th>
             <th style={{ padding: '6px 4px' }}>Difference</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
             {reconciliations.slice().reverse().map(r => (
-              <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+              <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3', background: selected.includes(r.id) ? '#F0F5FA' : 'transparent' }}>
+                <td style={{ padding: '6px 4px' }}>
+                  <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggleSelect(r.id)} />
+                </td>
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
                 <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
                 <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'AUTO' : 'REVIEW'} /></td>
-                <td style={{ padding: '6px 4px' }}>
+                <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
+                  <button onClick={() => deleteOne(r.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
             ))}
