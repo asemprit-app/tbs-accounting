@@ -1440,6 +1440,43 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
 
+  // ---- Full Cash Flow Statement (approximates the Sales/Purchases/Payroll/Owners grouping used by Wave) ----
+  function dayBefore(dateStr) {
+    const d = new Date(dateStr); d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+  const isPayrollLiability = a => a.type === 'Liability' && /payroll|s&w|fica|sinot|income tax/i.test(a.name);
+  const otherLiabilityAccts = liabilityAccts.filter(a => !isPayrollLiability(a));
+  const payrollLiabilityAccts = liabilityAccts.filter(isPayrollLiability);
+  const otherAssetAccts = assetAccts.filter(a => !cashAccts.includes(a) && !/receivable/i.test(a.name));
+
+  const cfSalesRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const cfTotalSales = cfSalesRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
+  const cfPurchaseRows = [
+    ...expenseAccts.filter(a => !/wages|s&w|payroll/i.test(a.name)).map(a => ({ ...a, value: -activityInPeriod(a.code, from, to) })),
+    ...otherLiabilityAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) })),
+  ];
+  const cfTotalPurchases = cfPurchaseRows.reduce((s, r) => s + r.value, 0);
+  const cfPayrollRows = [
+    ...expenseAccts.filter(a => /wages|s&w|payroll/i.test(a.name)).map(a => ({ ...a, value: -activityInPeriod(a.code, from, to) })),
+    ...payrollLiabilityAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) })),
+  ];
+  const cfTotalPayroll = cfPayrollRows.reduce((s, r) => s + r.value, 0);
+  const cfOperating = cfTotalSales + cfTotalPurchases + cfTotalPayroll;
+
+  const cfInvestingRows = otherAssetAccts.map(a => ({ ...a, value: -activityInPeriod(a.code, from, to) }));
+  const cfInvesting = cfInvestingRows.reduce((s, r) => s + r.value, 0);
+
+  const cfFinancingRows = equityAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const cfFinancing = cfFinancingRows.reduce((s, r) => s + r.value, 0);
+
+  const cfStartingRows = cashAccts.map(a => ({ ...a, value: balanceAsOf(a.code, dayBefore(from)) }));
+  const cfTotalStarting = cfStartingRows.reduce((s, r) => s + r.value, 0);
+  const cfEndingRows = cashAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
+  const cfTotalEnding = cfEndingRows.reduce((s, r) => s + r.value, 0);
+  const cfGrossInflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount > 0).reduce((s, p) => s + p.amount, 0);
+  const cfGrossOutflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount < 0).reduce((s, p) => s + p.amount, 0);
+
   const byMonth = useMemo(() => {
     const map = {};
     transactions.forEach(t => {
@@ -1509,7 +1546,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
       </Card>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Status of Resultados)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
@@ -1540,20 +1577,68 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             <Row label="Liabilities + Equity" value={totalLiabilities + totalEquity} bold />
           </div>
         </Card>
-
-        <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>Cash Flow (direct method)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Cambio en cuentas of banco/efectivo</div>
-          {cashRows.map(r => <Row key={r.code} label={r.name} value={r.change} gl={r.code} mode="period" />)}
-          {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280' }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
-          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
-            <Row label="Net Change in Cash" value={netCashChange} bold />
-          </div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
-            This calculation directly sums your bank account movements for the period — it doesn't yet separate operating/investing/financing activities.
-          </div>
-        </Card>
       </div>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Cash Flow</div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>{from} to {to}</div>
+
+        <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', marginBottom: 4 }}>Operating Activities</div>
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Sales</div>
+        {cfSalesRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
+        {invoiceRevenueInPeriod !== 0 && <div style={{ paddingLeft: 16 }}><Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} /></div>}
+        <div style={{ paddingLeft: 16 }}><Row label="Total Sales" value={cfTotalSales} bold /></div>
+
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Purchases</div>
+        {cfPurchaseRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
+        <div style={{ paddingLeft: 16 }}><Row label="Total Purchases" value={cfTotalPurchases} bold /></div>
+
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Payroll</div>
+        {cfPayrollRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
+        {cfPayrollRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No payroll activity in this period.</div>}
+        <div style={{ paddingLeft: 16 }}><Row label="Total Payroll" value={cfTotalPayroll} bold /></div>
+
+        <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+          <Row label="Net Cash from Operating Activities" value={cfOperating} bold />
+        </div>
+
+        <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Investing Activities</div>
+        {cfInvestingRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
+        {cfInvestingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No investing activity in this period.</div>}
+        <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+          <Row label="Net Cash from Investing Activities" value={cfInvesting} bold />
+        </div>
+
+        <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Financing Activities</div>
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Owners and Shareholders</div>
+        {cfFinancingRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
+        {cfFinancingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No financing activity in this period.</div>}
+        <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+          <Row label="Net Cash from Financing Activities" value={cfFinancing} bold />
+        </div>
+
+        <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Overview</div>
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Starting Balance (as of {dayBefore(from)})</div>
+        {cfStartingRows.map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="asOf" /></div>)}
+        <div style={{ paddingLeft: 16 }}><Row label="Total Starting Balance" value={cfTotalStarting} bold /></div>
+
+        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Ending Balance (as of {to})</div>
+        {cfEndingRows.map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="asOf" /></div>)}
+        <div style={{ paddingLeft: 16 }}><Row label="Total Ending Balance" value={cfTotalEnding} bold /></div>
+
+        <div style={{ paddingLeft: 8, marginTop: 10 }}>
+          <Row label="Gross Cash Inflow" value={cfGrossInflow} />
+          <Row label="Gross Cash Outflow" value={cfGrossOutflow} />
+          <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 4, paddingTop: 4 }}>
+            <Row label="Net Cash Change" value={netCashChange} bold />
+          </div>
+        </div>
+
+        {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10 }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
+        <div style={{ fontSize: 11, color: '#6B7280', marginTop: 14 }}>
+          Purchases/Payroll/Investing/Financing groupings are approximated from your account types and names (Wages/Payroll/FICA/SINOT/Income Tax → Payroll; other liabilities → Purchases; other assets → Investing; equity → Financing). Click any line to see the transactions behind it.
+        </div>
+      </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
