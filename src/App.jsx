@@ -267,7 +267,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
-        setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount) })));
+        setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount), sourceGL: row.source_gl })));
         setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0 })));
         setCustomersRaw(c.data || []);
         setAccountsRaw(a.data || []);
@@ -283,7 +283,8 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const setTransactions = useCallback((updater) => {
     setTransactionsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      diffSync('transactions', prev, next.map(({ ...r }) => r), clientId);
+      const toDb = arr => arr.map(t => ({ id: t.id, date: t.date, description: t.description, amount: t.amount, gl: t.gl, status: t.status, source_gl: t.sourceGL || null }));
+      diffSync('transactions', toDb(prev), toDb(next), clientId);
       return next;
     });
   }, []);
@@ -499,7 +500,7 @@ function Dashboard({ summary, transactions, invoices }) {
 }
 
 function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions }) {
-  const [form, setForm] = useState({ date: todayStr(), description: '', amount: '' });
+  const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState('');
@@ -521,7 +522,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.dateFrom && t.date < filters.dateFrom) return false;
       if (filters.dateTo && t.date > filters.dateTo) return false;
       if (filters.gl === '__uncat__' && t.gl) return false;
-      if (filters.gl && filters.gl !== '__uncat__' && t.gl !== filters.gl) return false;
+      if (filters.gl === '__uncat_income__' && (t.gl || t.amount < 0)) return false;
+      if (filters.gl === '__uncat_expense__' && (t.gl || t.amount >= 0)) return false;
+      if (filters.gl && !filters.gl.startsWith('__uncat') && t.gl !== filters.gl) return false;
       const abs = Math.abs(t.amount);
       if (filters.amountMin && abs < Number(filters.amountMin)) return false;
       if (filters.amountMax && abs > Number(filters.amountMax)) return false;
@@ -595,10 +598,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     const newTx = rows.map(r => {
       if (r.gl !== undefined) {
         // category row (Wave) already comes with gl/mode resolved
-        return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl: r.gl, status: r.mode };
+        return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl: r.gl, status: r.mode, sourceGL: importCardGL || null };
       }
       const { gl, mode } = suggestGL(r.description, rules);
-      return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl, status: mode };
+      return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl, status: mode, sourceGL: importCardGL || null };
     });
     setTransactions(prev => [...prev, ...newTx]);
     setCsvText('');
@@ -612,9 +615,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     }
     setError('');
     const { gl, mode } = suggestGL(form.description, rules);
-    const t = { id: uid(), date: form.date, description: form.description.trim(), amount: Number(form.amount), gl, status: mode };
+    const t = { id: uid(), date: form.date, description: form.description.trim(), amount: Number(form.amount), gl, status: mode, sourceGL: form.sourceGL || null };
     setTransactions(prev => [...prev, t]);
-    setForm({ date: todayStr(), description: '', amount: '' });
+    setForm({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   }
 
   function updateGL(id, gl) {
@@ -696,6 +699,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 {accounts.filter(a => a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
               </select>
             )}
+            {importSource === 'bank' && (
+              <select value={importCardGL} onChange={e => setImportCardGL(e.target.value)}>
+                <option value="">Which bank account is this?</option>
+                {accounts.filter(a => a.type === 'Asset').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              </select>
+            )}
           </div>
           <textarea rows={6} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
             placeholder={'2026-09-05,RESTAURANTE GUSTO SEVILLA,-45.20\n2026-09-06,EFT DEPOSIT CLIENTE ABC,850.00'}
@@ -723,6 +732,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <input type="number" step="0.01" style={{ width: 120 }} placeholder="0.00" value={form.amount}
               onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
           </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account (bank/card)</label>
+            <select value={form.sourceGL} onChange={e => setForm(f => ({ ...f, sourceGL: e.target.value }))}>
+              <option value="">—</option>
+              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
           <button onClick={addTransaction} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> Add
           </button>
@@ -743,7 +759,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Category</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
               <option value="">All</option>
-              <option value="__uncat__">Uncategorized</option>
+              <option value="__uncat__">Uncategorized (all)</option>
+              <option value="__uncat_income__">Uncategorized Income</option>
+              <option value="__uncat_expense__">Uncategorized Expenses</option>
               {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Min. amount</label>
@@ -802,6 +820,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <th style={{ padding: '6px 4px' }}>Date</th>
               <th style={{ padding: '6px 4px' }}>Description</th>
               <th style={{ padding: '6px 4px' }}>Amount</th>
+              <th style={{ padding: '6px 4px' }}>Account</th>
               <th style={{ padding: '6px 4px' }}>Category</th>
               <th style={{ padding: '6px 4px' }}>Status</th>
               <th style={{ padding: '6px 4px' }}></th>
@@ -816,6 +835,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
                 <td style={{ padding: '6px 4px' }}>{t.description}</td>
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
+                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>{t.sourceGL ? glName(t.sourceGL) : '—'}</td>
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
                     <option value="">Uncategorized</option>
