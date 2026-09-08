@@ -127,21 +127,10 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
-function ReportHeader({ businessName, reportName, periodStart, periodEnd, logoUrl }) {
+function ReportHeader({ businessName, reportName, periodStart, periodEnd }) {
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: '#FFFFFF', color: '#1B2333', width: '100%', boxSizing: 'border-box', marginBottom: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: 8, border: logoUrl ? 'none' : '1.5px dashed #C7CCD6',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-          background: logoUrl ? 'transparent' : '#F7F8FA', flexShrink: 0,
-        }}>
-          {logoUrl ? (
-            <img src={logoUrl} alt={businessName + ' logo'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          ) : (
-            <span style={{ fontSize: 10, color: '#9AA1AE', textAlign: 'center', lineHeight: 1.2 }}>logo</span>
-          )}
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 22 }}>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 11, letterSpacing: '0.02em', color: '#8A93A3', marginBottom: 3 }}>Report period</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#1B2333' }}>{periodStart} — {periodEnd}</div>
