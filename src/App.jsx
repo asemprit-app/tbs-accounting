@@ -1861,6 +1861,11 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   function toggleVerified(id) {
     setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
+  function toggleVerifiedAll(periodTx) {
+    const ids = periodTx.map(t => t.id);
+    const allChecked = ids.length > 0 && ids.every(id => verified.includes(id));
+    setVerified(allChecked ? verified.filter(id => !ids.includes(id)) : Array.from(new Set([...verified, ...ids])));
+  }
   function editTxDate(id, date) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t)); }
   function editTxAmount(id, amount) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t)); }
   function editTxAccount(id, sourceGL) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t)); }
@@ -1958,7 +1963,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               </div>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-                  <th style={{ padding: '4px' }}></th><th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
+                  <th style={{ padding: '4px' }}>
+                    <input type="checkbox" checked={periodTx.length > 0 && periodTx.every(t => verified.includes(t.id))} onChange={() => toggleVerifiedAll(periodTx)} />
+                  </th>
+                  <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
                   <th style={{ padding: '4px' }}>Amount</th><th style={{ padding: '4px' }}>Account</th>
                 </tr></thead>
                 <tbody>
