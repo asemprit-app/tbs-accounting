@@ -30,15 +30,42 @@ function parseAmount(raw) {
   return negative ? -Math.abs(n) : n;
 }
 
+const STOPWORDS = new Set(['and', 'the', 'of', 'for', 'a', 'de', 'y', 'la', 'el', 'en', 'expense', 'expenses']);
+
+const CATEGORY_ALIASES = {
+  'computer internet': 'Software, Technology Tools and Subscriptions',
+  'telephone wireless': 'Telecommunications Expense',
+  'uncategorized expense': 'Other Expenses',
+  'uncategorized income': 'Service Revenue',
+  'vehicle registration': 'Automobile Expense',
+  'vehicle toll': 'Parking and Tolls',
+  'vehicle fuel': 'Automobile Expense',
+};
+
 function matchAccountByName(text, accounts) {
   const t = text.trim().toLowerCase();
   let best = accounts.find(a => a.name.toLowerCase() === t);
   if (best) return best.code;
   best = accounts.find(a => t.includes(a.name.toLowerCase()) || a.name.toLowerCase().includes(t));
-  return best ? best.code : '';
+  if (best) return best.code;
+  const key = t.replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+  if (CATEGORY_ALIASES[key]) {
+    const alias = accounts.find(a => a.name === CATEGORY_ALIASES[key]);
+    if (alias) return alias.code;
+  }
+  // tercer intento: comparar por palabras significativas compartidas
+  const words = t.split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOPWORDS.has(w));
+  if (words.length === 0) return '';
+  let bestScore = 0, bestCode = '';
+  accounts.forEach(a => {
+    const aWords = a.name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOPWORDS.has(w));
+    const shared = words.filter(w => aWords.includes(w)).length;
+    if (shared > bestScore) { bestScore = shared; bestCode = a.code; }
+  });
+  return bestScore > 0 ? bestCode : '';
 }
 
-function parseBankCSV(text, accounts, rules) {
+function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
@@ -53,7 +80,7 @@ function parseBankCSV(text, accounts, rules) {
     if (cols.length >= 4) {
       // formato con categoría (ej. export de Wave): fecha,descripción,categoría,monto
       const category = cols[2];
-      const amount = parseAmount(cols[3]);
+      let amount = parseAmount(cols[3]);
       if (amount === null) continue;
       let gl = '';
       let mode = 'REVIEW';
@@ -64,6 +91,10 @@ function parseBankCSV(text, accounts, rules) {
         // guarda la referencia de Wave como nota visible, para vincular manualmente después
         const m = category.match(/Invoice #(\S+)\s*\|\s*Payment from (.+)$/i);
         if (m) finalDesc = `${description} (Wave: Factura #${m[1]} — ${m[2].replace(/\s*\+\s*\d+$/, '')})`;
+      } else if (/^Transfer (from|to)\s+/i.test(category) && source === 'card' && cardGL) {
+        // en un import de tarjeta, un "Transfer" es un pago hacia/desde la tarjeta misma
+        gl = cardGL;
+        mode = 'MATCH';
       } else if (/^Refund for /i.test(category)) {
         gl = matchAccountByName(category.replace(/^Refund for /i, ''), accounts);
         mode = gl ? 'AUTO' : 'REVIEW';
@@ -75,6 +106,12 @@ function parseBankCSV(text, accounts, rules) {
       if (!gl) {
         const bySuggest = suggestGL(description, rules);
         if (bySuggest.gl) { gl = bySuggest.gl; mode = bySuggest.mode; }
+      }
+      // en tarjeta de crédito, un cargo (gasto) llega positivo — hay que invertirlo para que
+      // el signo interno sea consistente (negativo = gasto), igual que en el formato de banco.
+      if (source === 'card' && gl) {
+        const acct = accounts.find(a => a.code === gl);
+        if (acct?.type === 'Expense') amount = -amount;
       }
       rows.push({ date, description: finalDesc, amount, gl, mode, rawCategory: category });
     } else {
@@ -460,9 +497,11 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
   const [splitError, setSplitError] = useState('');
   const [linkingId, setLinkingId] = useState(null);
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
+  const [importSource, setImportSource] = useState('bank');
+  const [importCardGL, setImportCardGL] = useState('');
 
   function importCSV() {
-    const rows = parseBankCSV(csvText, accounts, rules);
+    const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
     if (rows.length === 0) {
       setImportError('No se reconoció ninguna fila válida. Formato esperado: fecha,descripción,monto — o fecha,descripción,categoría,monto (export de Wave).');
       return;
@@ -556,7 +595,22 @@ function TransactionsView({ transactions, setTransactions, rules, glName, accoun
       {showImport && (
         <Card style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>
-            Pega el contenido del CSV: una fila por línea, formato <code>fecha,descripción,monto</code> (monto negativo = salida, positivo = entrada).
+            Pega el contenido del CSV: una fila por línea, formato <code>fecha,descripción,monto</code> (monto negativo = salida, positivo = entrada) —
+            o <code>fecha,descripción,categoría,monto</code> (export de Wave).
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 10 }}>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="radio" checked={importSource === 'bank'} onChange={() => setImportSource('bank')} /> Banco (gastos negativos)
+            </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="radio" checked={importSource === 'card'} onChange={() => setImportSource('card')} /> Tarjeta de crédito (gastos positivos)
+            </label>
+            {importSource === 'card' && (
+              <select value={importCardGL} onChange={e => setImportCardGL(e.target.value)}>
+                <option value="">¿Cuál tarjeta es esta?</option>
+                {accounts.filter(a => a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              </select>
+            )}
           </div>
           <textarea rows={6} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
             placeholder={'2026-09-05,RESTAURANTE GUSTO SEVILLA,-45.20\n2026-09-06,EFT DEPOSIT CLIENTE ABC,850.00'}
