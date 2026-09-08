@@ -403,7 +403,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
-        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} accounts={accounts} />}
+        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} />}
         </>
         )}
       </div>
@@ -1807,13 +1807,16 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   );
 }
 
-function ReconciliationView({ reconciliations, setReconciliations, transactions, accounts }) {
+function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts }) {
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
+  const [reviewingId, setReviewingId] = useState(null);
+  const [verified, setVerified] = useState([]);
 
+  // la cuenta de origen (sourceGL) es la que refleja de verdad qué banco/tarjeta movió el dinero
   function ledgerBalanceFor(gl, periodEnd) {
-    return transactions.filter(t => t.gl === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
+    return transactions.filter(t => t.sourceGL === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
   }
 
   function runReconciliation() {
@@ -1828,6 +1831,21 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     }]);
     setForm({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   }
+
+  function refreshReconciliation(r) {
+    const ledgerBalance = ledgerBalanceFor(r.gl, r.periodEnd);
+    const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
+    const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
+    setReconciliations(prev => prev.map(x => x.id === r.id ? { ...x, ledgerBalance, difference, status } : x));
+  }
+
+  function openReview(id) { setReviewingId(id); setVerified([]); }
+  function toggleVerified(id) {
+    setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function editTxDate(id, date) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t)); }
+  function editTxAmount(id, amount) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t)); }
+  function editTxAccount(id, sourceGL) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t)); }
 
   return (
     <div>
@@ -1849,19 +1867,19 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             <input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Saldo del estado of cuenta</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Statement balance</label>
             <input type="number" step="0.01" style={{ width: 140 }} value={form.statementBalance} onChange={e => setForm(f => ({ ...f, statementBalance: e.target.value }))} />
           </div>
           <button onClick={runReconciliation} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Reconcile</button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
-      <Card>
+      <Card style={{ marginBottom: 20 }}>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Corte</th>
-            <th style={{ padding: '6px 4px' }}>Status of cuenta</th><th style={{ padding: '6px 4px' }}>Book</th>
-            <th style={{ padding: '6px 4px' }}>Difference</th><th style={{ padding: '6px 4px' }}>Status</th>
+            <th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>As of</th>
+            <th style={{ padding: '6px 4px' }}>Statement</th><th style={{ padding: '6px 4px' }}>Book</th>
+            <th style={{ padding: '6px 4px' }}>Difference</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
             {reconciliations.slice().reverse().map(r => (
@@ -1872,12 +1890,69 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
                 <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'AUTO' : 'REVIEW'} /></td>
+                <td style={{ padding: '6px 4px' }}>
+                  {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         {reconciliations.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No reconciliations yet.</div>}
       </Card>
+
+      {reviewingId && (() => {
+        const r = reconciliations.find(x => x.id === reviewingId);
+        if (!r) return null;
+        const periodTx = transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd).sort((a, b) => a.date.localeCompare(b.date));
+        const liveLedger = periodTx.reduce((s, t) => s + t.amount, 0);
+        const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+            <Card style={{ width: 820, maxHeight: '85vh', overflow: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ fontWeight: 600 }}>{accounts.find(a => a.code === r.gl)?.name} — as of {r.periodEnd}</div>
+                <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
+              </div>
+              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
+                <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
+                <span>Book (live): <strong>{money(liveLedger)}</strong></span>
+                <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
+                <span style={{ color: '#6B7280' }}>{verified.length} of {periodTx.length} verified</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+                Check off each transaction that matches your bank statement exactly. Edit the date, amount, or account on any that don't match, then click Recalculate.
+              </div>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+                  <th style={{ padding: '4px' }}></th><th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
+                  <th style={{ padding: '4px' }}>Amount</th><th style={{ padding: '4px' }}>Account</th>
+                </tr></thead>
+                <tbody>
+                  {periodTx.map(t => (
+                    <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: verified.includes(t.id) ? '#EAF3DE' : 'transparent' }}>
+                      <td style={{ padding: '4px' }}><input type="checkbox" checked={verified.includes(t.id)} onChange={() => toggleVerified(t.id)} /></td>
+                      <td style={{ padding: '4px' }}><input type="date" style={{ width: 130 }} value={t.date} onChange={e => editTxDate(t.id, e.target.value)} /></td>
+                      <td style={{ padding: '4px' }}>{t.description}</td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={t.amount} onChange={e => editTxAmount(t.id, e.target.value)} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <select value={t.sourceGL || ''} onChange={e => editTxAccount(t.id, e.target.value)}>
+                          <option value="">—</option>
+                          {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {periodTx.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
+                <button onClick={() => { refreshReconciliation(r); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 }
