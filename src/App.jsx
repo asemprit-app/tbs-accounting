@@ -127,6 +127,37 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
+function ReportHeader({ businessName, reportName, periodStart, periodEnd, logoUrl }) {
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: '#FFFFFF', color: '#1B2333', width: '100%', boxSizing: 'border-box', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: 8, border: logoUrl ? 'none' : '1.5px dashed #C7CCD6',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          background: logoUrl ? 'transparent' : '#F7F8FA', flexShrink: 0,
+        }}>
+          {logoUrl ? (
+            <img src={logoUrl} alt={businessName + ' logo'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          ) : (
+            <span style={{ fontSize: 10, color: '#9AA1AE', textAlign: 'center', lineHeight: 1.2 }}>logo</span>
+          )}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 11, letterSpacing: '0.02em', color: '#8A93A3', marginBottom: 3 }}>Report period</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1B2333' }}>{periodStart} — {periodEnd}</div>
+        </div>
+      </div>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontSize: 26, fontWeight: 600, color: '#14213D', lineHeight: 1.15, marginBottom: 6 }}>
+          {businessName}
+        </div>
+        <div style={{ fontSize: 15, color: '#5B6472', fontWeight: 500 }}>{reportName}</div>
+      </div>
+      <div style={{ height: 2, background: 'linear-gradient(90deg, #B08D57 0%, #E4D3B0 60%, transparent 100%)' }} />
+    </div>
+  );
+}
+
 function suggestGL(description, rules) {
   const desc = (description || '').toUpperCase();
   const hit = rules.find(r => desc.includes(r.keyword.toUpperCase()));
@@ -248,12 +279,13 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [journalEntries, setJournalEntriesRaw] = useState([]);
   const [reconciliations, setReconciliationsRaw] = useState([]);
   const [dismissedSuggestions, setDismissedSuggestionsRaw] = useState([]);
+  const [businessName, setBusinessName] = useState('');
   const [printInvoice, setPrintInvoice] = useState(null);
   const [statementClient, setStatementClient] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [t, i, c, a, r, j, rec, ds] = await Promise.all([
+      const results = await Promise.all([
         supabase.from('transactions').select('*').eq('client_id', clientId).order('date'),
         supabase.from('invoices').select('*').eq('client_id', clientId).order('date'),
         supabase.from('customers').select('*').eq('client_id', clientId),
@@ -262,7 +294,9 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         supabase.from('journal_entries').select('*').eq('client_id', clientId).order('date'),
         supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
         supabase.from('dismissed_suggestions').select('*').eq('client_id', clientId),
+        supabase.from('clients').select('name').eq('id', clientId).single(),
       ]);
+      const [t, i, c, a, r, j, rec, ds, cl] = results;
       const firstErr = [t, i, c, a, r, j, rec, ds].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
@@ -275,6 +309,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         setJournalEntriesRaw(j.data || []);
         setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end })));
         setDismissedSuggestionsRaw((ds.data || []).map(row => row.suggestion_key));
+        setBusinessName(cl?.data?.name || 'Business');
       }
       setLoaded(true);
     })();
@@ -371,7 +406,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onLogout={onLogout} userEmail={userEmail} />
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
@@ -400,7 +435,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
@@ -408,13 +443,13 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
         </>
         )}
       </div>
-      {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} />}
-      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} onClose={() => setStatementClient(null)} />}
+      {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} businessName={businessName} />}
+      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} onClose={() => setStatementClient(null)} businessName={businessName} />}
     </div>
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail, businessName }) {
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transactions', icon: Receipt, badge: reviewCount },
@@ -428,7 +463,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
   ];
   return (
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>TBS Accounting</div>
+      <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>{businessName || 'Accounting'}</div>
       {isStaff && (
         <select value={selectedClientId} onChange={e => onSwitchClient(e.target.value)}
           style={{ margin: '0 10px 16px', fontSize: 12, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
@@ -1297,7 +1332,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
   );
 }
 
-function InvoicePrintModal({ inv, total, onClose }) {
+function InvoicePrintModal({ inv, total, onClose, businessName }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
       className="no-print-overlay">
@@ -1309,9 +1344,8 @@ function InvoicePrintModal({ inv, total, onClose }) {
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
-        <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Invoice {inv.number} — {inv.date}</div>
+        <ReportHeader businessName={businessName} reportName={`Invoice ${inv.number}`} periodStart={inv.date} periodEnd={inv.date} logoUrl={null} />
+        <div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{inv.client}</strong></div>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
@@ -1380,7 +1414,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
   );
 }
 
-function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
+function CustomerStatementModal({ client, invoices, invoiceTotal, onClose, businessName }) {
   const rows = invoices.filter(i => i.client === client).sort((a, b) => a.date.localeCompare(b.date));
   const totalInvoiced = rows.reduce((s, i) => s + invoiceTotal(i), 0);
   const totalPaid = rows.reduce((s, i) => s + (i.paid || 0), 0);
@@ -1391,13 +1425,12 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Statement — {client}</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Imprimir / PDF</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
-        <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 20, color: '#17365D' }}>TBS ACCOUNTING</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>Statement as of {todayStr()}</div>
+        <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} periodStart={rows[0]?.date || todayStr()} periodEnd={todayStr()} logoUrl={null} />
+        <div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
@@ -1438,7 +1471,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries }) {
+function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries, businessName }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [showExportPreview, setShowExportPreview] = useState(false);
@@ -1967,9 +2000,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                   <button onClick={() => setShowExportPreview(false)} style={iconBtn}><X size={14} /></button>
                 </div>
               </div>
-              <div style={{ borderTop: '2px solid #17365D', paddingTop: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D' }}>TBS Accounting</div>
-                <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>{title}</div>
+              <ReportHeader businessName={businessName} reportName={title} periodStart={from} periodEnd={to} logoUrl={null} />
+              <div>
                 <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
                     {header.map(h => <th key={h} style={{ padding: '4px 6px', textAlign: h === header[header.length - 1] ? 'right' : 'left' }}>{h}</th>)}
