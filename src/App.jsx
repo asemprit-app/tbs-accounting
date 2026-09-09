@@ -330,7 +330,8 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   }, []);
   const setAccounts = useCallback((updater) => {
     setAccountsRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
+      let next = typeof updater === 'function' ? updater(prev) : updater;
+      next = next.slice().sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
       diffSyncByKey('accounts', 'code', prev, next, clientId);
       return next;
     });
@@ -419,7 +420,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} onPrintStatement={setStatementClient} />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} />}
-        {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} />}
+        {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
         {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries} />}
@@ -2014,7 +2015,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   );
 }
 
-function ChartOfAccountsView({ accounts, setAccounts }) {
+function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
   const [form, setForm] = useState({ code: '', name: '', type: 'Expense' });
   const [error, setError] = useState('');
   const [editingCode, setEditingCode] = useState(null);
@@ -2039,28 +2040,39 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Chart of Accounts</h2>
-      <Card style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Code</label>
-            <input style={{ width: 90 }} placeholder="6300" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
+
+      {!isMaster && (
+        <Card style={{ marginBottom: 20, background: '#FFF8E6', borderColor: '#F0D896' }}>
+          <div style={{ fontSize: 13, color: '#7A5B00' }}>
+            This chart of accounts is managed centrally from <strong>Twelve Business Strategies</strong> and kept in sync across all clients — it's read-only here to avoid conflicting edits.
           </div>
-          <div style={{ flex: 1, minWidth: 180 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Name</label>
-            <input style={{ width: '100%' }} placeholder="Account name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </Card>
+      )}
+
+      {isMaster && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Code</label>
+              <input style={{ width: 90 }} placeholder="6300" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Name</label>
+              <input style={{ width: '100%' }} placeholder="Account name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Type</label>
+              <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {types.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <button onClick={addAccount} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+              <Plus size={15} /> Add account
+            </button>
           </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Type</label>
-            <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-              {types.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <button onClick={addAccount} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-            <Plus size={15} /> Add cuenta
-          </button>
-        </div>
-        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-      </Card>
+          {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+        </Card>
+      )}
 
       {grouped.map(g => g.rows.length > 0 && (
         <Card key={g.type} style={{ marginBottom: 16 }}>
@@ -2071,15 +2083,17 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
                 <tr key={a.code} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   <td style={{ padding: '6px 4px', width: 80 }}>{a.code}</td>
                   <td style={{ padding: '6px 4px' }}>
-                    {editingCode === a.code ? (
+                    {isMaster && editingCode === a.code ? (
                       <input style={{ width: '100%' }} value={a.name} onChange={e => updateAccount(a.code, 'name', e.target.value)} onBlur={() => setEditingCode(null)} autoFocus />
                     ) : (
-                      <span onClick={() => setEditingCode(a.code)} style={{ cursor: 'pointer' }}>{a.name}</span>
+                      <span onClick={isMaster ? () => setEditingCode(a.code) : undefined} style={{ cursor: isMaster ? 'pointer' : 'default' }}>{a.name}</span>
                     )}
                   </td>
-                  <td style={{ padding: '6px 4px', width: 40 }}>
-                    <button onClick={() => removeAccount(a.code)} style={iconBtn}><Trash2 size={14} /></button>
-                  </td>
+                  {isMaster && (
+                    <td style={{ padding: '6px 4px', width: 40 }}>
+                      <button onClick={() => removeAccount(a.code)} style={iconBtn}><Trash2 size={14} /></button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
