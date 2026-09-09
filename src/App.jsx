@@ -338,7 +338,19 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
     setAccountsRaw(prev => {
       let next = typeof updater === 'function' ? updater(prev) : updater;
       next = next.slice().sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-      diffSyncByKey('accounts', 'code', prev, next, clientId);
+      // ojo: "code" se repite entre clientes (cada cliente tiene su propio 6050, etc.), así que
+      // cada operación debe ir siempre acompañada de client_id — nunca solo por code.
+      const prevMap = new Map(prev.map(x => [x.code, x]));
+      const nextMap = new Map(next.map(x => [x.code, x]));
+      const toDelete = prev.filter(x => !nextMap.has(x.code)).map(x => x.code);
+      const toInsert = next.filter(x => !prevMap.has(x.code)).map(x => ({ ...x, client_id: clientId }));
+      const toUpdate = next.filter(x => prevMap.has(x.code) && JSON.stringify(prevMap.get(x.code)) !== JSON.stringify(x));
+      if (toDelete.length) supabase.from('accounts').delete().eq('client_id', clientId).in('code', toDelete).then(({ error }) => error && console.error('accounts delete', error));
+      if (toInsert.length) supabase.from('accounts').insert(toInsert).then(({ error }) => error && console.error('accounts insert', error));
+      toUpdate.forEach(row => {
+        supabase.from('accounts').update({ name: row.name, type: row.type }).eq('client_id', clientId).eq('code', row.code)
+          .then(({ error }) => error && console.error('accounts update', error));
+      });
       return next;
     });
   }, []);
@@ -2025,6 +2037,7 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
   const [form, setForm] = useState({ code: '', name: '', type: 'Expense' });
   const [error, setError] = useState('');
   const [editingCode, setEditingCode] = useState(null);
+  const [editDraft, setEditDraft] = useState({ name: '', type: 'Expense' });
 
   function addAccount() {
     if (!form.code.trim() || !form.name.trim()) { setError('Enter a code and name.'); return; }
@@ -2035,6 +2048,14 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
   }
   function updateAccount(code, field, value) {
     setAccounts(prev => prev.map(a => a.code === code ? { ...a, [field]: value } : a));
+  }
+  function startEdit(a) {
+    setEditingCode(a.code);
+    setEditDraft({ name: a.name, type: a.type });
+  }
+  function saveEdit(code) {
+    setAccounts(prev => prev.map(a => a.code === code ? { ...a, name: editDraft.name, type: editDraft.type } : a));
+    setEditingCode(null);
   }
   function removeAccount(code) {
     setAccounts(prev => prev.filter(a => a.code !== code));
@@ -2087,18 +2108,33 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
             <tbody>
               {g.rows.map(a => (
                 <tr key={a.code} style={{ borderBottom: '1px solid #F0F1F3' }}>
-                  <td style={{ padding: '6px 4px', width: 80 }}>{a.code}</td>
-                  <td style={{ padding: '6px 4px' }}>
-                    {isMaster && editingCode === a.code ? (
-                      <input style={{ width: '100%' }} value={a.name} onChange={e => updateAccount(a.code, 'name', e.target.value)} onBlur={() => setEditingCode(null)} autoFocus />
-                    ) : (
-                      <span onClick={isMaster ? () => setEditingCode(a.code) : undefined} style={{ cursor: isMaster ? 'pointer' : 'default' }}>{a.name}</span>
-                    )}
-                  </td>
-                  {isMaster && (
-                    <td style={{ padding: '6px 4px', width: 40 }}>
-                      <button onClick={() => removeAccount(a.code)} style={iconBtn}><Trash2 size={14} /></button>
-                    </td>
+                  <td style={{ padding: '6px 4px', width: 80, color: '#6B7280' }}>{a.code}</td>
+                  {editingCode === a.code ? (
+                    <>
+                      <td style={{ padding: '6px 4px' }}>
+                        <input style={{ width: '100%' }} value={editDraft.name} onChange={e => setEditDraft(d => ({ ...d, name: e.target.value }))} autoFocus />
+                      </td>
+                      <td style={{ padding: '6px 4px', width: 130 }}>
+                        <select value={editDraft.type} onChange={e => setEditDraft(d => ({ ...d, type: e.target.value }))}>
+                          {types.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ padding: '6px 4px', width: 90, display: 'flex', gap: 4 }}>
+                        <button onClick={() => saveEdit(a.code)} style={iconBtn}><Check size={14} /></button>
+                        <button onClick={() => setEditingCode(null)} style={iconBtn}><X size={14} /></button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: '6px 4px' }}>{a.name}</td>
+                      <td style={{ padding: '6px 4px', width: 130, color: '#6B7280' }}>{a.type}</td>
+                      {isMaster && (
+                        <td style={{ padding: '6px 4px', width: 90, display: 'flex', gap: 4 }}>
+                          <button onClick={() => startEdit(a)} style={iconBtn}>Edit</button>
+                          <button onClick={() => removeAccount(a.code)} style={iconBtn}><Trash2 size={14} /></button>
+                        </td>
+                      )}
+                    </>
                   )}
                 </tr>
               ))}
