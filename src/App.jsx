@@ -188,7 +188,10 @@ export default function App() {
         if (data.role === 'staff') {
           const { data: cl } = await supabase.from('clients').select('*').order('name');
           setClients(cl || []);
-          if (cl && cl.length) setSelectedClientId(cl[0].id);
+          if (cl && cl.length) {
+            const defaultClient = cl.find(c => c.name === 'Twelve Business Strategies') || cl[0];
+            setSelectedClientId(defaultClient.id);
+          }
         } else {
           setSelectedClientId(data.client_id);
         }
