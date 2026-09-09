@@ -1771,7 +1771,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Income Statement)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
-          {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} />}
+          {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} gl="__invoices__" mode="period" />}
           <Row label="Total Revenue" value={totalRevenue} bold />
           <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
           {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
@@ -1806,7 +1806,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', marginBottom: 4 }}>Operating Activities</div>
         <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Sales</div>
         {cfSalesRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
-        {invoiceRevenueInPeriod !== 0 && <div style={{ paddingLeft: 16 }}><Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} /></div>}
+        {invoiceRevenueInPeriod !== 0 && <div style={{ paddingLeft: 16 }}><Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} gl="__invoices__" mode="period" /></div>}
         <div style={{ paddingLeft: 16 }}><Row label="Total Sales" value={cfTotalSales} bold /></div>
 
         <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Purchases</div>
@@ -1942,6 +1942,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       {drillDown && (() => {
         const { gl, label, mode } = drillDown;
         const items = [];
+        if (gl === '__invoices__') {
+          invoices.forEach(inv => {
+            if (mode === 'period' && (inv.date < from || inv.date > to)) return;
+            if (mode === 'asOf' && inv.date > to) return;
+            items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceTotal(inv), type: 'Invoice' });
+          });
+        } else {
         transactions.forEach(t => {
           const matchesCategory = t.gl === gl;
           const matchesSource = t.sourceGL === gl && t.sourceGL !== t.gl;
@@ -1969,6 +1976,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             items.push({ id: `je-${je.id}`, date: je.date, description: `Journal Entry — ${je.memo || l.desc || 'no memo'}`, amount, type: 'Journal Entry' });
           });
         });
+        }
         items.sort((a, b) => a.date.localeCompare(b.date));
         const total = items.reduce((s, i) => s + i.amount, 0);
         return (
