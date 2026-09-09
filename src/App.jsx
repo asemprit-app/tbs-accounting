@@ -512,7 +512,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
     byMonth.forEach(([m, v]) => { csv += `${m},${v.revenue.toFixed(2)},${v.expense.toFixed(2)},${(v.revenue - v.expense).toFixed(2)}\n`; });
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'monthly_trend.csv'; a.click();
@@ -1642,7 +1642,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     const { title, header, rows } = getReportData(selectedReport);
     let csv = businessName + '\n' + title + '\n\n' + header.join(',') + '\n';
     rows.forEach(r => { csv += r.map(v => typeof v === 'number' ? v.toFixed(2) : `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n'; });
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `${selectedReport}_${from}_to_${to}.csv`; a.click();
@@ -1668,7 +1668,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
     byMonth.forEach(([m, v]) => { csv += `${m},${v.revenue.toFixed(2)},${v.expense.toFixed(2)},${(v.revenue - v.expense).toFixed(2)}\n`; });
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'monthly_report.csv'; a.click();
@@ -2094,6 +2094,7 @@ function ChartOfAccountsView({ accounts, setAccounts }) {
 function RulesView({ rules, setRules, accounts }) {
   const [form, setForm] = useState({ keyword: '', gl: '', mode: 'AUTO' });
   const [error, setError] = useState('');
+  const [filters, setFilters] = useState({ keyword: '', gl: '' });
 
   function addRule() {
     if (!form.keyword.trim() || !form.gl) { setError('Enter the keyword and the account.'); return; }
@@ -2104,6 +2105,14 @@ function RulesView({ rules, setRules, accounts }) {
   function removeRule(id) {
     setRules(prev => prev.filter(r => r.id !== id));
   }
+  const filteredRules = useMemo(() => {
+    return rules.filter(r => {
+      if (filters.keyword.trim() && !r.keyword.toUpperCase().includes(filters.keyword.trim().toUpperCase())) return false;
+      if (filters.gl && r.gl !== filters.gl) return false;
+      return true;
+    });
+  }, [rules, filters]);
+  const filtersActive = filters.keyword.trim() || filters.gl;
 
   return (
     <div>
@@ -2133,18 +2142,39 @@ function RulesView({ rules, setRules, accounts }) {
             </select>
           </div>
           <button onClick={addRule} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-            <Plus size={15} /> Add regla
+            <Plus size={15} /> Add rule
           </button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Filter by keyword</label>
+            <input style={{ width: '100%' }} placeholder="Search keyword..." value={filters.keyword} onChange={e => setFilters(f => ({ ...f, keyword: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Filter by account</label>
+            <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
+              <option value="">All</option>
+              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
+          {filtersActive && (
+            <button onClick={() => setFilters({ keyword: '', gl: '' })} style={iconBtn}>Clear filters</button>
+          )}
+        </div>
+        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredRules.length} of {rules.length} rules</div>}
+      </Card>
+
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Keyword</th><th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Mode</th><th></th>
           </tr></thead>
           <tbody>
-            {rules.map(r => (
+            {filteredRules.map(r => (
               <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{r.keyword}</td>
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
@@ -2154,7 +2184,7 @@ function RulesView({ rules, setRules, accounts }) {
             ))}
           </tbody>
         </table>
-        {rules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No rules yet.</div>}
+        {filteredRules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{rules.length === 0 ? 'No rules yet.' : 'No rules match these filters.'}</div>}
       </Card>
     </div>
   );
