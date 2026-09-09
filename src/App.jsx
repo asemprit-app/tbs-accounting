@@ -189,7 +189,9 @@ export default function App() {
           const { data: cl } = await supabase.from('clients').select('*').order('name');
           setClients(cl || []);
           if (cl && cl.length) {
-            const defaultClient = cl.find(c => c.name === 'Twelve Business Strategies') || cl[0];
+            const savedId = window.localStorage.getItem('tbs_last_client_id');
+            const savedClient = savedId && cl.find(c => c.id === savedId);
+            const defaultClient = savedClient || cl.find(c => c.name === 'Twelve Business Strategies') || cl[0];
             setSelectedClientId(defaultClient.id);
           }
         } else {
@@ -208,6 +210,7 @@ export default function App() {
   }
   async function handleLogout() {
     await supabase.auth.signOut();
+    window.localStorage.removeItem('tbs_last_client_id');
     setProfile(null); setSelectedClientId(null); setClients([]);
   }
 
@@ -246,7 +249,7 @@ export default function App() {
       isStaff={profile.role === 'staff'}
       clients={clients}
       selectedClientId={selectedClientId}
-      onSwitchClient={setSelectedClientId}
+      onSwitchClient={(id) => { window.localStorage.setItem('tbs_last_client_id', id); setSelectedClientId(id); }}
       onLogout={handleLogout}
       userEmail={session.user.email}
     />
