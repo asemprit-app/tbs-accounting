@@ -533,6 +533,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
       map[m] = map[m] || { revenue: 0, expense: 0 };
       const acct = accounts.find(g => g.code === t.gl);
       if (acct?.type === 'Expense') map[m].expense += Math.abs(t.amount);
+      if (acct?.type === 'Revenue') map[m].revenue += Math.abs(t.amount);
     });
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
@@ -1689,6 +1690,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       map[m] = map[m] || { revenue: 0, expense: 0 };
       const acct = accounts.find(g => g.code === t.gl);
       if (acct?.type === 'Expense') map[m].expense += Math.abs(t.amount);
+      if (acct?.type === 'Revenue') map[m].revenue += Math.abs(t.amount);
     });
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
@@ -1766,7 +1768,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Status of Resultados)</div>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Income Statement)</div>
           <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} />}
