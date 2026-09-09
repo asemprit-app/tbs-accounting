@@ -125,6 +125,20 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function money(n) { return (Number(n) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
+
+const ACCOUNT_TYPE_LABELS = { Asset: 'Assets', Liability: 'Liabilities', Equity: 'Capital', Revenue: 'Income', Expense: 'Expenses' };
+const ACCOUNT_TYPE_ORDER = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
+function AccountOptions({ accounts }) {
+  return ACCOUNT_TYPE_ORDER.map(t => {
+    const rows = accounts.filter(a => a.type === t);
+    if (rows.length === 0) return null;
+    return (
+      <optgroup key={t} label={ACCOUNT_TYPE_LABELS[t]}>
+        {rows.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+      </optgroup>
+    );
+  });
+}
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function ReportHeader({ businessName, reportName }) {
@@ -886,7 +900,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account (bank/card)</label>
             <select value={form.sourceGL} onChange={e => setForm(f => ({ ...f, sourceGL: e.target.value }))}>
               <option value="">—</option>
-              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
             </select>
           </div>
           <button onClick={addTransaction} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
@@ -912,13 +926,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="__uncat__">Uncategorized (all)</option>
               <option value="__uncat_income__">Uncategorized Income</option>
               <option value="__uncat_expense__">Uncategorized Expenses</option>
-              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts} />
             </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={filters.sourceGL} onChange={e => setFilters(f => ({ ...f, sourceGL: e.target.value }))}>
               <option value="">All</option>
               <option value="__unassigned__">Unassigned</option>
-              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
             </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Status</label>
             <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
@@ -962,12 +976,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
             <select value={bulkGL} onChange={e => setBulkGL(e.target.value)}>
               <option value="">Choose account...</option>
-              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts} />
             </select>
             <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
             <select value={bulkSourceGL} onChange={e => setBulkSourceGL(e.target.value)}>
               <option value="">Choose account...</option>
-              {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
             </select>
             <button onClick={applyBulkAccount} disabled={!bulkSourceGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Set account</button>
             <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
@@ -1017,13 +1031,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.sourceGL || ''} onChange={e => updateSourceGL(t.id, e.target.value)}>
                     <option value="">—</option>
-                    {accounts.filter(a => a.type === 'Asset' || a.type === 'Liability').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                    <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
                   </select>
                 </td>
                 <td style={{ padding: '6px 4px' }}>
                   <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
                     <option value="">Uncategorized</option>
-                    {accounts.map(g => <option key={g.code} value={g.code}>{g.code} — {g.name}</option>)}
+                    <AccountOptions accounts={accounts} />
                   </select>
                 </td>
                 <td style={{ padding: '6px 4px' }}>
@@ -1058,7 +1072,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <select style={{ flex: 1 }} value={l.gl} onChange={e => updateSplitLine(i, 'gl', e.target.value)}>
                     <option value="">Account</option>
-                    {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                    <AccountOptions accounts={accounts} />
                   </select>
                   <input type="number" step="0.01" style={{ width: 100 }} value={l.amount} onChange={e => updateSplitLine(i, 'amount', e.target.value)} />
                   <button onClick={() => removeSplitLine(i)} style={iconBtn}><Trash2 size={14} /></button>
@@ -2186,7 +2200,7 @@ function RulesView({ rules, setRules, accounts }) {
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
               <option value="">Select</option>
-              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts} />
             </select>
           </div>
           <div>
@@ -2214,7 +2228,7 @@ function RulesView({ rules, setRules, accounts }) {
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Filter by account</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
               <option value="">All</option>
-              {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <AccountOptions accounts={accounts} />
             </select>
           </div>
           {filtersActive && (
@@ -2302,7 +2316,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
               <select style={{ width: 200 }} value={l.gl} onChange={e => updateLine(i, 'gl', e.target.value)}>
                 <option value="">Account</option>
-                {accounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                <AccountOptions accounts={accounts} />
               </select>
               <input style={{ flex: 1 }} placeholder="Line description" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
               <input type="number" step="0.01" style={{ width: 100 }} placeholder="Debit" value={l.debit} onChange={e => updateLine(i, 'debit', e.target.value)} />
