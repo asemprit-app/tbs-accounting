@@ -165,14 +165,28 @@ function diffSync(table, prevArr, nextArr, clientId) {
   diffSyncByKey(table, 'id', prevArr, nextArr, clientId);
 }
 
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 function diffSyncByKey(table, key, prevArr, nextArr, clientId) {
   const prevMap = new Map(prevArr.map(x => [x[key], x]));
   const nextMap = new Map(nextArr.map(x => [x[key], x]));
   const toDelete = prevArr.filter(x => !nextMap.has(x[key])).map(x => x[key]);
   const toInsert = nextArr.filter(x => !prevMap.has(x[key])).map(x => ({ ...x, client_id: clientId }));
   const toUpdate = nextArr.filter(x => prevMap.has(x[key]) && JSON.stringify(prevMap.get(x[key])) !== JSON.stringify(x));
-  if (toDelete.length) supabase.from(table).delete().in(key, toDelete).then(({ error }) => error && console.error(table, 'delete', error));
-  if (toInsert.length) supabase.from(table).insert(toInsert).then(({ error }) => error && console.error(table, 'insert', error));
+  if (toDelete.length) {
+    chunk(toDelete, 200).forEach(batch => {
+      supabase.from(table).delete().in(key, batch).then(({ error }) => error && console.error(table, 'delete', error));
+    });
+  }
+  if (toInsert.length) {
+    chunk(toInsert, 200).forEach(batch => {
+      supabase.from(table).insert(batch).then(({ error }) => error && console.error(table, 'insert', error));
+    });
+  }
   toUpdate.forEach(row => {
     supabase.from(table).update(row).eq(key, row[key]).then(({ error }) => error && console.error(table, 'update', error));
   });
