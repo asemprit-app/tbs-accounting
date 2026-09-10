@@ -1491,6 +1491,7 @@ function naturalAmount(gl, amount, accounts) {
 function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries, businessName }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
+  const [breakdown, setBreakdown] = useState('none');
   const [showExportPreview, setShowExportPreview] = useState(false);
   const [customFrom, setCustomFrom] = useState(todayStr());
   const [customTo, setCustomTo] = useState(todayStr());
@@ -1672,8 +1673,60 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     return { title: '', header: [], rows: [] };
   }
 
+  function getSubPeriods(fromD, toD, kind) {
+    const periods = [];
+    let cursor = new Date(fromD);
+    const end = new Date(toD);
+    while (cursor <= end) {
+      let periodFrom, periodTo, label;
+      if (kind === 'monthly') {
+        periodFrom = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+        periodTo = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+        label = periodFrom.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      } else if (kind === 'quarterly') {
+        const q = Math.floor(cursor.getMonth() / 3);
+        periodFrom = new Date(cursor.getFullYear(), q * 3, 1);
+        periodTo = new Date(cursor.getFullYear(), q * 3 + 3, 0);
+        label = `Q${q + 1} ${cursor.getFullYear()}`;
+        cursor = new Date(cursor.getFullYear(), q * 3 + 3, 1);
+      } else {
+        periodFrom = new Date(cursor.getFullYear(), 0, 1);
+        periodTo = new Date(cursor.getFullYear(), 11, 31);
+        label = String(cursor.getFullYear());
+        cursor = new Date(cursor.getFullYear() + 1, 0, 1);
+      }
+      const pf = periodFrom < new Date(fromD) ? fromD : periodFrom.toISOString().slice(0, 10);
+      const pt = periodTo > end ? toD : periodTo.toISOString().slice(0, 10);
+      periods.push({ label, from: pf, to: pt });
+    }
+    return periods;
+  }
+
+  function getBreakdownData(key, kind) {
+    const periods = getSubPeriods(from, to, kind);
+    const isAsOf = key === 'balance_sheet';
+    let rowAccounts = [];
+    if (key === 'pnl') rowAccounts = [...revenueAccts, ...expenseAccts];
+    else if (key === 'balance_sheet') rowAccounts = [...assetAccts, ...liabilityAccts, ...equityAccts];
+    else if (key === 'ap') rowAccounts = liabilityAccts;
+    else return null;
+
+    const header = ['Code', 'Account', ...periods.map(p => p.label)];
+    const rows = rowAccounts.map(a => {
+      const values = periods.map(p => {
+        if (isAsOf) return balanceAsOf(a.code, p.to);
+        const v = activityInPeriod(a.code, p.from, p.to);
+        return key === 'ap' ? -v : v;
+      });
+      return [a.code, a.name, ...values];
+    }).filter(r => r.slice(2).some(v => v !== 0));
+    return { title: `${REPORT_OPTIONS.find(([id]) => id === key)[1]} — ${periods[0]?.label} to ${periods[periods.length - 1]?.label} (${kind})`, header, rows };
+  }
+
   function downloadReportCSV() {
-    const { title, header, rows } = getReportData(selectedReport);
+    const usesBreakdown = breakdown !== 'none' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport);
+    const { title, header, rows } = usesBreakdown ? getBreakdownData(selectedReport, breakdown) : getReportData(selectedReport);
     let csv = businessName + '\n' + title + '\n\n' + header.join(',') + '\n';
     rows.forEach(r => { csv += r.map(v => typeof v === 'number' ? v.toFixed(2) : `"${String(v).replace(/"/g, '""')}"`).join(',') + '\n'; });
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
@@ -1761,9 +1814,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
               {REPORT_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
             </select>
           </div>
+          {preset === 'custom' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport) && (
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Breakdown</label>
+              <select value={breakdown} onChange={e => setBreakdown(e.target.value)}>
+                <option value="none">Single total</option>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="annually">Annually</option>
+              </select>
+            </div>
+          )}
           <button onClick={() => setShowExportPreview(true)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Download PDF</button>
           <button onClick={downloadReportCSV} style={iconBtn}>Download CSV</button>
         </div>
+        {preset === 'custom' && breakdown !== 'none' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport) && (
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 8 }}>Each column will be one {breakdown === 'monthly' ? 'month' : breakdown === 'quarterly' ? 'quarter' : 'year'} within your custom period.</div>
+        )}
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
@@ -2015,7 +2082,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       })()}
 
       {showExportPreview && (() => {
-        const { title, header, rows } = getReportData(selectedReport);
+        const usesBreakdownPdf = breakdown !== 'none' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport);
+        const { title, header, rows } = usesBreakdownPdf ? getBreakdownData(selectedReport, breakdown) : getReportData(selectedReport);
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
             <div style={{ background: '#fff', width: 640, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
