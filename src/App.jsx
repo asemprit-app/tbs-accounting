@@ -1673,10 +1673,22 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     return { title: '', header: [], rows: [] };
   }
 
+  function parseLocalDate(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  function formatLocalDate(d) {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function toNumeralDate(iso) {
+    const [y, m, d] = iso.split('-');
+    return `${m}-${d}-${y}`;
+  }
   function getSubPeriods(fromD, toD, kind) {
     const periods = [];
-    let cursor = new Date(fromD);
-    const end = new Date(toD);
+    let cursor = parseLocalDate(fromD);
+    const end = parseLocalDate(toD);
     while (cursor <= end) {
       let periodFrom, periodTo, label;
       if (kind === 'monthly') {
@@ -1696,8 +1708,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         label = String(cursor.getFullYear());
         cursor = new Date(cursor.getFullYear() + 1, 0, 1);
       }
-      const pf = periodFrom < new Date(fromD) ? fromD : periodFrom.toISOString().slice(0, 10);
-      const pt = periodTo > end ? toD : periodTo.toISOString().slice(0, 10);
+      const pf = periodFrom < parseLocalDate(fromD) ? fromD : formatLocalDate(periodFrom);
+      const pt = periodTo > end ? toD : formatLocalDate(periodTo);
       periods.push({ label, from: pf, to: pt });
     }
     return periods;
@@ -1721,7 +1733,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       });
       return [a.code, a.name, ...values];
     }).filter(r => r.slice(2).some(v => v !== 0));
-    return { title: `${REPORT_OPTIONS.find(([id]) => id === key)[1]} — ${periods[0]?.label} to ${periods[periods.length - 1]?.label} (${kind})`, header, rows };
+    return { title: `${REPORT_OPTIONS.find(([id]) => id === key)[1]} — ${toNumeralDate(from)} to ${toNumeralDate(to)} (${kind})`, header, rows };
   }
 
   function downloadReportCSV() {
