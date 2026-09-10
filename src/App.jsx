@@ -2062,6 +2062,16 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
   const [error, setError] = useState('');
   const [editingCode, setEditingCode] = useState(null);
   const [editDraft, setEditDraft] = useState({ name: '', type: 'Expense' });
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null); // 'ok' | 'error' | null
+
+  async function runSync() {
+    setSyncing(true);
+    setSyncResult(null);
+    const { error } = await supabase.rpc('sync_chart_of_accounts_from_tbs');
+    setSyncing(false);
+    setSyncResult(error ? 'error' : 'ok');
+  }
 
   function addAccount() {
     if (!form.code.trim() || !form.name.trim()) { setError('Enter a code and name.'); return; }
@@ -2091,6 +2101,19 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Chart of Accounts</h2>
+
+      {isMaster && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={runSync} disabled={syncing} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: syncing ? 'default' : 'pointer' }}>
+              {syncing ? 'Syncing…' : 'Sync to all clients'}
+            </button>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>Pushes this chart of accounts to every other client.</span>
+            {syncResult === 'ok' && <span style={{ fontSize: 12, color: '#0F6E56', fontWeight: 600 }}>✓ Synced successfully</span>}
+            {syncResult === 'error' && <span style={{ fontSize: 12, color: '#B00020', fontWeight: 600 }}>Sync failed — the function may not exist yet in Supabase.</span>}
+          </div>
+        </Card>
+      )}
 
       {!isMaster && (
         <Card style={{ marginBottom: 20, background: '#FFF8E6', borderColor: '#F0D896' }}>
