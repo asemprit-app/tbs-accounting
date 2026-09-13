@@ -539,7 +539,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
             dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
-            journalEntries={journalEntries}
+            journalEntries={journalEntries} reconciliations={reconciliations}
           />
         )}
         {tab === 'invoices' && (
@@ -721,7 +721,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -819,6 +819,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const combinedRows = useMemo(() => {
     return [...filteredTransactions, ...journalEntryRows].sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredTransactions, journalEntryRows]);
+  const reconciledIds = useMemo(() => {
+    const set = new Set();
+    (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => (r.verifiedIds || []).forEach(id => set.add(id)));
+    return set;
+  }, [reconciliations]);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const totalPages = Math.max(1, Math.ceil(combinedRows.length / PAGE_SIZE));
@@ -1191,6 +1196,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <th style={{ padding: '6px 4px' }}>Account</th>
               <th style={{ padding: '6px 4px' }}>Category</th>
               <th style={{ padding: '6px 4px' }}>Status</th>
+              <th style={{ padding: '6px 4px' }}>Reconciled</th>
               <th style={{ padding: '6px 4px' }}></th>
             </tr>
           </thead>
@@ -1204,6 +1210,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>—</td>
                 <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>{glName(t.gl)}</td>
                 <td style={{ padding: '6px 4px' }}><StatusBadge status="JOURNAL ENTRY" /></td>
+                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>—</td>
                 <td style={{ padding: '6px 4px' }}></td>
               </tr>
             ) : (
@@ -1224,6 +1231,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 </td>
                 <td style={{ padding: '6px 4px' }}>
                   <StatusBadge status={t.status} />
+                </td>
+                <td style={{ padding: '6px 4px' }}>
+                  {reconciledIds.has(t.id) ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 12 }}>✓ Reconciled</span> : <span style={{ color: '#6B7280', fontSize: 12 }}>—</span>}
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {t.status === 'REVIEW' && (
