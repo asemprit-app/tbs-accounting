@@ -886,6 +886,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setBulkGL('');
   }
   function deleteSelected() {
+    const reconciledSelected = selected.filter(id => reconciledIds.has(id));
+    if (reconciledSelected.length > 0) {
+      alert(`${reconciledSelected.length} of the selected transactions are part of an approved reconciliation and can't be deleted. Go to Reconciliation, reopen that period, and reset its approval first — then try again.`);
+      return;
+    }
+    if (!window.confirm(`Delete ${selected.length} transaction${selected.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
     setTransactions(prev => prev.filter(t => !selected.includes(t.id)));
     setSelected([]);
   }
@@ -964,6 +970,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: t.gl ? 'AUTO' : 'REVIEW' } : t));
   }
   function removeRow(id) {
+    if (reconciledIds.has(id)) {
+      alert("This transaction is part of an approved reconciliation and can't be deleted. Go to Reconciliation, reopen that period, and reset its approval first — then try again.");
+      return;
+    }
+    if (!window.confirm('Delete this transaction? This cannot be undone.')) return;
     setTransactions(prev => prev.filter(t => t.id !== id));
   }
 
