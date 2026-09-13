@@ -704,6 +704,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const combinedRows = useMemo(() => {
     return [...filteredTransactions, ...journalEntryRows].sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredTransactions, journalEntryRows]);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  const totalPages = Math.max(1, Math.ceil(combinedRows.length / PAGE_SIZE));
+  const pagedRows = useMemo(() => {
+    const reversed = combinedRows.slice().reverse();
+    const start = (page - 1) * PAGE_SIZE;
+    return reversed.slice(start, start + PAGE_SIZE);
+  }, [combinedRows, page]);
+  useEffect(() => { setPage(1); }, [filters, search]);
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -1024,7 +1033,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             </tr>
           </thead>
           <tbody>
-            {combinedRows.slice().reverse().map(t => t.isJE ? (
+            {pagedRows.map(t => t.isJE ? (
               <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: '#FAF7FF' }}>
                 <td style={{ padding: '6px 4px' }}></td>
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
@@ -1073,6 +1082,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           </tbody>
         </table>
         {combinedRows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
+        {combinedRows.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 13 }}>
+            <span style={{ color: '#6B7280' }}>{combinedRows.length} total — page {page} of {totalPages}</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={iconBtn}>Previous</button>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={iconBtn}>Next</button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {splittingId && (() => {
