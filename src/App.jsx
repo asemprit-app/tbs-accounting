@@ -1264,6 +1264,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       {splittingId && (() => {
         const original = transactions.find(t => t.id === splittingId);
         if (!original) return null;
+        const splitSum = splitLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+        const remaining = Number((original.amount - splitSum).toFixed(2));
+        const balanced = Math.abs(remaining) <= 0.01;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 420 }}>
@@ -1280,10 +1283,14 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 </div>
               ))}
               <button onClick={addSplitLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Line</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, padding: '6px 0', borderTop: '1px solid #E2E5E9', marginBottom: 10 }}>
+                <span>Remaining to allocate</span>
+                <span style={{ color: balanced ? '#0F6E56' : '#B00020' }}>{money(remaining)}</span>
+              </div>
               {splitError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{splitError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancel</button>
-                <button onClick={confirmSplit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirm split</button>
+                <button onClick={confirmSplit} disabled={!balanced} style={{ background: balanced ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: balanced ? 'pointer' : 'default' }}>Confirm split</button>
               </div>
             </Card>
           </div>
