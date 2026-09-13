@@ -2717,6 +2717,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [reviewingId, setReviewingId] = useState(null);
   const [verified, setVerified] = useState([]);
   const [selected, setSelected] = useState([]);
+  const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amountMin: '', amountMax: '' });
 
   function toggleSelect(id) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2878,34 +2879,67 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
           ...transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd),
           ...jePostingsFor(r.gl, r.periodEnd),
         ].sort((a, b) => a.date.localeCompare(b.date));
-        const liveLedger = periodTx.filter(t => verified.includes(t.id)).reduce((s, t) => s + t.amount, 0);
+        const filteredPeriodTx = periodTx.filter(t => {
+          if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
+          if (reviewFilters.dateTo && t.date > reviewFilters.dateTo) return false;
+          if (reviewFilters.description.trim() && !t.description.toUpperCase().includes(reviewFilters.description.trim().toUpperCase())) return false;
+          const abs = Math.abs(t.amount);
+          if (reviewFilters.amountMin && abs < Number(reviewFilters.amountMin)) return false;
+          if (reviewFilters.amountMax && abs > Number(reviewFilters.amountMax)) return false;
+          return true;
+        });
+        const verifiedTx = periodTx.filter(t => verified.includes(t.id));
+        const liveLedger = verifiedTx.reduce((s, t) => s + t.amount, 0);
+        const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+        const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
+        const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amountMin || reviewFilters.amountMax;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
-            <Card style={{ width: 820, maxHeight: '85vh', overflow: 'auto' }}>
+            <Card style={{ width: 900, maxHeight: '85vh', overflow: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontWeight: 600 }}>{accounts.find(a => a.code === r.gl)?.name} — as of {r.periodEnd}</div>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
               </div>
-              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{verified.length} of {periodTx.length} verified</span>
               </div>
+              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
+                <span>Verified debits: <strong>{money(verifiedDebits)}</strong></span>
+                <span>Verified credits: <strong>{money(verifiedCredits)}</strong></span>
+              </div>
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
                 Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don't match, then check it once it's correct, and click Recalculate to save.
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Search description</label>
+                  <input style={{ width: 180 }} value={reviewFilters.description} onChange={e => setReviewFilters(f => ({ ...f, description: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
+                  <input type="date" value={reviewFilters.dateFrom} onChange={e => setReviewFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
+                  <input type="date" value={reviewFilters.dateTo} onChange={e => setReviewFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Min. amount</label>
+                  <input type="number" step="0.01" style={{ width: 90 }} value={reviewFilters.amountMin} onChange={e => setReviewFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Max. amount</label>
+                  <input type="number" step="0.01" style={{ width: 90 }} value={reviewFilters.amountMax} onChange={e => setReviewFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
+                {reviewFiltersActive && (
+                  <button onClick={() => setReviewFilters({ dateFrom: '', dateTo: '', description: '', amountMin: '', amountMax: '' })} style={iconBtn}>Clear filters</button>
+                )}
+                {reviewFiltersActive && <span style={{ fontSize: 11, color: '#6B7280', alignSelf: 'center' }}>{filteredPeriodTx.length} of {periodTx.length} shown</span>}
               </div>
               <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ padding: '4px' }}>
-                    <input type="checkbox" checked={periodTx.length > 0 && periodTx.every(t => verified.includes(t.id))} onChange={() => toggleVerifiedAll(periodTx)} />
+                    <input type="checkbox" checked={filteredPeriodTx.length > 0 && filteredPeriodTx.every(t => verified.includes(t.id))} onChange={() => toggleVerifiedAll(filteredPeriodTx)} />
                   </th>
                   <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
                   <th style={{ padding: '4px' }}>Amount</th><th style={{ padding: '4px' }}>Account</th>
                 </tr></thead>
                 <tbody>
-                  {periodTx.map(t => (
+                  {filteredPeriodTx.map(t => (
                     <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: verified.includes(t.id) ? '#EAF3DE' : 'transparent' }}>
                       <td style={{ padding: '4px' }}><input type="checkbox" checked={verified.includes(t.id)} onChange={() => toggleVerified(t.id)} /></td>
                       {t.isJE ? (
