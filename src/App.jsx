@@ -348,6 +348,8 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [reconciliations, setReconciliationsRaw] = useState([]);
   const [dismissedSuggestions, setDismissedSuggestionsRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
+  const [reconcilingReviewId, setReconcilingReviewId] = useState(null);
+  const [reconcilingVerified, setReconcilingVerified] = useState([]);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [statementClient, setStatementClient] = useState(null);
 
@@ -555,7 +557,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
-        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries} />}
+        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
+          reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         </>
         )}
       </div>
@@ -2730,12 +2733,10 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   );
 }
 
-function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts, journalEntries }) {
+function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified }) {
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
-  const [reviewingId, setReviewingId] = useState(null);
-  const [verified, setVerified] = useState([]);
   const [selected, setSelected] = useState([]);
   const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amount: '' });
 
