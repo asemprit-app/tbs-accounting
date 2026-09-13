@@ -691,6 +691,33 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }, [transactions, filters, search]);
   const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amountMin || filters.amountMax || search.trim();
 
+  const quickPeriods = useMemo(() => {
+    const months = new Set();
+    const years = new Set();
+    transactions.forEach(t => {
+      months.add(t.date.slice(0, 7));
+      years.add(t.date.slice(0, 4));
+    });
+    const monthOpts = Array.from(months).sort().reverse().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const from = `${m}-01`;
+      const to = formatLocalDate2(new Date(Number(y), Number(mo), 0));
+      return { value: `m:${m}`, label, from, to };
+    });
+    const yearOpts = Array.from(years).sort().reverse().map(y => ({ value: `y:${y}`, label: y, from: `${y}-01-01`, to: `${y}-12-31` }));
+    return { monthOpts, yearOpts };
+  }, [transactions]);
+  function formatLocalDate2(d) {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function applyQuickPeriod(value) {
+    if (!value) return;
+    const opt = [...quickPeriods.yearOpts, ...quickPeriods.monthOpts].find(o => o.value === value);
+    if (opt) setFilters(f => ({ ...f, dateFrom: opt.from, dateTo: opt.to }));
+  }
+
   function jeNaturalAmount(gl, line) {
     const acct = accounts.find(a => a.code === gl);
     const debit = Number(line.debit) || 0, credit = Number(line.credit) || 0;
@@ -975,6 +1002,18 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
             <input style={{ width: '100%' }} placeholder="E.g. STARBUCKS, NICOLE VALENTIN..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Period</label>
+            <select onChange={e => applyQuickPeriod(e.target.value)} defaultValue="">
+              <option value="">Custom range...</option>
+              <optgroup label="Years">
+                {quickPeriods.yearOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </optgroup>
+              <optgroup label="Months">
+                {quickPeriods.monthOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </optgroup>
+            </select>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
             <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
