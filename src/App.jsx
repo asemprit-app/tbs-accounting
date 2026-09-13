@@ -1863,13 +1863,16 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     }
     if (key === 'unreconciled') {
       const latestApproved = {};
+      const cumulativeVerifiedByGl = {};
       (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => {
         const cur = latestApproved[r.gl];
         if (!cur || r.periodEnd > cur.periodEnd) latestApproved[r.gl] = r;
+        cumulativeVerifiedByGl[r.gl] = cumulativeVerifiedByGl[r.gl] || new Set();
+        (r.verifiedIds || []).forEach(id => cumulativeVerifiedByGl[r.gl].add(id));
       });
       const rows = [];
       Object.values(latestApproved).forEach(r => {
-        const verifiedSet = new Set(r.verifiedIds || []);
+        const verifiedSet = cumulativeVerifiedByGl[r.gl] || new Set();
         transactions.forEach(t => {
           if (t.sourceGL !== r.gl || t.date > r.periodEnd || verifiedSet.has(t.id)) return;
           rows.push([t.date, t.description, t.amount, `${r.gl} — ${accounts.find(a => a.code === r.gl)?.name || ''}`, `Approved through ${r.periodEnd}`]);
@@ -2875,10 +2878,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
       {reviewingId && (() => {
         const r = reconciliations.find(x => x.id === reviewingId);
         if (!r) return null;
-        const periodTx = [
+        const priorApprovedVerified = new Set();
+        reconciliations.filter(x => x.gl === r.gl && x.status === 'PASS' && x.periodEnd < r.periodEnd && x.id !== r.id)
+          .forEach(x => (x.verifiedIds || []).forEach(id => priorApprovedVerified.add(id)));
+        const allMatching = [
           ...transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd),
           ...jePostingsFor(r.gl, r.periodEnd),
-        ].sort((a, b) => a.date.localeCompare(b.date));
+        ];
+        const priorApprovedTotal = allMatching.filter(t => priorApprovedVerified.has(t.id)).reduce((s, t) => s + t.amount, 0);
+        const periodTx = allMatching.filter(t => !priorApprovedVerified.has(t.id)).sort((a, b) => a.date.localeCompare(b.date));
         const filteredPeriodTx = periodTx.filter(t => {
           if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
           if (reviewFilters.dateTo && t.date > reviewFilters.dateTo) return false;
@@ -2889,7 +2897,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
           return true;
         });
         const verifiedTx = periodTx.filter(t => verified.includes(t.id));
-        const liveLedger = verifiedTx.reduce((s, t) => s + t.amount, 0);
+        const liveLedger = priorApprovedTotal + verifiedTx.reduce((s, t) => s + t.amount, 0);
         const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
         const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
