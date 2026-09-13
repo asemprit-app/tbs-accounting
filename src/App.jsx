@@ -650,6 +650,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amountMin: '', amountMax: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
   const [bulkSourceGL, setBulkSourceGL] = useState('');
 
@@ -765,6 +766,24 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }
   function dismissSuggestion(s) {
     setDismissedSuggestions(prev => [...prev, s.key + '|' + s.gl]);
+  }
+  function createSelectedSuggestions() {
+    const toCreate = ruleSuggestions.filter(s => selectedSuggestions.includes(s.key + '|' + s.gl));
+    setRules(prev => [...prev, ...toCreate.map(s => ({ id: uid(), keyword: s.key, gl: s.gl, mode: 'AUTO' }))]);
+    setDismissedSuggestions(prev => [...prev, ...toCreate.map(s => s.key + '|' + s.gl)]);
+    setSelectedSuggestions([]);
+  }
+  function dismissSelectedSuggestions() {
+    setDismissedSuggestions(prev => [...prev, ...selectedSuggestions]);
+    setSelectedSuggestions([]);
+  }
+  function toggleSuggestion(id) {
+    setSelectedSuggestions(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  function toggleSuggestionAll() {
+    const ids = ruleSuggestions.map(s => s.key + '|' + s.gl);
+    const allSelected = ids.length > 0 && ids.every(id => selectedSuggestions.includes(id));
+    setSelectedSuggestions(allSelected ? [] : ids);
   }
 
   function importCSV() {
@@ -978,19 +997,38 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
 
       {ruleSuggestions.length > 0 && (
         <Card style={{ marginBottom: 20, borderColor: '#B7E4C7' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Sugerencias of reglas ({ruleSuggestions.length})</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontWeight: 700 }}>Rule suggestions ({ruleSuggestions.length})</div>
+            {selectedSuggestions.length > 0 && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <span style={{ fontSize: 12, color: '#6B7280', alignSelf: 'center' }}>{selectedSuggestions.length} selected</span>
+                <button onClick={createSelectedSuggestions} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}>Create selected</button>
+                <button onClick={dismissSelectedSuggestions} style={iconBtn}>Dismiss selected</button>
+              </div>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
             These patterns repeated 4 or more times with the same category. Create the rule so similar future transactions get categorized automatically.
           </div>
-          {ruleSuggestions.map(s => (
-            <div key={s.key + s.gl} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 13 }}>
-              <span>"{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} times)</span></span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => createRuleFromSuggestion(s)} style={iconBtn}>Create rule</button>
-                <button onClick={() => dismissSuggestion(s)} style={iconBtn}><X size={14} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #E2E5E9', fontSize: 12, color: '#6B7280' }}>
+            <input type="checkbox" checked={ruleSuggestions.length > 0 && ruleSuggestions.every(s => selectedSuggestions.includes(s.key + '|' + s.gl))} onChange={toggleSuggestionAll} style={{ marginRight: 8 }} />
+            Select all
+          </div>
+          {ruleSuggestions.map(s => {
+            const id = s.key + '|' + s.gl;
+            return (
+              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 13 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={selectedSuggestions.includes(id)} onChange={() => toggleSuggestion(id)} />
+                  "{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} times)</span>
+                </label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => createRuleFromSuggestion(s)} style={iconBtn}>Create rule</button>
+                  <button onClick={() => dismissSuggestion(s)} style={iconBtn}><X size={14} /></button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </Card>
       )}
 
