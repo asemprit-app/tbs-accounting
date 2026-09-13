@@ -445,14 +445,22 @@ async function fetchAllRows(table, clientId, orderCol) {
 
   const summary = useMemo(() => {
     const month = todayStr().slice(0, 7);
+    const year = todayStr().slice(0, 4);
     const revenueMTD = invoices.filter(i => i.date.slice(0, 7) === month)
       .reduce((s, i) => s + invoiceTotal(i), 0);
+    const invoiceRevenueYTD = invoices.filter(i => i.date.slice(0, 4) === year)
+      .reduce((s, i) => s + invoiceTotal(i), 0);
+    const txRevenueYTD = transactions.filter(t => t.date.slice(0, 4) === year).reduce((s, t) => {
+      const acct = accounts.find(a => a.code === t.gl);
+      return acct?.type === 'Revenue' ? s + Math.abs(t.amount) : s;
+    }, 0);
+    const salesYTD = invoiceRevenueYTD + txRevenueYTD;
     const arOpen = invoices.filter(i => i.status !== 'Paid')
       .reduce((s, i) => s + invoiceTotal(i) - (i.paid || 0), 0);
     const cash = transactions.reduce((s, t) => s + (t.gl === '1010' ? t.amount : 0), 0);
     const review = transactions.filter(t => t.status === 'REVIEW').length;
-    return { revenueMTD, arOpen, cash, review };
-  }, [transactions, invoices]);
+    return { revenueMTD, salesYTD, arOpen, cash, review };
+  }, [transactions, invoices, accounts]);
 
   function invoiceTotal(inv) {
     const sub = inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
@@ -565,6 +573,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
     { label: 'Bank (net recorded)', value: money(summary.cash) },
     { label: 'Open A/R', value: money(summary.arOpen) },
     { label: 'Revenue this month', value: money(summary.revenueMTD) },
+    { label: 'Total Sales (YTD)', value: money(summary.salesYTD) },
     { label: 'Transactions in Review', value: summary.review },
   ];
   const byMonth = useMemo(() => {
@@ -597,7 +606,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Dashboard</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
         {cards.map(c => (
           <Card key={c.label}>
             <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>{c.label}</div>
