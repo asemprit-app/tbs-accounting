@@ -738,12 +738,18 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [bulkGL, setBulkGL] = useState('');
   const [bulkSourceGL, setBulkSourceGL] = useState('');
+
+  const reconciledIds = useMemo(() => {
+    const set = new Set();
+    (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => (r.verifiedIds || []).forEach(id => set.add(id)));
+    return set;
+  }, [reconciliations]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -758,11 +764,18 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.status && t.status !== filters.status) return false;
       const abs = Math.abs(t.amount);
       if (filters.amount.trim() && Math.abs(abs - Number(filters.amount)) > 0.005) return false;
+      if (filters.reconciled) {
+        const isReconciled = reconciledIds.has(t.id);
+        const isPending = (pendingReviewIds || []).includes(t.id);
+        if (filters.reconciled === 'reconciled' && !isReconciled) return false;
+        if (filters.reconciled === 'pending' && !isPending) return false;
+        if (filters.reconciled === 'none' && (isReconciled || isPending)) return false;
+      }
       if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
       return true;
     });
-  }, [transactions, filters, search]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || search.trim();
+  }, [transactions, filters, search, reconciledIds, pendingReviewIds]);
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || search.trim();
 
   const quickPeriods = useMemo(() => {
     const months = new Set();
@@ -822,11 +835,6 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const combinedRows = useMemo(() => {
     return [...filteredTransactions, ...journalEntryRows].sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredTransactions, journalEntryRows]);
-  const reconciledIds = useMemo(() => {
-    const set = new Set();
-    (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => (r.verifiedIds || []).forEach(id => set.add(id)));
-    return set;
-  }, [reconciliations]);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const totalPages = Math.max(1, Math.ceil(combinedRows.length / PAGE_SIZE));
@@ -1120,8 +1128,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             </select></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
             <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 120 }} value={filters.amount} onChange={e => setFilters(f => ({ ...f, amount: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reconciled</label>
+            <select value={filters.reconciled} onChange={e => setFilters(f => ({ ...f, reconciled: e.target.value }))}>
+              <option value="">All</option>
+              <option value="reconciled">Reconciled</option>
+              <option value="pending">Marked (pending)</option>
+              <option value="none">Not marked</option>
+            </select></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
