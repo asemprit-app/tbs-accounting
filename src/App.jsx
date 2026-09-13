@@ -1071,7 +1071,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
-            <input style={{ width: '100%' }} placeholder="E.g. STARBUCKS, NICOLE VALENTIN..." value={search} onChange={e => setSearch(e.target.value)} />
+            <input style={{ width: '100%' }} placeholder="E.g. STARBUCKS, UTILITIES..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Period</label>
