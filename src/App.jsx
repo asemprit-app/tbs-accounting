@@ -392,7 +392,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setAccountsRaw(a.data || []);
         setRulesRaw(r.data || []);
         setJournalEntriesRaw(j.data || []);
-        setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end })));
+        setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end, verifiedIds: row.verified_ids || [] })));
         setDismissedSuggestionsRaw((ds.data || []).map(row => row.suggestion_key));
         setBusinessName(cl?.data?.name || 'Business');
       }
@@ -477,8 +477,8 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setReconciliations = useCallback((updater) => {
     setReconciliationsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      const forDb = next.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status }));
-      const prevForDb = prev.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status }));
+      const forDb = next.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status, verified_ids: r.verifiedIds || [] }));
+      const prevForDb = prev.map(r => ({ id: r.id, gl: r.gl, period_end: r.periodEnd, statement_balance: r.statementBalance, ledger_balance: r.ledgerBalance, difference: r.difference, status: r.status, verified_ids: r.verifiedIds || [] }));
       diffSync('reconciliations', prevForDb, forDb, clientId);
       return next;
     });
@@ -551,7 +551,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
@@ -1678,7 +1678,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries, businessName }) {
+function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries, businessName, reconciliations }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [breakdown, setBreakdown] = useState('none');
@@ -1796,6 +1796,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     ['cash_flow', 'Cash Flow'],
     ['ap', 'A/P (Accounts Payable)'],
     ['open_invoices', 'Open Invoices'],
+    ['unreconciled', 'Unreconciled Transactions'],
   ];
 
   function getReportData(key) {
@@ -1859,6 +1860,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     if (key === 'open_invoices') {
       const rows = openInvoicesForExport.map(i => [i.number, i.client, i.date, invoiceTotal(i), invoiceTotal(i) - (i.paid || 0), i.status]);
       return { title: `Open Invoices — as of ${todayStr()}`, header: ['Invoice #', 'Customer', 'Date', 'Total', 'Balance', 'Status'], rows };
+    }
+    if (key === 'unreconciled') {
+      const latestApproved = {};
+      (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => {
+        const cur = latestApproved[r.gl];
+        if (!cur || r.periodEnd > cur.periodEnd) latestApproved[r.gl] = r;
+      });
+      const rows = [];
+      Object.values(latestApproved).forEach(r => {
+        const verifiedSet = new Set(r.verifiedIds || []);
+        transactions.forEach(t => {
+          if (t.sourceGL !== r.gl || t.date > r.periodEnd || verifiedSet.has(t.id)) return;
+          rows.push([t.date, t.description, t.amount, `${r.gl} — ${accounts.find(a => a.code === r.gl)?.name || ''}`, `Approved through ${r.periodEnd}`]);
+        });
+      });
+      rows.sort((a, b) => a[0].localeCompare(b[0]));
+      return { title: 'Unreconciled Transactions (in already-approved periods)', header: ['Date', 'Description', 'Amount', 'Account', 'Last approved period'], rows };
     }
     return { title: '', header: [], rows: [] };
   }
@@ -2206,6 +2224,38 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </tbody>
         </table>
         {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
+      </Card>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Unreconciled Transactions</div>
+        <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 10 }}>
+          For each account's most recently approved reconciliation, these are the transactions dated on or before that period that were never checked off — carry these into your next reconciliation.
+        </div>
+        {(() => {
+          const { rows } = getReportData('unreconciled');
+          return (
+            <>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+                  <th style={{ padding: '6px 4px' }}>Date</th><th style={{ padding: '6px 4px' }}>Description</th>
+                  <th style={{ padding: '6px 4px' }}>Amount</th><th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Last approved period</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                      <td style={{ padding: '6px 4px' }}>{r[0]}</td>
+                      <td style={{ padding: '6px 4px' }}>{r[1]}</td>
+                      <td style={{ padding: '6px 4px' }}>{money(r[2])}</td>
+                      <td style={{ padding: '6px 4px' }}>{r[3]}</td>
+                      <td style={{ padding: '6px 4px' }}>{r[4]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Nothing pending — every approved period has all its transactions checked off.</div>}
+            </>
+          );
+        })()}
       </Card>
 
       {drillDown && (() => {
@@ -2717,20 +2767,29 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     const statementBalance = Number(form.statementBalance);
     const difference = Number((statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
+    const newId = uid();
+    const matchingTxIds = transactions.filter(t => t.sourceGL === form.gl && t.date <= form.periodEnd).map(t => t.id);
+    const matchingJeIds = jePostingsFor(form.gl, form.periodEnd).map(p => p.id);
+    const verifiedIds = status === 'PASS' ? [...matchingTxIds, ...matchingJeIds] : [];
     setReconciliations(prev => [...prev, {
-      id: uid(), gl: form.gl, periodEnd: form.periodEnd, statementBalance, ledgerBalance, difference, status,
+      id: newId, gl: form.gl, periodEnd: form.periodEnd, statementBalance, ledgerBalance, difference, status, verifiedIds,
     }]);
     setForm({ gl: '', periodEnd: todayStr(), statementBalance: '' });
+    if (status !== 'PASS') openReview(newId);
   }
 
-  function refreshReconciliation(r, ledgerBalanceOverride) {
+  function refreshReconciliation(r, ledgerBalanceOverride, verifiedIdsOverride) {
     const ledgerBalance = ledgerBalanceOverride !== undefined ? ledgerBalanceOverride : ledgerBalanceFor(r.gl, r.periodEnd);
     const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
-    setReconciliations(prev => prev.map(x => x.id === r.id ? { ...x, ledgerBalance, difference, status } : x));
+    setReconciliations(prev => prev.map(x => x.id === r.id ? { ...x, ledgerBalance, difference, status, verifiedIds: verifiedIdsOverride !== undefined ? verifiedIdsOverride : x.verifiedIds } : x));
   }
 
-  function openReview(id) { setReviewingId(id); setVerified([]); }
+  function openReview(id) {
+    setReviewingId(id);
+    const r = reconciliations.find(x => x.id === id);
+    setVerified(r?.verifiedIds || []);
+  }
   function toggleVerified(id) {
     setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
@@ -2876,7 +2935,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               {periodTx.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
-                <button onClick={() => { refreshReconciliation(r, liveLedger); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+                <button onClick={() => { refreshReconciliation(r, liveLedger, verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
               </div>
             </Card>
           </div>
