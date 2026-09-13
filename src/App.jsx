@@ -139,6 +139,57 @@ function AccountOptions({ accounts }) {
     );
   });
 }
+
+function AccountSearchSelect({ value, onChange, accounts, emptyLabel, width }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef(null);
+  const selected = accounts.find(a => a.code === value);
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q ? accounts.filter(a => a.name.toLowerCase().includes(q) || a.code.includes(q)) : accounts;
+  const grouped = ACCOUNT_TYPE_ORDER.map(t => ({ type: t, rows: filtered.filter(a => a.type === t) })).filter(g => g.rows.length);
+
+  function pick(code) {
+    onChange(code);
+    setOpen(false);
+    setQuery('');
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: width || '100%' }}>
+      <input
+        style={{ width: '100%', boxSizing: 'border-box' }}
+        value={open ? query : (selected ? `${selected.code} — ${selected.name}` : (emptyLabel || ''))}
+        placeholder="Type to search…"
+        onFocus={() => { setOpen(true); setQuery(''); }}
+        onChange={e => setQuery(e.target.value)}
+      />
+      {open && (
+        <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 240, overflowY: 'auto', width: 280, boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
+          {emptyLabel && (
+            <div onClick={() => pick('')} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: '#6B7280' }}>{emptyLabel}</div>
+          )}
+          {grouped.map(g => (
+            <div key={g.type}>
+              <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 700, color: '#6B7280', background: '#F7F8FA' }}>{ACCOUNT_TYPE_LABELS[g.type]}</div>
+              {g.rows.map(a => (
+                <div key={a.code} onClick={() => pick(a.code)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>{a.code} — {a.name}</div>
+              ))}
+            </div>
+          ))}
+          {grouped.length === 0 && <div style={{ padding: '8px 10px', fontSize: 12, color: '#6B7280' }}>No matches</div>}
+        </div>
+      )}
+    </div>
+  );
+}
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function ReportHeader({ businessName, reportName }) {
@@ -1111,15 +1162,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
-            <select value={bulkGL} onChange={e => setBulkGL(e.target.value)}>
-              <option value="">Choose account...</option>
-              <AccountOptions accounts={accounts} />
-            </select>
+            <div style={{ width: 220 }}>
+              <AccountSearchSelect value={bulkGL} onChange={setBulkGL} accounts={accounts} emptyLabel="Choose account..." />
+            </div>
             <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
-            <select value={bulkSourceGL} onChange={e => setBulkSourceGL(e.target.value)}>
-              <option value="">Choose account...</option>
-              <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
-            </select>
+            <div style={{ width: 220 }}>
+              <AccountSearchSelect value={bulkSourceGL} onChange={setBulkSourceGL} accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} emptyLabel="Choose account..." />
+            </div>
             <button onClick={applyBulkAccount} disabled={!bulkSourceGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Set account</button>
             <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
             <button onClick={() => setSelected([])} style={iconBtn}>Cancel selection</button>
@@ -1165,17 +1214,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
                 <td style={{ padding: '6px 4px' }}>{t.description}</td>
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
-                <td style={{ padding: '6px 4px' }}>
-                  <select value={t.sourceGL || ''} onChange={e => updateSourceGL(t.id, e.target.value)}>
-                    <option value="">—</option>
-                    <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
-                  </select>
+                <td style={{ padding: '6px 4px', minWidth: 160 }}>
+                  <AccountSearchSelect value={t.sourceGL || ''} onChange={gl => updateSourceGL(t.id, gl)}
+                    accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} emptyLabel="—" />
                 </td>
-                <td style={{ padding: '6px 4px' }}>
-                  <select value={t.gl} onChange={e => updateGL(t.id, e.target.value)}>
-                    <option value="">Uncategorized</option>
-                    <AccountOptions accounts={accounts} />
-                  </select>
+                <td style={{ padding: '6px 4px', minWidth: 200 }}>
+                  <AccountSearchSelect value={t.gl} onChange={gl => updateGL(t.id, gl)}
+                    accounts={accounts} emptyLabel="Uncategorized" />
                 </td>
                 <td style={{ padding: '6px 4px' }}>
                   <StatusBadge status={t.status} />
