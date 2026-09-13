@@ -300,15 +300,32 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [printInvoice, setPrintInvoice] = useState(null);
   const [statementClient, setStatementClient] = useState(null);
 
+async function fetchAllRows(table, clientId, orderCol) {
+  const pageSize = 1000;
+  let allRows = [];
+  let page = 0;
+  while (true) {
+    let q = supabase.from(table).select('*').eq('client_id', clientId);
+    if (orderCol) q = q.order(orderCol);
+    q = q.range(page * pageSize, page * pageSize + pageSize - 1);
+    const { data, error } = await q;
+    if (error) return { data: null, error };
+    allRows = allRows.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    page++;
+  }
+  return { data: allRows, error: null };
+}
+
   useEffect(() => {
     (async () => {
       const results = await Promise.all([
-        supabase.from('transactions').select('*').eq('client_id', clientId).order('date'),
-        supabase.from('invoices').select('*').eq('client_id', clientId).order('date'),
+        fetchAllRows('transactions', clientId, 'date'),
+        fetchAllRows('invoices', clientId, 'date'),
         supabase.from('customers').select('*').eq('client_id', clientId),
         supabase.from('accounts').select('*').eq('client_id', clientId).order('code'),
         supabase.from('rules').select('*').eq('client_id', clientId),
-        supabase.from('journal_entries').select('*').eq('client_id', clientId).order('date'),
+        fetchAllRows('journal_entries', clientId, 'date'),
         supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
         supabase.from('dismissed_suggestions').select('*').eq('client_id', clientId),
         supabase.from('clients').select('name').eq('id', clientId).single(),
