@@ -380,6 +380,7 @@ async function fetchAllRows(table, clientId, orderCol) {
     });
   }, []);
   const setAccounts = useCallback((updater) => {
+    let pendingWrites = [];
     setAccountsRaw(prev => {
       let next = typeof updater === 'function' ? updater(prev) : updater;
       next = next.slice().sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
@@ -390,14 +391,23 @@ async function fetchAllRows(table, clientId, orderCol) {
       const toDelete = prev.filter(x => !nextMap.has(x.code)).map(x => x.code);
       const toInsert = next.filter(x => !prevMap.has(x.code)).map(x => ({ ...x, client_id: clientId }));
       const toUpdate = next.filter(x => prevMap.has(x.code) && JSON.stringify(prevMap.get(x.code)) !== JSON.stringify(x));
-      if (toDelete.length) supabase.from('accounts').delete().eq('client_id', clientId).in('code', toDelete).then(({ error }) => error && console.error('accounts delete', error));
-      if (toInsert.length) supabase.from('accounts').insert(toInsert).then(({ error }) => error && console.error('accounts insert', error));
+      if (toDelete.length) pendingWrites.push(supabase.from('accounts').delete().eq('client_id', clientId).in('code', toDelete));
+      if (toInsert.length) pendingWrites.push(supabase.from('accounts').insert(toInsert));
       toUpdate.forEach(row => {
-        supabase.from('accounts').update({ name: row.name, type: row.type }).eq('client_id', clientId).eq('code', row.code)
-          .then(({ error }) => error && console.error('accounts update', error));
+        pendingWrites.push(supabase.from('accounts').update({ name: row.name, type: row.type }).eq('client_id', clientId).eq('code', row.code));
       });
       return next;
     });
+    // solo Twelve es el maestro: si algo cambió ahí, espera a que se guarde y sincroniza sola a todos los demás
+    if (pendingWrites.length && businessName === 'Twelve Business Strategies') {
+      Promise.all(pendingWrites).then(results => {
+        const err = results.find(r => r.error);
+        if (err) { console.error('accounts write', err.error); return; }
+        supabase.rpc('sync_chart_of_accounts_from_tbs').then(({ error }) => error && console.error('auto-sync', error));
+      });
+    } else if (pendingWrites.length) {
+      pendingWrites.forEach(p => p.then(({ error }) => error && console.error('accounts write', error)));
+    }
   }, []);
   const setRules = useCallback((updater) => {
     setRulesRaw(prev => {
@@ -2314,7 +2324,7 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
             <button onClick={runSync} disabled={syncing} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: syncing ? 'default' : 'pointer' }}>
               {syncing ? 'Syncing…' : 'Sync to all clients'}
             </button>
-            <span style={{ fontSize: 12, color: '#6B7280' }}>Pushes this chart of accounts to every other client.</span>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>This now happens automatically after every change — use this only if you edited accounts directly in Supabase.</span>
             {syncResult === 'ok' && <span style={{ fontSize: 12, color: '#0F6E56', fontWeight: 600 }}>✓ Synced successfully</span>}
             {syncResult === 'error' && <span style={{ fontSize: 12, color: '#B00020', fontWeight: 600 }}>Sync failed — the function may not exist yet in Supabase.</span>}
           </div>
