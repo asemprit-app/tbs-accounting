@@ -2792,7 +2792,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   function openReview(id) {
     setReviewingId(id);
     const r = reconciliations.find(x => x.id === id);
-    setVerified(r?.verifiedIds || []);
+    // solo se recuerdan las marcas si el período ya quedó APPROVED — si sigue en REVIEW,
+    // no se da por hecho nada, se empieza de cero cada vez que se vuelve a abrir.
+    setVerified(r?.status === 'PASS' ? (r.verifiedIds || []) : []);
   }
   function toggleVerified(id) {
     setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
