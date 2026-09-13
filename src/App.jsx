@@ -2807,9 +2807,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   function openReview(id) {
     setReviewingId(id);
     const r = reconciliations.find(x => x.id === id);
-    // solo se recuerdan las marcas si el período ya quedó APPROVED — si sigue en REVIEW,
-    // no se da por hecho nada, se empieza de cero cada vez que se vuelve a abrir.
-    setVerified(r?.status === 'PASS' ? (r.verifiedIds || []) : []);
+    // se recuerdan siempre las marcas guardadas, sin importar si el período ya quedó
+    // aprobado o sigue en REVIEW — así no se pierde el trabajo mientras completas el proceso.
+    setVerified(r?.verifiedIds || []);
   }
   function toggleVerified(id) {
     setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2922,7 +2922,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             <Card style={{ width: 900, maxHeight: '85vh', overflow: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontWeight: 600 }}>{accounts.find(a => a.code === r.gl)?.name} — as of {r.periodEnd}</div>
-                <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { if (window.confirm('Clear all checkmarks for this period and start over?')) setVerified([]); }} style={iconBtn}>Reset marks</button>
+                  <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
