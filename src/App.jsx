@@ -737,7 +737,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amountMin: '', amountMax: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
@@ -756,13 +756,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.sourceGL && filters.sourceGL !== '__unassigned__' && t.sourceGL !== filters.sourceGL) return false;
       if (filters.status && t.status !== filters.status) return false;
       const abs = Math.abs(t.amount);
-      if (filters.amountMin && abs < Number(filters.amountMin)) return false;
-      if (filters.amountMax && abs > Number(filters.amountMax)) return false;
+      if (filters.amount.trim() && Math.abs(abs - Number(filters.amount)) > 0.005) return false;
       if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
       return true;
     });
   }, [transactions, filters, search]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amountMin || filters.amountMax || search.trim();
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || search.trim();
 
   const quickPeriods = useMemo(() => {
     const months = new Set();
@@ -1118,12 +1117,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="MATCH">MATCH</option>
               <option value="REVIEW">REVIEW</option>
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Min. amount</label>
-            <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMin} onChange={e => setFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Max. amount</label>
-            <input type="number" step="0.01" style={{ width: 100 }} value={filters.amountMax} onChange={e => setFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
+            <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 120 }} value={filters.amount} onChange={e => setFilters(f => ({ ...f, amount: e.target.value }))} /></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amountMin: '', amountMax: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
