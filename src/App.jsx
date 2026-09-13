@@ -2730,7 +2730,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [reviewingId, setReviewingId] = useState(null);
   const [verified, setVerified] = useState([]);
   const [selected, setSelected] = useState([]);
-  const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amountMin: '', amountMax: '' });
+  const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amount: '' });
 
   function toggleSelect(id) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2903,9 +2903,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
           if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
           if (reviewFilters.dateTo && t.date > reviewFilters.dateTo) return false;
           if (reviewFilters.description.trim() && !t.description.toUpperCase().includes(reviewFilters.description.trim().toUpperCase())) return false;
-          const abs = Math.abs(t.amount);
-          if (reviewFilters.amountMin && abs < Number(reviewFilters.amountMin)) return false;
-          if (reviewFilters.amountMax && abs > Number(reviewFilters.amountMax)) return false;
+          if (reviewFilters.amount.trim() && Math.abs(Math.abs(t.amount) - Number(reviewFilters.amount)) > 0.005) return false;
           return true;
         });
         const verifiedTx = periodTx.filter(t => verified.includes(t.id));
@@ -2913,7 +2911,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
         const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
-        const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amountMin || reviewFilters.amountMax;
+        const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amount.trim();
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 900, maxHeight: '85vh', overflow: 'auto' }}>
@@ -2941,12 +2939,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   <input type="date" value={reviewFilters.dateFrom} onChange={e => setReviewFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
                 <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
                   <input type="date" value={reviewFilters.dateTo} onChange={e => setReviewFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Min. amount</label>
-                  <input type="number" step="0.01" style={{ width: 90 }} value={reviewFilters.amountMin} onChange={e => setReviewFilters(f => ({ ...f, amountMin: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Max. amount</label>
-                  <input type="number" step="0.01" style={{ width: 90 }} value={reviewFilters.amountMax} onChange={e => setReviewFilters(f => ({ ...f, amountMax: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Amount</label>
+                  <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 110 }} value={reviewFilters.amount} onChange={e => setReviewFilters(f => ({ ...f, amount: e.target.value }))} /></div>
                 {reviewFiltersActive && (
-                  <button onClick={() => setReviewFilters({ dateFrom: '', dateTo: '', description: '', amountMin: '', amountMax: '' })} style={iconBtn}>Clear filters</button>
+                  <button onClick={() => setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' })} style={iconBtn}>Clear filters</button>
                 )}
                 {reviewFiltersActive && <span style={{ fontSize: 11, color: '#6B7280', alignSelf: 'center' }}>{filteredPeriodTx.length} of {periodTx.length} shown</span>}
               </div>
