@@ -542,6 +542,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
             dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
             journalEntries={journalEntries} reconciliations={reconciliations}
+            pendingReviewIds={reconcilingVerified}
           />
         )}
         {tab === 'invoices' && (
@@ -724,7 +725,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, pendingReviewIds }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -1233,7 +1234,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                   <StatusBadge status={t.status} />
                 </td>
                 <td style={{ padding: '6px 4px' }}>
-                  {reconciledIds.has(t.id) ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 12 }}>✓ Reconciled</span> : <span style={{ color: '#6B7280', fontSize: 12 }}>—</span>}
+                  {reconciledIds.has(t.id)
+                    ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 12 }}>✓ Reconciled</span>
+                    : (pendingReviewIds || []).includes(t.id)
+                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 12 }}>Marked (pending)</span>
+                      : <span style={{ color: '#6B7280', fontSize: 12 }}>—</span>}
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {t.status === 'REVIEW' && (
@@ -2810,14 +2815,25 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     // se recuerdan siempre las marcas guardadas, sin importar si el período ya quedó
     // aprobado o sigue en REVIEW — así no se pierde el trabajo mientras completas el proceso.
     setVerified(r?.verifiedIds || []);
+    setVerifiedHistory([]);
   }
+  const [verifiedHistory, setVerifiedHistory] = useState([]);
   function toggleVerified(id) {
+    setVerifiedHistory(h => [...h, verified]);
     setVerified(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
   function toggleVerifiedAll(periodTx) {
+    setVerifiedHistory(h => [...h, verified]);
     const ids = periodTx.map(t => t.id);
     const allChecked = ids.length > 0 && ids.every(id => verified.includes(id));
     setVerified(allChecked ? verified.filter(id => !ids.includes(id)) : Array.from(new Set([...verified, ...ids])));
+  }
+  function undoLastMark() {
+    setVerifiedHistory(h => {
+      if (h.length === 0) return h;
+      setVerified(h[h.length - 1]);
+      return h.slice(0, -1);
+    });
   }
   function editTxDate(id, date) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t)); }
   function editTxAmount(id, amount) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t)); }
@@ -2923,7 +2939,8 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontWeight: 600 }}>{accounts.find(a => a.code === r.gl)?.name} — as of {r.periodEnd}</div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => { if (window.confirm('Clear all checkmarks for this period and start over?')) setVerified([]); }} style={iconBtn}>Reset marks</button>
+                  <button onClick={undoLastMark} disabled={verifiedHistory.length === 0} style={iconBtn}>Undo</button>
+                  <button onClick={() => { if (window.confirm('Clear all checkmarks for this period and start over?')) { setVerified([]); setVerifiedHistory([]); } }} style={iconBtn}>Reset marks</button>
                   <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
                 </div>
               </div>
