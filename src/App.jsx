@@ -2767,6 +2767,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [error, setError] = useState('');
   const [selected, setSelected] = useState([]);
   const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amount: '' });
+  const [reviewSort, setReviewSort] = useState({ column: null, dir: 'asc' });
+  function toggleReviewSort(column) {
+    setReviewSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
 
   function toggleSelect(id) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2842,6 +2846,8 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     // aprobado o sigue en REVIEW — así no se pierde el trabajo mientras completas el proceso.
     setVerified(r?.verifiedIds || []);
     setVerifiedHistory([]);
+    setReviewSort({ column: null, dir: 'asc' });
+    setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' });
   }
   const [verifiedHistory, setVerifiedHistory] = useState([]);
   function toggleVerified(id) {
@@ -2946,12 +2952,20 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         ];
         const priorApprovedTotal = allMatching.filter(t => priorApprovedVerified.has(t.id)).reduce((s, t) => s + t.amount, 0);
         const periodTx = allMatching.filter(t => !priorApprovedVerified.has(t.id)).sort((a, b) => a.date.localeCompare(b.date));
-        const filteredPeriodTx = periodTx.filter(t => {
+        const filteredPeriodTxUnsorted = periodTx.filter(t => {
           if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
           if (reviewFilters.dateTo && t.date > reviewFilters.dateTo) return false;
           if (reviewFilters.description.trim() && !t.description.toUpperCase().includes(reviewFilters.description.trim().toUpperCase())) return false;
           if (reviewFilters.amount.trim() && Math.abs(Math.abs(t.amount) - Number(reviewFilters.amount)) > 0.005) return false;
           return true;
+        });
+        const filteredPeriodTx = filteredPeriodTxUnsorted.slice().sort((a, b) => {
+          if (!reviewSort.column) return 0;
+          let cmp = 0;
+          if (reviewSort.column === 'date') cmp = a.date.localeCompare(b.date);
+          else if (reviewSort.column === 'description') cmp = a.description.localeCompare(b.description);
+          else if (reviewSort.column === 'amount') cmp = a.amount - b.amount;
+          return reviewSort.dir === 'asc' ? cmp : -cmp;
         });
         const verifiedTx = periodTx.filter(t => verified.includes(t.id));
         const liveLedger = priorApprovedTotal + verifiedTx.reduce((s, t) => s + t.amount, 0);
@@ -3002,8 +3016,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   <th style={{ padding: '4px' }}>
                     <input type="checkbox" checked={filteredPeriodTx.length > 0 && filteredPeriodTx.every(t => verified.includes(t.id))} onChange={() => toggleVerifiedAll(filteredPeriodTx)} />
                   </th>
-                  <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
-                  <th style={{ padding: '4px' }}>Amount</th><th style={{ padding: '4px' }}>Account</th>
+                  <th style={{ padding: '4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReviewSort('date')}>Date {reviewSort.column === 'date' ? (reviewSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+                  <th style={{ padding: '4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReviewSort('description')}>Description {reviewSort.column === 'description' ? (reviewSort.dir === 'asc' ? 'A-Z' : 'Z-A') : ''}</th>
+                  <th style={{ padding: '4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReviewSort('amount')}>Amount {reviewSort.column === 'amount' ? (reviewSort.dir === 'asc' ? '▲ min-max' : '▼ max-min') : ''}</th>
+                  <th style={{ padding: '4px' }}>Account</th>
                 </tr></thead>
                 <tbody>
                   {filteredPeriodTx.map(t => (
