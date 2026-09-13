@@ -2768,6 +2768,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [selected, setSelected] = useState([]);
   const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amount: '' });
   const [reviewSort, setReviewSort] = useState({ column: null, dir: 'asc' });
+  const [reviewSign, setReviewSign] = useState(''); // '' | 'positive' | 'negative'
+  const [reviewDates, setReviewDates] = useState([]); // fechas específicas seleccionadas (vacío = todas)
+  const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
   function toggleReviewSort(column) {
     setReviewSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
   }
@@ -2848,6 +2851,8 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     setVerifiedHistory([]);
     setReviewSort({ column: null, dir: 'asc' });
     setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' });
+    setReviewSign('');
+    setReviewDates([]);
   }
   const [verifiedHistory, setVerifiedHistory] = useState([]);
   function toggleVerified(id) {
@@ -2952,11 +2957,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         ];
         const priorApprovedTotal = allMatching.filter(t => priorApprovedVerified.has(t.id)).reduce((s, t) => s + t.amount, 0);
         const periodTx = allMatching.filter(t => !priorApprovedVerified.has(t.id)).sort((a, b) => a.date.localeCompare(b.date));
+        const availableDates = Array.from(new Set(periodTx.map(t => t.date))).sort();
         const filteredPeriodTxUnsorted = periodTx.filter(t => {
           if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
           if (reviewFilters.dateTo && t.date > reviewFilters.dateTo) return false;
           if (reviewFilters.description.trim() && !t.description.toUpperCase().includes(reviewFilters.description.trim().toUpperCase())) return false;
           if (reviewFilters.amount.trim() && Math.abs(Math.abs(t.amount) - Number(reviewFilters.amount)) > 0.005) return false;
+          if (reviewSign === 'positive' && t.amount < 0) return false;
+          if (reviewSign === 'negative' && t.amount >= 0) return false;
+          if (reviewDates.length > 0 && !reviewDates.includes(t.date)) return false;
           return true;
         });
         const filteredPeriodTx = filteredPeriodTxUnsorted.slice().sort((a, b) => {
@@ -2972,7 +2981,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
         const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
         const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
-        const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amount.trim();
+        const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amount.trim() || reviewSign || reviewDates.length > 0;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 900, maxHeight: '85vh', overflow: 'auto' }}>
@@ -3006,8 +3015,35 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   <input type="date" value={reviewFilters.dateTo} onChange={e => setReviewFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
                 <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Amount</label>
                   <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 110 }} value={reviewFilters.amount} onChange={e => setReviewFilters(f => ({ ...f, amount: e.target.value }))} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Sign</label>
+                  <select value={reviewSign} onChange={e => setReviewSign(e.target.value)}>
+                    <option value="">All</option>
+                    <option value="positive">Positive only</option>
+                    <option value="negative">Negative only</option>
+                  </select></div>
+                <div style={{ position: 'relative' }}>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Dates</label>
+                  <button onClick={() => setDateDropdownOpen(o => !o)} style={{ ...iconBtn, minWidth: 130, textAlign: 'left' }}>
+                    {reviewDates.length === 0 ? 'All dates' : `${reviewDates.length} selected`} ▾
+                  </button>
+                  {dateDropdownOpen && (
+                    <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 220, overflowY: 'auto', width: 160, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', padding: 6 }}>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 11, marginBottom: 6, borderBottom: '1px solid #F0F1F3', paddingBottom: 6 }}>
+                        <span onClick={() => setReviewDates(availableDates)} style={{ cursor: 'pointer', color: '#0C447C' }}>Select all</span>
+                        <span onClick={() => setReviewDates([])} style={{ cursor: 'pointer', color: '#0C447C' }}>Clear</span>
+                      </div>
+                      {availableDates.map(d => (
+                        <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 0', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={reviewDates.includes(d)}
+                            onChange={() => setReviewDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])} />
+                          {d}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {reviewFiltersActive && (
-                  <button onClick={() => setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' })} style={iconBtn}>Clear filters</button>
+                  <button onClick={() => { setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' }); setReviewSign(''); setReviewDates([]); }} style={iconBtn}>Clear filters</button>
                 )}
                 {reviewFiltersActive && <span style={{ fontSize: 11, color: '#6B7280', alignSelf: 'center' }}>{filteredPeriodTx.length} of {periodTx.length} shown</span>}
               </div>
