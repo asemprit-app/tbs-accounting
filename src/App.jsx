@@ -2718,6 +2718,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankJE());
   const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
 
   function blankJE() {
     return { date: todayStr(), memo: '', lines: [{ gl: '', debit: '', credit: '', desc: '' }, { gl: '', debit: '', credit: '', desc: '' }] };
@@ -2736,9 +2737,26 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     if (form.lines.some(l => !l.gl)) { setError('Each line needs an account.'); return; }
     if (!balanced) { setError("The entry doesn't balance: Debit and Credit must be equal and greater than zero."); return; }
     setError('');
-    setJournalEntries(prev => [...prev, { ...form, id: uid() }]);
+    if (editingId) {
+      setJournalEntries(prev => prev.map(j => j.id === editingId ? { ...form, id: editingId } : j));
+    } else {
+      setJournalEntries(prev => [...prev, { ...form, id: uid() }]);
+    }
     setForm(blankJE());
+    setEditingId(null);
     setShowForm(false);
+  }
+  function editJE(je) {
+    setForm({ date: je.date, memo: je.memo, lines: je.lines.map(l => ({ ...l })) });
+    setEditingId(je.id);
+    setShowForm(true);
+    setError('');
+  }
+  function cancelForm() {
+    setForm(blankJE());
+    setEditingId(null);
+    setShowForm(false);
+    setError('');
   }
   function removeJE(id) {
     setJournalEntries(prev => prev.filter(j => j.id !== id));
@@ -2748,13 +2766,14 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Journal Entries</h2>
-        <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+        <button onClick={() => { if (showForm) { cancelForm(); } else { setForm(blankJE()); setEditingId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
           <Plus size={15} /> New entry
         </button>
       </div>
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>{editingId ? 'Editing entry' : 'New entry'}</div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
@@ -2786,7 +2805,10 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
             <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? "Balanced" : "Doesn't balance"}</span>
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-          <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save entry</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>{editingId ? 'Update entry' : 'Save entry'}</button>
+            {editingId && <button onClick={cancelForm} style={iconBtn}>Cancel</button>}
+          </div>
         </Card>
       )}
 
@@ -2795,7 +2817,10 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
           <div key={je.id} style={{ borderBottom: '1px solid #F0F1F3', padding: '8px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
               <span>{je.date} — {je.memo || 'No memo'}</span>
-              <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => editJE(je)} style={iconBtn}>Edit</button>
+                <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
+              </div>
             </div>
             {je.lines.map((l, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6B7280', paddingLeft: 12 }}>
