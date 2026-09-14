@@ -391,7 +391,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount), sourceGL: row.source_gl })));
         setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0 })));
         setCustomersRaw(c.data || []);
-        setAccountsRaw(a.data || []);
+        setAccountsRaw((a.data || []).map(row => ({ ...row, isCogs: !!row.is_cogs })));
         setRulesRaw(r.data || []);
         setJournalEntriesRaw(j.data || []);
         setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end, verifiedIds: row.verified_ids || [] })));
@@ -442,12 +442,12 @@ async function fetchAllRows(table, clientId, orderCol) {
       const prevMap = new Map(prev.map(x => [x.code, x]));
       const nextMap = new Map(next.map(x => [x.code, x]));
       const toDelete = prev.filter(x => !nextMap.has(x.code)).map(x => x.code);
-      const toInsert = next.filter(x => !prevMap.has(x.code)).map(x => ({ ...x, client_id: clientId }));
+      const toInsert = next.filter(x => !prevMap.has(x.code)).map(x => ({ code: x.code, name: x.name, type: x.type, is_cogs: x.isCogs || false, client_id: clientId }));
       const toUpdate = next.filter(x => prevMap.has(x.code) && JSON.stringify(prevMap.get(x.code)) !== JSON.stringify(x));
       if (toDelete.length) pendingWrites.push(supabase.from('accounts').delete().eq('client_id', clientId).in('code', toDelete));
       if (toInsert.length) pendingWrites.push(supabase.from('accounts').insert(toInsert));
       toUpdate.forEach(row => {
-        pendingWrites.push(supabase.from('accounts').update({ name: row.name, type: row.type }).eq('client_id', clientId).eq('code', row.code));
+        pendingWrites.push(supabase.from('accounts').update({ name: row.name, type: row.type, is_cogs: row.isCogs || false }).eq('client_id', clientId).eq('code', row.code));
       });
       return next;
     });
@@ -1811,7 +1811,12 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
   const totalRevenue = revenueRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
   const expenseRows = expenseAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
-  const totalExpense = expenseRows.reduce((s, r) => s + r.value, 0);
+  const cogsRows = expenseRows.filter(r => r.isCogs);
+  const otherExpenseRows = expenseRows.filter(r => !r.isCogs);
+  const totalCogs = cogsRows.reduce((s, r) => s + r.value, 0);
+  const totalOtherExpense = otherExpenseRows.reduce((s, r) => s + r.value, 0);
+  const totalExpense = totalCogs + totalOtherExpense;
+  const grossProfit = totalRevenue - totalCogs;
   const netIncome = totalRevenue - totalExpense;
 
   const assetRows = assetAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
@@ -1877,9 +1882,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       const rows = [
         ...revenueRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ...(invoiceRevenueInPeriod !== 0 ? [['', 'Invoicing (Service Revenue)', invoiceRevenueInPeriod]] : []),
-        ['', 'Total Revenue', totalRevenue],
-        ...expenseRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Total Expenses', totalExpense],
+        ['', 'Total Sales', totalRevenue],
+        ...(cogsRows.length > 0 ? [
+          ...cogsRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+          ['', 'Total COGS', totalCogs],
+          ['', 'Gross Profit', grossProfit],
+        ] : []),
+        ...otherExpenseRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
+        ['', 'Total Expenses', totalOtherExpense],
         ['', 'Net Income', netIncome],
       ];
       return { title: `P&L — ${from} to ${to}`, header: ['Code', 'Account', 'Amount'], rows };
@@ -2157,13 +2167,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Income Statement)</div>
-          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Sales</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} gl="__invoices__" mode="period" />}
-          <Row label="Total Revenue" value={totalRevenue} bold />
+          <Row label="Total Sales" value={totalRevenue} bold />
+          {cogsRows.length > 0 && (
+            <>
+              <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Cost of Goods Sold</div>
+              {cogsRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
+              <Row label="Total COGS" value={totalCogs} bold />
+              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
+                <Row label="Gross Profit" value={grossProfit} bold />
+              </div>
+            </>
+          )}
           <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
-          {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
-          <Row label="Total Expenses" value={totalExpense} bold />
+          {otherExpenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
+          <Row label="Total Expenses" value={totalOtherExpense} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Net Income" value={netIncome} bold />
           </div>
@@ -2455,7 +2475,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                   </tr></thead>
                   <tbody>
                     {rows.map((r, i) => {
-                      const isTotal = typeof r[1] === 'string' && /^Total|^Net |ACTIVITIES$|OVERVIEW$/.test(r[1]);
+                      const isTotal = typeof r[1] === 'string' && /^Total|^Net |^Gross Profit$|ACTIVITIES$|OVERVIEW$/.test(r[1]);
                       return (
                         <tr key={i} style={{ fontWeight: isTotal ? 700 : 400, borderTop: isTotal ? '1px solid #E2E5E9' : 'none' }}>
                           {r.map((cell, ci) => (
@@ -2479,10 +2499,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 }
 
 function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
-  const [form, setForm] = useState({ code: '', name: '', type: 'Expense' });
+  const [form, setForm] = useState({ code: '', name: '', type: 'Expense', isCogs: false });
   const [error, setError] = useState('');
   const [editingCode, setEditingCode] = useState(null);
-  const [editDraft, setEditDraft] = useState({ name: '', type: 'Expense' });
+  const [editDraft, setEditDraft] = useState({ name: '', type: 'Expense', isCogs: false });
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null); // 'ok' | 'error' | null
 
@@ -2498,18 +2518,18 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
     if (!form.code.trim() || !form.name.trim()) { setError('Enter a code and name.'); return; }
     if (accounts.some(a => a.code === form.code.trim())) { setError('That code already exists.'); return; }
     setError('');
-    setAccounts(prev => [...prev, { code: form.code.trim(), name: form.name.trim(), type: form.type }]);
-    setForm({ code: '', name: '', type: 'Expense' });
+    setAccounts(prev => [...prev, { code: form.code.trim(), name: form.name.trim(), type: form.type, isCogs: form.type === 'Expense' ? form.isCogs : false }]);
+    setForm({ code: '', name: '', type: 'Expense', isCogs: false });
   }
   function updateAccount(code, field, value) {
     setAccounts(prev => prev.map(a => a.code === code ? { ...a, [field]: value } : a));
   }
   function startEdit(a) {
     setEditingCode(a.code);
-    setEditDraft({ name: a.name, type: a.type });
+    setEditDraft({ name: a.name, type: a.type, isCogs: !!a.isCogs });
   }
   function saveEdit(code) {
-    setAccounts(prev => prev.map(a => a.code === code ? { ...a, name: editDraft.name, type: editDraft.type } : a));
+    setAccounts(prev => prev.map(a => a.code === code ? { ...a, name: editDraft.name, type: editDraft.type, isCogs: editDraft.type === 'Expense' ? editDraft.isCogs : false } : a));
     setEditingCode(null);
   }
   function removeAccount(code) {
@@ -2561,6 +2581,11 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
                 {types.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
+            {form.type === 'Expense' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, marginBottom: 8 }}>
+                <input type="checkbox" checked={form.isCogs} onChange={e => setForm(f => ({ ...f, isCogs: e.target.checked }))} /> Cost of Goods Sold
+              </label>
+            )}
             <button onClick={addAccount} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
               <Plus size={15} /> Add account
             </button>
@@ -2586,6 +2611,11 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
                         <select value={editDraft.type} onChange={e => setEditDraft(d => ({ ...d, type: e.target.value }))}>
                           {types.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
+                        {editDraft.type === 'Expense' && (
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, marginTop: 4, whiteSpace: 'nowrap' }}>
+                            <input type="checkbox" checked={editDraft.isCogs} onChange={e => setEditDraft(d => ({ ...d, isCogs: e.target.checked }))} /> COGS
+                          </label>
+                        )}
                       </td>
                       <td style={{ padding: '6px 4px', width: 90, display: 'flex', gap: 4 }}>
                         <button onClick={() => saveEdit(a.code)} style={iconBtn}><Check size={14} /></button>
@@ -2595,7 +2625,7 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
                   ) : (
                     <>
                       <td style={{ padding: '6px 4px' }}>{a.name}</td>
-                      <td style={{ padding: '6px 4px', width: 130, color: '#6B7280' }}>{a.type}</td>
+                      <td style={{ padding: '6px 4px', width: 130, color: '#6B7280' }}>{a.type}{a.isCogs ? ' (COGS)' : ''}</td>
                       {isMaster && (
                         <td style={{ padding: '6px 4px', width: 90, display: 'flex', gap: 4 }}>
                           <button onClick={() => startEdit(a)} style={iconBtn}>Edit</button>
