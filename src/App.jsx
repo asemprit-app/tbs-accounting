@@ -738,11 +738,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' });
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
-  const [bulkGL, setBulkGL] = useState('');
+  const [bulkGL, setBulkGL] = useState(null);
   const [bulkSourceGL, setBulkSourceGL] = useState('');
 
   const reconciledIds = useMemo(() => {
@@ -764,6 +764,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.status && t.status !== filters.status) return false;
       const abs = Math.abs(t.amount);
       if (filters.amount.trim() && Math.abs(abs - Number(filters.amount)) > 0.005) return false;
+      if (filters.sign === 'positive' && t.amount < 0) return false;
+      if (filters.sign === 'negative' && t.amount >= 0) return false;
       if (filters.reconciled) {
         const isReconciled = reconciledIds.has(t.id);
         const isPending = (pendingReviewIds || []).includes(t.id);
@@ -775,7 +777,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       return true;
     });
   }, [transactions, filters, search, reconciledIds, pendingReviewIds]);
-  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || search.trim();
+  const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || filters.sign || search.trim();
 
   const quickPeriods = useMemo(() => {
     const months = new Set();
@@ -880,10 +882,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setSelected(allSelected ? selected.filter(id => !visibleIds.includes(id)) : Array.from(new Set([...selected, ...visibleIds])));
   }
   function applyBulkCategory() {
-    if (!bulkGL || selected.length === 0) return;
-    setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, gl: bulkGL, status: 'AUTO' } : t));
+    if (bulkGL === null || selected.length === 0) return;
+    const status = bulkGL === '' ? 'REVIEW' : 'AUTO';
+    setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, gl: bulkGL, status } : t));
     setSelected([]);
-    setBulkGL('');
+    setBulkGL(null);
   }
   function deleteSelected() {
     const reconciledSelected = selected.filter(id => reconciledIds.has(id));
@@ -1156,8 +1159,14 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="pending">Marked (pending)</option>
               <option value="none">Not marked</option>
             </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sign</label>
+            <select value={filters.sign} onChange={e => setFilters(f => ({ ...f, sign: e.target.value }))}>
+              <option value="">All</option>
+              <option value="positive">Positive only</option>
+              <option value="negative">Negative only</option>
+            </select></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
@@ -1205,9 +1214,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
             <div style={{ width: 220 }}>
-              <AccountSearchSelect value={bulkGL} onChange={setBulkGL} accounts={accounts} emptyLabel="Choose account..." />
+              <AccountSearchSelect value={bulkGL === null ? '' : bulkGL} onChange={v => setBulkGL(v)} accounts={accounts} emptyLabel="Uncategorized" />
             </div>
-            <button onClick={applyBulkCategory} disabled={!bulkGL} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
+            <button onClick={applyBulkCategory} disabled={bulkGL === null} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply category</button>
             <div style={{ width: 220 }}>
               <AccountSearchSelect value={bulkSourceGL} onChange={setBulkSourceGL} accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} emptyLabel="Choose account..." />
             </div>
