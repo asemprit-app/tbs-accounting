@@ -2068,6 +2068,24 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     </div>
   );
 
+  const monthYearOptions = useMemo(() => {
+    const months = new Set();
+    transactions.forEach(t => months.add(t.date.slice(0, 7)));
+    return Array.from(months).sort().reverse().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const first = `${m}-01`;
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      const last = `${m}-${String(lastDay).padStart(2, '0')}`;
+      return { value: m, label, first, last };
+    });
+  }, [transactions]);
+  function applyMonthYear(value) {
+    if (!value) return;
+    const opt = monthYearOptions.find(o => o.value === value);
+    if (opt) { setCustomFrom(opt.first); setCustomTo(opt.last); setPreset('custom'); }
+  }
+
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Financial Reports</h2>
@@ -2081,6 +2099,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
               {label}
             </button>
           ))}
+          <div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Month/Year</label>
+            <select onChange={e => applyMonthYear(e.target.value)} defaultValue="">
+              <option value="">Select…</option>
+              {monthYearOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
           {preset === 'custom' && (
             <>
               <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
