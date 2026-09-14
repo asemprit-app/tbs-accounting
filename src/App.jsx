@@ -960,6 +960,16 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   function updateSourceGL(id, sourceGL) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t));
   }
+  function updateDate(id, date) {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t));
+  }
+  function updateDescription(id, description) {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, description } : t));
+  }
+  function updateAmount(id, amount) {
+    if (amount === '' || isNaN(Number(amount))) return;
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t));
+  }
   function applyBulkAccount() {
     if (!bulkSourceGL || selected.length === 0) return;
     setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, sourceGL: bulkSourceGL } : t));
@@ -1245,9 +1255,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>
                   <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggleSelect(t.id)} />
                 </td>
-                <td style={{ padding: '6px 4px' }}>{t.date}</td>
-                <td style={{ padding: '6px 4px' }}>{t.description}</td>
-                <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
+                <td style={{ padding: '6px 4px' }}>
+                  <input type="date" style={{ width: 130 }} value={t.date} onChange={e => updateDate(t.id, e.target.value)} />
+                </td>
+                <td style={{ padding: '6px 4px', minWidth: 200 }}>
+                  <input type="text" style={{ width: '100%', boxSizing: 'border-box' }} value={t.description} onChange={e => updateDescription(t.id, e.target.value)} />
+                </td>
+                <td style={{ padding: '6px 4px' }}>
+                  <input type="number" step="0.01" style={{ width: 100 }} defaultValue={t.amount} key={t.id + '-' + t.amount} onBlur={e => updateAmount(t.id, e.target.value)} />
+                </td>
                 <td style={{ padding: '6px 4px', minWidth: 160 }}>
                   <AccountSearchSelect value={t.sourceGL || ''} onChange={gl => updateSourceGL(t.id, gl)}
                     accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} emptyLabel="—" />
