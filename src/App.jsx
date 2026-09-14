@@ -174,17 +174,17 @@ function AccountSearchSelect({ value, onChange, accounts, emptyLabel, width }) {
       {open && (
         <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 240, overflowY: 'auto', width: 280, boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
           {emptyLabel && (
-            <div onClick={() => pick('')} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: '#6B7280' }}>{emptyLabel}</div>
+            <div onClick={() => pick('')} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 14, color: '#6B7280' }}>{emptyLabel}</div>
           )}
           {grouped.map(g => (
             <div key={g.type}>
-              <div style={{ padding: '4px 10px', fontSize: 11, fontWeight: 700, color: '#6B7280', background: '#F7F8FA' }}>{ACCOUNT_TYPE_LABELS[g.type]}</div>
+              <div style={{ padding: '4px 10px', fontSize: 12, fontWeight: 700, color: '#6B7280', background: '#F7F8FA' }}>{ACCOUNT_TYPE_LABELS[g.type]}</div>
               {g.rows.map(a => (
-                <div key={a.code} onClick={() => pick(a.code)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>{a.code} — {a.name}</div>
+                <div key={a.code} onClick={() => pick(a.code)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 14 }}>{a.code} — {a.name}</div>
               ))}
             </div>
           ))}
-          {grouped.length === 0 && <div style={{ padding: '8px 10px', fontSize: 12, color: '#6B7280' }}>No matches</div>}
+          {grouped.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No matches</div>}
         </div>
       )}
     </div>
@@ -303,11 +303,11 @@ export default function App() {
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 28, width: 320 }}>
           <div style={{ fontWeight: 700, fontSize: 18, color: '#17365D', marginBottom: 16 }}>TBS Accounting — Sign In</div>
           <form onSubmit={handleLogin}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Email</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Email</label>
             <input type="email" required style={{ width: '100%', marginBottom: 10 }} value={authForm.email} onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))} />
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 4 }}>Password</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Password</label>
             <input type="password" required style={{ width: '100%', marginBottom: 16 }} value={authForm.password} onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))} />
-            {authError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{authError}</div>}
+            {authError && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10 }}>{authError}</div>}
             <button type="submit" disabled={authBusy} style={{ width: '100%', background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '10px', cursor: 'pointer' }}>
               {authBusy ? 'Signing in…' : 'Sign In'}
             </button>
@@ -527,12 +527,12 @@ async function fetchAllRows(table, clientId, orderCol) {
         selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
-          <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+          <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
             Could not connect to the database: {loadError}. Check your .env file (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
           </div>
         )}
         {!loaded ? (
-          <div style={{ fontSize: 13, color: '#6B7280' }}>Loading data...</div>
+          <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
         {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} />}
@@ -586,7 +586,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
       <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>{businessName || 'Accounting'}</div>
       {isStaff && (
         <select value={selectedClientId} onChange={e => onSwitchClient(e.target.value)}
-          style={{ margin: '0 10px 16px', fontSize: 12, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
+          style={{ margin: '0 10px 16px', fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       )}
@@ -603,7 +603,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
             <Icon size={17} />
             <span style={{ flex: 1 }}>{it.label}</span>
             {!!it.badge && (
-              <span style={{ background: '#E24B4A', color: '#fff', fontSize: 11, borderRadius: 10, padding: '1px 7px' }}>
+              <span style={{ background: '#E24B4A', color: '#fff', fontSize: 12, borderRadius: 10, padding: '1px 7px' }}>
                 {it.badge}
               </span>
             )}
@@ -611,7 +611,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
         );
       })}
       <div style={{ flex: 1 }} />
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, fontSize: 12 }}>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 10, fontSize: 13 }}>
         <div style={{ opacity: 0.8, marginBottom: 6, wordBreak: 'break-all' }}>{userEmail}</div>
         <div onClick={onLogout} style={{ cursor: 'pointer', opacity: 0.9 }}>Sign out</div>
       </div>
@@ -664,7 +664,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
         {cards.map(c => (
           <Card key={c.label}>
-            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>{c.label}</div>
+            <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 6 }}>{c.label}</div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>{c.value}</div>
           </Card>
         ))}
@@ -672,12 +672,12 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Recent activity</div>
         {transactions.slice(-5).reverse().map(t => (
-          <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: '1px solid #F0F1F3' }}>
+          <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '6px 0', borderBottom: '1px solid #F0F1F3' }}>
             <span>{t.date} — {t.description}</span>
             <span>{money(t.amount)}</span>
           </div>
         ))}
-        {transactions.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No transactions yet. Go to the Transactions tab to add one.</div>}
+        {transactions.length === 0 && <div style={{ fontSize: 14, color: '#6B7280' }}>No transactions yet. Go to the Transactions tab to add one.</div>}
       </Card>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -704,7 +704,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
       )}
 
       <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Month</th><th style={{ padding: '6px 4px' }}>Revenue</th><th style={{ padding: '6px 4px' }}>Expenses</th><th style={{ padding: '6px 4px' }}>Net</th>
           </tr></thead>
@@ -719,7 +719,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
             ))}
           </tbody>
         </table>
-        {byMonth.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the trend.</div>}
+        {byMonth.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>Add transactions and invoices to see the trend.</div>}
       </Card>
     </div>
   );
@@ -1043,15 +1043,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
 
       {showImport && (
         <Card style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 6 }}>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 6 }}>
             Paste the CSV content: one row per line, format <code>date,description,amount</code> (negative amount = outflow, positive = inflow) —
             or <code>date,description,category,amount</code> (Wave export).
           </div>
           <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 10 }}>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="radio" checked={importSource === 'bank'} onChange={() => setImportSource('bank')} /> Bank (expenses negative)
             </label>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="radio" checked={importSource === 'card'} onChange={() => setImportSource('card')} /> Credit card (expenses positive)
             </label>
             {importSource === 'card' && (
@@ -1067,10 +1067,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               </select>
             )}
           </div>
-          <textarea rows={6} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
+          <textarea rows={6} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
             placeholder={'2026-09-05,RESTAURANTE GUSTO SEVILLA,-45.20\n2026-09-06,EFT DEPOSIT CLIENTE ABC,850.00'}
             value={csvText} onChange={e => setCsvText(e.target.value)} />
-          {importError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{importError}</div>}
+          {importError && <div style={{ color: '#B00020', fontSize: 13, marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{importError}</div>}
           <div style={{ marginTop: 8 }}>
             <button onClick={importCSV} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Import and categorize</button>
           </div>
@@ -1080,21 +1080,21 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Description</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Description</label>
             <input style={{ width: '100%' }} placeholder="E.g. RESTAURANT GUSTO SEVILLA" value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Amount</label>
             <input type="number" step="0.01" style={{ width: 120 }} placeholder="0.00" value={form.amount}
               onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account (bank/card)</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Account (bank/card)</label>
             <select value={form.sourceGL} onChange={e => setForm(f => ({ ...f, sourceGL: e.target.value }))}>
               <option value="">—</option>
               <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
@@ -1104,17 +1104,17 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <Plus size={15} /> Add
           </button>
         </div>
-        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+        {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Search description</label>
             <input style={{ width: '100%' }} placeholder="E.g. STARBUCKS, UTILITIES..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Period</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Period</label>
             <select onChange={e => applyQuickPeriod(e.target.value)} defaultValue="">
               <option value="">Custom range...</option>
               <optgroup label="Years">
@@ -1125,11 +1125,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               </optgroup>
             </select>
           </div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>From</label>
             <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>To</label>
             <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Category</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Category</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
               <option value="">All</option>
               <option value="__uncat__">Uncategorized (all)</option>
@@ -1137,29 +1137,29 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <option value="__uncat_expense__">Uncategorized Expenses</option>
               <AccountOptions accounts={accounts} />
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={filters.sourceGL} onChange={e => setFilters(f => ({ ...f, sourceGL: e.target.value }))}>
               <option value="">All</option>
               <option value="__unassigned__">Unassigned</option>
               <AccountOptions accounts={accounts.filter(a => a.type === 'Asset' || a.type === 'Liability')} />
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Status</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Status</label>
             <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
               <option value="">All</option>
               <option value="AUTO">AUTO</option>
               <option value="MATCH">MATCH</option>
               <option value="REVIEW">REVIEW</option>
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Amount</label>
             <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 120 }} value={filters.amount} onChange={e => setFilters(f => ({ ...f, amount: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reconciled</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Reconciled</label>
             <select value={filters.reconciled} onChange={e => setFilters(f => ({ ...f, reconciled: e.target.value }))}>
               <option value="">All</option>
               <option value="reconciled">Reconciled</option>
               <option value="pending">Marked (pending)</option>
               <option value="none">Not marked</option>
             </select></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sign</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Sign</label>
             <select value={filters.sign} onChange={e => setFilters(f => ({ ...f, sign: e.target.value }))}>
               <option value="">All</option>
               <option value="positive">Positive only</option>
@@ -1169,7 +1169,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
-        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
+        {filtersActive && <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
       </Card>
 
       {ruleSuggestions.length > 0 && (
@@ -1178,23 +1178,23 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             <div style={{ fontWeight: 700 }}>Rule suggestions ({ruleSuggestions.length})</div>
             {selectedSuggestions.length > 0 && (
               <div style={{ display: 'flex', gap: 6 }}>
-                <span style={{ fontSize: 12, color: '#6B7280', alignSelf: 'center' }}>{selectedSuggestions.length} selected</span>
+                <span style={{ fontSize: 13, color: '#6B7280', alignSelf: 'center' }}>{selectedSuggestions.length} selected</span>
                 <button onClick={createSelectedSuggestions} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}>Create selected</button>
                 <button onClick={dismissSelectedSuggestions} style={iconBtn}>Dismiss selected</button>
               </div>
             )}
           </div>
-          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
             These patterns repeated 4 or more times with the same category. Create the rule so similar future transactions get categorized automatically.
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #E2E5E9', fontSize: 12, color: '#6B7280' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #E2E5E9', fontSize: 13, color: '#6B7280' }}>
             <input type="checkbox" checked={ruleSuggestions.length > 0 && ruleSuggestions.every(s => selectedSuggestions.includes(s.key + '|' + s.gl))} onChange={toggleSuggestionAll} style={{ marginRight: 8 }} />
             Select all
           </div>
           {ruleSuggestions.map(s => {
             const id = s.key + '|' + s.gl;
             return (
-              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 13 }}>
+              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #F0F1F3', fontSize: 14 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input type="checkbox" checked={selectedSuggestions.includes(id)} onChange={() => toggleSuggestion(id)} />
                   "{s.key}" → {s.gl} — {glName(s.gl)} <span style={{ color: '#6B7280' }}>({s.count} times)</span>
@@ -1212,7 +1212,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       {selected.length > 0 && (
         <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{selected.length} selected</span>
             <div style={{ width: 220 }}>
               <AccountSearchSelect value={bulkGL === null ? '' : bulkGL} onChange={v => setBulkGL(v)} accounts={accounts} emptyLabel="Uncategorized" />
             </div>
@@ -1228,7 +1228,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       )}
 
       <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
               <th style={{ padding: '6px 4px' }}>
@@ -1251,12 +1251,12 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3', background: '#FAF7FF' }}>
                 <td style={{ padding: '6px 4px' }}></td>
                 <td style={{ padding: '6px 4px' }}>{t.date}</td>
-                <td style={{ padding: '6px 4px' }}>{t.description} <span style={{ fontSize: 10, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
+                <td style={{ padding: '6px 4px' }}>{t.description} <span style={{ fontSize: 11, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
                 <td style={{ padding: '6px 4px' }}>{money(t.amount)}</td>
-                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>—</td>
-                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>{glName(t.gl)}</td>
+                <td style={{ padding: '6px 4px', fontSize: 13, color: '#6B7280' }}>—</td>
+                <td style={{ padding: '6px 4px', fontSize: 13, color: '#6B7280' }}>{glName(t.gl)}</td>
                 <td style={{ padding: '6px 4px' }}><StatusBadge status="JOURNAL ENTRY" /></td>
-                <td style={{ padding: '6px 4px', fontSize: 12, color: '#6B7280' }}>—</td>
+                <td style={{ padding: '6px 4px', fontSize: 13, color: '#6B7280' }}>—</td>
                 <td style={{ padding: '6px 4px' }}></td>
               </tr>
             ) : (
@@ -1286,10 +1286,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 </td>
                 <td style={{ padding: '6px 4px' }}>
                   {reconciledIds.has(t.id)
-                    ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 12 }}>✓ Reconciled</span>
+                    ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 13 }}>✓ Reconciled</span>
                     : (pendingReviewIds || []).includes(t.id)
-                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 12 }}>Marked (pending)</span>
-                      : <span style={{ color: '#6B7280', fontSize: 12 }}>—</span>}
+                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 13 }}>Marked (pending)</span>
+                      : <span style={{ color: '#6B7280', fontSize: 13 }}>—</span>}
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {t.status === 'REVIEW' && (
@@ -1305,9 +1305,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
             ))}
           </tbody>
         </table>
-        {combinedRows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
+        {combinedRows.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>{transactions.length === 0 ? 'No transactions yet. Add the first one above.' : 'No transactions match these filters.'}</div>}
         {combinedRows.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 13 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 14 }}>
             <span style={{ color: '#6B7280' }}>{combinedRows.length} total — page {page} of {totalPages}</span>
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={iconBtn}>Previous</button>
@@ -1327,7 +1327,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 420 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Split transaction — {money(original.amount)}</div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{original.description}</div>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>{original.description}</div>
               {splitLines.map((l, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <select style={{ flex: 1 }} value={l.gl} onChange={e => updateSplitLine(i, 'gl', e.target.value)}>
@@ -1339,11 +1339,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 </div>
               ))}
               <button onClick={addSplitLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Line</button>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600, padding: '6px 0', borderTop: '1px solid #E2E5E9', marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600, padding: '6px 0', borderTop: '1px solid #E2E5E9', marginBottom: 10 }}>
                 <span>Remaining to allocate</span>
                 <span style={{ color: balanced ? '#0F6E56' : '#B00020' }}>{money(remaining)}</span>
               </div>
-              {splitError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10 }}>{splitError}</div>}
+              {splitError && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10 }}>{splitError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancel</button>
                 <button onClick={confirmSplit} disabled={!balanced} style={{ background: balanced ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: balanced ? 'pointer' : 'default' }}>Confirm split</button>
@@ -1360,7 +1360,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 380 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Link to invoice real</div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
               <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
                 <option value="">Select the invoice</option>
                 {(() => {
@@ -1400,7 +1400,7 @@ function StatusBadge({ status }) {
     'JOURNAL ENTRY': { bg: '#EFE6FB', color: '#5B2C9E' },
   };
   const s = styles[status] || styles.REVIEW;
-  return <span style={{ background: s.bg, color: s.color, fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
+  return <span style={{ background: s.bg, color: s.color, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
 }
 
 function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint }) {
@@ -1479,11 +1479,11 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Customer</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Customer</label>
               <input style={{ width: '100%' }} value={form.client} onChange={e => setForm(f => ({ ...f, client: e.target.value }))} placeholder="Customer name" />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
           </div>
@@ -1493,25 +1493,25 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
               <input style={{ flex: 1 }} placeholder="Service description" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
               <input type="number" style={{ width: 70 }} placeholder="Qty." value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} />
               <input type="number" step="0.01" style={{ width: 100 }} placeholder="Price" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} />
-              <span style={{ width: 90, fontSize: 13, textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
+              <span style={{ width: 90, fontSize: 14, textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
               <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
             </div>
           ))}
           <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={form.retention} onChange={e => setForm(f => ({ ...f, retention: e.target.checked }))} />
               Apply withholding
             </label>
             {form.retention && (
               <input type="number" style={{ width: 60 }} value={form.retentionPct} onChange={e => setForm(f => ({ ...f, retentionPct: e.target.value }))} />
             )}
-            {form.retention && <span style={{ fontSize: 13 }}>%</span>}
+            {form.retention && <span style={{ fontSize: 14 }}>%</span>}
           </div>
 
           <div style={{ fontWeight: 700, marginBottom: 12 }}>Total: {money(invoiceTotal(form))}</div>
-          {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+          {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <button onClick={saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save invoice</button>
         </Card>
       )}
@@ -1519,14 +1519,14 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search (invoice # or customer)</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Search (invoice # or customer)</label>
             <input style={{ width: '100%' }} placeholder="E.g. 3133, Bivona's..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} />
           </div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>From</label>
             <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>To</label>
             <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
-          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Status</label>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Status</label>
             <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
               <option value="">All</option>
               <option value="Pending">Pending</option>
@@ -1538,7 +1538,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
           )}
         </div>
         {filtersActive && (
-          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10, display: 'flex', gap: 16 }}>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 10, display: 'flex', gap: 16 }}>
             <span>{filteredInvoices.length} of {invoices.length} invoices</span>
             <span>Total: <strong>{money(filteredTotal)}</strong></span>
             <span>Outstanding balance: <strong>{money(filteredBalance)}</strong></span>
@@ -1547,7 +1547,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
       </Card>
 
       <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
               <th style={{ padding: '6px 4px' }}>No.</th>
@@ -1585,7 +1585,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
             </tfoot>
           )}
         </table>
-        {filteredInvoices.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{invoices.length === 0 ? 'No invoices yet.' : 'No invoices match these filters.'}</div>}
+        {filteredInvoices.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>{invoices.length === 0 ? 'No invoices yet.' : 'No invoices match these filters.'}</div>}
       </Card>
 
       {payingId && (() => {
@@ -1596,10 +1596,10 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 320 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Apply payment — {inv.number}</div>
-              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>Outstanding balance: {money(balance)}</div>
+              <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 10 }}>Outstanding balance: {money(balance)}</div>
               <input type="number" step="0.01" style={{ width: '100%', marginBottom: 8 }} placeholder="Amount cobrado"
                 value={payAmount} onChange={e => setPayAmount(e.target.value)} />
-              {payError && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 8 }}>{payError}</div>}
+              {payError && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 8 }}>{payError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setPayingId(null)} style={iconBtn}>Cancel</button>
                 <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirm</button>
@@ -1626,8 +1626,8 @@ function InvoicePrintModal({ inv, total, onClose, businessName }) {
         </div>
         <ReportHeader businessName={businessName} reportName={`Invoice ${inv.number}`} periodStart={inv.date} periodEnd={inv.date} logoUrl={null} />
         <div>
-          <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{inv.client}</strong></div>
-          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
+          <div style={{ fontSize: 14, marginBottom: 16 }}>Customer: <strong>{inv.client}</strong></div>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
               <th style={{ padding: '4px 0' }}>Description</th><th>Qty.</th><th>Price</th><th style={{ textAlign: 'right' }}>Amount</th>
             </tr></thead>
@@ -1638,7 +1638,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName }) {
               ))}
             </tbody>
           </table>
-          {inv.retention && <div style={{ fontSize: 13, textAlign: 'right' }}>Withholding ({inv.retentionPct}%) applied</div>}
+          {inv.retention && <div style={{ fontSize: 14, textAlign: 'right' }}>Withholding ({inv.retentionPct}%) applied</div>}
           <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'right', marginTop: 8 }}>Total: {money(total)}</div>
         </div>
       </div>
@@ -1674,7 +1674,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
         </div>
       </Card>
       <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
           </tr></thead>
@@ -1688,7 +1688,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
             ))}
           </tbody>
         </table>
-        {allNames.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No customers yet.</div>}
+        {allNames.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No customers yet.</div>}
       </Card>
     </div>
   );
@@ -1711,8 +1711,8 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, onClose, busin
         </div>
         <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} periodStart={rows[0]?.date || todayStr()} periodEnd={todayStr()} logoUrl={null} />
         <div>
-          <div style={{ fontSize: 13, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
-          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
+          <div style={{ fontSize: 14, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', marginBottom: 16 }}>
             <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
               <th style={{ padding: '4px 0' }}>Invoice</th><th>Date</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Balance</th>
             </tr></thead>
@@ -2070,7 +2070,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     <div
       onClick={gl ? () => setDrillDown({ gl, label, mode }) : undefined}
       style={{
-        display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, fontWeight: bold ? 700 : 400,
+        display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 14, fontWeight: bold ? 700 : 400,
         cursor: gl ? 'pointer' : 'default', color: gl ? '#0C447C' : 'inherit', textDecoration: gl ? 'underline' : 'none',
       }}>
       <span>{label}</span><span>{money(value)}</span>
@@ -2103,13 +2103,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           {PRESETS.map(([id, label]) => (
             <button key={id} onClick={() => setPreset(id)}
-              style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 13,
+              style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 14,
                 background: preset === id ? '#17365D' : '#fff', color: preset === id ? '#fff' : '#1F2933' }}>
               {label}
             </button>
           ))}
           <div>
-            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Month/Year</label>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Month/Year</label>
             <select onChange={e => applyMonthYear(e.target.value)} defaultValue="">
               <option value="">Select…</option>
               {monthYearOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2117,27 +2117,27 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </div>
           {preset === 'custom' && (
             <>
-              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
+              <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
                 <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
-              <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
+              <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
                 <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
             </>
           )}
         </div>
-        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
+        <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Report</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Report</label>
             <select value={selectedReport} onChange={e => setSelectedReport(e.target.value)}>
               {REPORT_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
             </select>
           </div>
           {preset === 'custom' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport) && (
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Breakdown</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Breakdown</label>
               <select value={breakdown} onChange={e => setBreakdown(e.target.value)}>
                 <option value="none">Single total</option>
                 <option value="monthly">Monthly</option>
@@ -2150,18 +2150,18 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           <button onClick={downloadReportCSV} style={iconBtn}>Download CSV</button>
         </div>
         {preset === 'custom' && breakdown !== 'none' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport) && (
-          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 8 }}>Each column will be one {breakdown === 'monthly' ? 'month' : breakdown === 'quarterly' ? 'quarter' : 'year'} within your custom period.</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Each column will be one {breakdown === 'monthly' ? 'month' : breakdown === 'quarterly' ? 'quarter' : 'year'} within your custom period.</div>
         )}
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Income Statement)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Revenue</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           {invoiceRevenueInPeriod !== 0 && <Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} gl="__invoices__" mode="period" />}
           <Row label="Total Revenue" value={totalRevenue} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
+          <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
           {expenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
           <Row label="Total Expenses" value={totalExpense} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
@@ -2171,13 +2171,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (as of {to})</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Assets</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Assets</div>
           {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Assets" value={totalAssets} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Liabilities</div>
+          <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Liabilities</div>
           {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Liabilities" value={totalLiabilities} bold />
-          <div style={{ fontSize: 11, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
+          <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
           {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Period income" value={netIncome} />
           <Row label="Total Equity" value={totalEquity} bold />
@@ -2189,21 +2189,21 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Cash Flow</div>
-        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>{from} to {to}</div>
+        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 14 }}>{from} to {to}</div>
 
         <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', marginBottom: 4 }}>Operating Activities</div>
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Sales</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Sales</div>
         {cfSalesRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
         {invoiceRevenueInPeriod !== 0 && <div style={{ paddingLeft: 16 }}><Row label="Invoicing (Service Revenue)" value={invoiceRevenueInPeriod} gl="__invoices__" mode="period" /></div>}
         <div style={{ paddingLeft: 16 }}><Row label="Total Sales" value={cfTotalSales} bold /></div>
 
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Purchases</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Purchases</div>
         {cfPurchaseRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
         <div style={{ paddingLeft: 16 }}><Row label="Total Purchases" value={cfTotalPurchases} bold /></div>
 
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Payroll</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Payroll</div>
         {cfPayrollRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
-        {cfPayrollRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No payroll activity in this period.</div>}
+        {cfPayrollRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 13, color: '#6B7280' }}>No payroll activity in this period.</div>}
         <div style={{ paddingLeft: 16 }}><Row label="Total Payroll" value={cfTotalPayroll} bold /></div>
 
         <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
@@ -2212,25 +2212,25 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
         <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Investing Activities</div>
         {cfInvestingRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
-        {cfInvestingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No investing activity in this period.</div>}
+        {cfInvestingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 13, color: '#6B7280' }}>No investing activity in this period.</div>}
         <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
           <Row label="Net Cash from Investing Activities" value={cfInvesting} bold />
         </div>
 
         <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Financing Activities</div>
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Owners and Shareholders</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Owners and Shareholders</div>
         {cfFinancingRows.filter(r => r.value !== 0).map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="period" /></div>)}
-        {cfFinancingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 12, color: '#6B7280' }}>No financing activity in this period.</div>}
+        {cfFinancingRows.every(r => r.value === 0) && <div style={{ paddingLeft: 16, fontSize: 13, color: '#6B7280' }}>No financing activity in this period.</div>}
         <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
           <Row label="Net Cash from Financing Activities" value={cfFinancing} bold />
         </div>
 
         <div style={{ fontWeight: 700, background: '#F0F1F3', padding: '4px 8px', margin: '16px 0 4px' }}>Overview</div>
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Starting Balance (as of {dayBefore(from)})</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '6px 0 2px', paddingLeft: 8 }}>Starting Balance (as of {dayBefore(from)})</div>
         {cfStartingRows.map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="asOf" /></div>)}
         <div style={{ paddingLeft: 16 }}><Row label="Total Starting Balance" value={cfTotalStarting} bold /></div>
 
-        <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Ending Balance (as of {to})</div>
+        <div style={{ fontSize: 13, color: '#6B7280', margin: '10px 0 2px', paddingLeft: 8 }}>Ending Balance (as of {to})</div>
         {cfEndingRows.map(r => <div key={r.code} style={{ paddingLeft: 16 }}><Row label={r.name} value={r.value} gl={r.code} mode="asOf" /></div>)}
         <div style={{ paddingLeft: 16 }}><Row label="Total Ending Balance" value={cfTotalEnding} bold /></div>
 
@@ -2242,8 +2242,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </div>
         </div>
 
-        {cashRows.length === 0 && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10 }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
-        <div style={{ fontSize: 11, color: '#6B7280', marginTop: 14 }}>
+        {cashRows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', marginTop: 10 }}>No accounts are marked as bank/cash (the name must include "bank", "cash", or similar).</div>}
+        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 14 }}>
           Purchases/Payroll/Investing/Financing groupings are approximated from your account types and names (Wages/Payroll/FICA/SINOT/Income Tax → Payroll; other liabilities → Purchases; other assets → Investing; equity → Financing). Click any line to see the transactions behind it.
         </div>
       </Card>
@@ -2266,7 +2266,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             const clients = Object.keys(byClient);
             const totals = buckets.reduce((acc, b) => ({ ...acc, [b]: clients.reduce((s, c) => s + byClient[c][b], 0) }), {});
             return (
-              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'right', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ textAlign: 'left', padding: '4px' }}>Customer</th>
                   {buckets.map(b => <th key={b} style={{ padding: '4px' }}>{b}</th>)}
@@ -2293,12 +2293,12 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
         <Card>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Accounts Payable)</div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8 }}>Current balance of your liability accounts (cards, payroll, and taxes payable)</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Current balance of your liability accounts (cards, payroll, and taxes payable)</div>
           {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} gl={r.code} mode="asOf" />)}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Total A/P" value={-totalLiabilities} bold />
           </div>
-          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10 }}>
             This reflects your liability accounts as they stand today; the system doesn't yet track individual vendor bills.
           </div>
         </Card>
@@ -2306,7 +2306,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>Open Invoices</div>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Invoice</th><th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Date</th>
             <th style={{ padding: '6px 4px' }}>Total</th><th style={{ padding: '6px 4px' }}>Balance</th><th style={{ padding: '6px 4px' }}>Status</th>
@@ -2324,19 +2324,19 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
             ))}
           </tbody>
         </table>
-        {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
+        {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Unreconciled Transactions</div>
-        <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
           For each account's most recently approved reconciliation, these are the transactions dated on or before that period that were never checked off — carry these into your next reconciliation.
         </div>
         {(() => {
           const { rows } = getReportData('unreconciled');
           return (
             <>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ padding: '6px 4px' }}>Date</th><th style={{ padding: '6px 4px' }}>Description</th>
                   <th style={{ padding: '6px 4px' }}>Amount</th><th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Last approved period</th>
@@ -2353,7 +2353,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                   ))}
                 </tbody>
               </table>
-              {rows.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>Nothing pending — every approved period has all its transactions checked off.</div>}
+              {rows.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>Nothing pending — every approved period has all its transactions checked off.</div>}
             </>
           );
         })()}
@@ -2406,10 +2406,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                 <div style={{ fontWeight: 600 }}>{label}</div>
                 <button onClick={() => setDrillDown(null)} style={iconBtn}><X size={14} /></button>
               </div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>
                 {mode === 'period' ? `Activity from ${from} to ${to}` : `Balance as of ${to}`} — {items.length} item{items.length === 1 ? '' : 's'}
               </div>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
                   <th style={{ padding: '4px' }}>Source</th><th style={{ padding: '4px', textAlign: 'right' }}>Amount</th>
@@ -2425,8 +2425,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
                   ))}
                 </tbody>
               </table>
-              {items.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions or journal entries behind this number.</div>}
-              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 10, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 13 }}>
+              {items.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions or journal entries behind this number.</div>}
+              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 10, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 14 }}>
                 <span>Total</span><span>{money(total)}</span>
               </div>
             </Card>
@@ -2449,7 +2449,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
               </div>
               <ReportHeader businessName={businessName} reportName={title} periodStart={from} periodEnd={to} logoUrl={null} />
               <div>
-                <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
                     {header.map(h => <th key={h} style={{ padding: '4px 6px', textAlign: h === header[header.length - 1] ? 'right' : 'left' }}>{h}</th>)}
                   </tr></thead>
@@ -2529,16 +2529,16 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
             <button onClick={runSync} disabled={syncing} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: syncing ? 'default' : 'pointer' }}>
               {syncing ? 'Syncing…' : 'Sync to all clients'}
             </button>
-            <span style={{ fontSize: 12, color: '#6B7280' }}>This now happens automatically after every change — use this only if you edited accounts directly in Supabase.</span>
-            {syncResult === 'ok' && <span style={{ fontSize: 12, color: '#0F6E56', fontWeight: 600 }}>✓ Synced successfully</span>}
-            {syncResult === 'error' && <span style={{ fontSize: 12, color: '#B00020', fontWeight: 600 }}>Sync failed — the function may not exist yet in Supabase.</span>}
+            <span style={{ fontSize: 13, color: '#6B7280' }}>This now happens automatically after every change — use this only if you edited accounts directly in Supabase.</span>
+            {syncResult === 'ok' && <span style={{ fontSize: 13, color: '#0F6E56', fontWeight: 600 }}>✓ Synced successfully</span>}
+            {syncResult === 'error' && <span style={{ fontSize: 13, color: '#B00020', fontWeight: 600 }}>Sync failed — the function may not exist yet in Supabase.</span>}
           </div>
         </Card>
       )}
 
       {!isMaster && (
         <Card style={{ marginBottom: 20, background: '#FFF8E6', borderColor: '#F0D896' }}>
-          <div style={{ fontSize: 13, color: '#7A5B00' }}>
+          <div style={{ fontSize: 14, color: '#7A5B00' }}>
             This chart of accounts is managed centrally from <strong>Twelve Business Strategies</strong> and kept in sync across all clients — it's read-only here to avoid conflicting edits.
           </div>
         </Card>
@@ -2548,15 +2548,15 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Code</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Code</label>
               <input style={{ width: 90 }} placeholder="6300" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
             </div>
             <div style={{ flex: 1, minWidth: 180 }}>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Name</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Name</label>
               <input style={{ width: '100%' }} placeholder="Account name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Type</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Type</label>
               <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
                 {types.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -2565,14 +2565,14 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
               <Plus size={15} /> Add account
             </button>
           </div>
-          {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+          {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
         </Card>
       )}
 
       {grouped.map(g => g.rows.length > 0 && (
         <Card key={g.type} style={{ marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>{g.type}</div>
-          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
             <tbody>
               {g.rows.map(a => (
                 <tr key={a.code} style={{ borderBottom: '1px solid #F0F1F3' }}>
@@ -2610,7 +2610,7 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
           </table>
         </Card>
       ))}
-      {accounts.length === 0 && <Card><div style={{ fontSize: 13, color: '#6B7280' }}>No accounts yet.</div></Card>}
+      {accounts.length === 0 && <Card><div style={{ fontSize: 14, color: '#6B7280' }}>No accounts yet.</div></Card>}
     </div>
   );
 }
@@ -2642,23 +2642,23 @@ function RulesView({ rules, setRules, accounts }) {
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Categorization Rules</h2>
       <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
           When to transaction's description contains this word, it will be categorized automatically with the account you choose.
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Keyword</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Keyword</label>
             <input style={{ width: '100%' }} placeholder="Ej. NETFLIX" value={form.keyword} onChange={e => setForm(f => ({ ...f, keyword: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
               <option value="">Select</option>
               <AccountOptions accounts={accounts} />
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Mode</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Mode</label>
             <select value={form.mode} onChange={e => setForm(f => ({ ...f, mode: e.target.value }))}>
               <option value="AUTO">AUTO</option>
               <option value="MATCH">MATCH</option>
@@ -2669,17 +2669,17 @@ function RulesView({ rules, setRules, accounts }) {
             <Plus size={15} /> Add rule
           </button>
         </div>
-        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+        {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 160 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Filter by keyword</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Filter by keyword</label>
             <input style={{ width: '100%' }} placeholder="Search keyword..." value={filters.keyword} onChange={e => setFilters(f => ({ ...f, keyword: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Filter by account</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Filter by account</label>
             <select value={filters.gl} onChange={e => setFilters(f => ({ ...f, gl: e.target.value }))}>
               <option value="">All</option>
               <AccountOptions accounts={accounts} />
@@ -2689,11 +2689,11 @@ function RulesView({ rules, setRules, accounts }) {
             <button onClick={() => setFilters({ keyword: '', gl: '' })} style={iconBtn}>Clear filters</button>
           )}
         </div>
-        {filtersActive && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>{filteredRules.length} of {rules.length} rules</div>}
+        {filtersActive && <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>{filteredRules.length} of {rules.length} rules</div>}
       </Card>
 
       <Card>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Keyword</th><th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>Mode</th><th></th>
           </tr></thead>
@@ -2708,7 +2708,7 @@ function RulesView({ rules, setRules, accounts }) {
             ))}
           </tbody>
         </table>
-        {filteredRules.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>{rules.length === 0 ? 'No rules yet.' : 'No rules match these filters.'}</div>}
+        {filteredRules.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>{rules.length === 0 ? 'No rules yet.' : 'No rules match these filters.'}</div>}
       </Card>
     </div>
   );
@@ -2757,11 +2757,11 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Memo</label>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Memo</label>
               <input style={{ width: '100%' }} placeholder="Description general del asiento" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
             </div>
           </div>
@@ -2780,12 +2780,12 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
           ))}
           <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
 
-          <div style={{ display: 'flex', gap: 16, fontSize: 13, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 16, fontSize: 14, marginBottom: 12 }}>
             <span>Total debit: <strong>{money(totalDebit)}</strong></span>
             <span>Total credit: <strong>{money(totalCredit)}</strong></span>
             <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? "Balanced" : "Doesn't balance"}</span>
           </div>
-          {error && <div style={{ color: '#B00020', fontSize: 12, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+          {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save entry</button>
         </Card>
       )}
@@ -2793,19 +2793,19 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
       <Card>
         {journalEntries.slice().reverse().map(je => (
           <div key={je.id} style={{ borderBottom: '1px solid #F0F1F3', padding: '8px 0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
               <span>{je.date} — {je.memo || 'No memo'}</span>
               <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
             </div>
             {je.lines.map((l, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280', paddingLeft: 12 }}>
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6B7280', paddingLeft: 12 }}>
                 <span>{l.gl} — {l.desc}</span>
                 <span>{l.debit ? `Db ${money(l.debit)}` : `Cr ${money(l.credit)}`}</span>
               </div>
             ))}
           </div>
         ))}
-        {journalEntries.length === 0 && <div style={{ fontSize: 13, color: '#6B7280' }}>No manual entries yet.</div>}
+        {journalEntries.length === 0 && <div style={{ fontSize: 14, color: '#6B7280' }}>No manual entries yet.</div>}
       </Card>
     </div>
   );
@@ -2930,40 +2930,40 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Bank Reconciliation</h2>
       <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
           Enter the real statement balance at period close. The system automatically compares it against the balance calculated from your transactions.
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Account</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Account</label>
             <select value={form.gl} onChange={e => setForm(f => ({ ...f, gl: e.target.value }))}>
               <option value="">Select</option>
               {bankAccounts.map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>As of</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>As of</label>
             <input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Statement balance</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Statement balance</label>
             <input type="number" step="0.01" style={{ width: 140 }} value={form.statementBalance} onChange={e => setForm(f => ({ ...f, statementBalance: e.target.value }))} />
           </div>
           <button onClick={runReconciliation} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Reconcile</button>
         </div>
-        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+        {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
       {selected.length > 0 && (
         <Card style={{ marginBottom: 20, borderColor: '#17365D' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.length} selected</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{selected.length} selected</span>
             <button onClick={deleteSelected} style={iconBtn}>Delete selected</button>
             <button onClick={() => setSelected([])} style={iconBtn}>Cancel selection</button>
           </div>
         </Card>
       )}
       <Card style={{ marginBottom: 20 }}>
-        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>
               <input type="checkbox" checked={reconciliations.length > 0 && reconciliations.every(r => selected.includes(r.id))} onChange={toggleSelectAll} />
@@ -2992,7 +2992,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             ))}
           </tbody>
         </table>
-        {reconciliations.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No reconciliations yet.</div>}
+        {reconciliations.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No reconciliations yet.</div>}
       </Card>
 
       {reviewingId && (() => {
@@ -3043,47 +3043,47 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   <button onClick={() => setReviewingId(null)} style={iconBtn}><X size={14} /></button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{verified.length} of {periodTx.length} verified</span>
               </div>
-              <div style={{ display: 'flex', gap: 20, fontSize: 13, marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 12 }}>
                 <span>Verified debits: <strong>{money(verifiedDebits)}</strong></span>
                 <span>Verified credits: <strong>{money(verifiedCredits)}</strong></span>
               </div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
                 Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don't match, then check it once it's correct, and click Recalculate to save.
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Search description</label>
+                <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
                   <input style={{ width: 180 }} value={reviewFilters.description} onChange={e => setReviewFilters(f => ({ ...f, description: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
+                <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
                   <input type="date" value={reviewFilters.dateFrom} onChange={e => setReviewFilters(f => ({ ...f, dateFrom: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
+                <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
                   <input type="date" value={reviewFilters.dateTo} onChange={e => setReviewFilters(f => ({ ...f, dateTo: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Amount</label>
+                <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
                   <input type="number" step="0.01" placeholder="e.g. 397.02" style={{ width: 110 }} value={reviewFilters.amount} onChange={e => setReviewFilters(f => ({ ...f, amount: e.target.value }))} /></div>
-                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Sign</label>
+                <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sign</label>
                   <select value={reviewSign} onChange={e => setReviewSign(e.target.value)}>
                     <option value="">All</option>
                     <option value="positive">Positive only</option>
                     <option value="negative">Negative only</option>
                   </select></div>
                 <div style={{ position: 'relative' }}>
-                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Dates</label>
+                  <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Dates</label>
                   <button onClick={() => setDateDropdownOpen(o => !o)} style={{ ...iconBtn, minWidth: 130, textAlign: 'left' }}>
                     {reviewDates.length === 0 ? 'All dates' : `${reviewDates.length} selected`} ▾
                   </button>
                   {dateDropdownOpen && (
                     <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 220, overflowY: 'auto', width: 160, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', padding: 6 }}>
-                      <div style={{ display: 'flex', gap: 8, fontSize: 11, marginBottom: 6, borderBottom: '1px solid #F0F1F3', paddingBottom: 6 }}>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 12, marginBottom: 6, borderBottom: '1px solid #F0F1F3', paddingBottom: 6 }}>
                         <span onClick={() => setReviewDates(availableDates)} style={{ cursor: 'pointer', color: '#0C447C' }}>Select all</span>
                         <span onClick={() => setReviewDates([])} style={{ cursor: 'pointer', color: '#0C447C' }}>Clear</span>
                       </div>
                       {availableDates.map(d => (
-                        <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 0', cursor: 'pointer' }}>
+                        <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '2px 0', cursor: 'pointer' }}>
                           <input type="checkbox" checked={reviewDates.includes(d)}
                             onChange={() => setReviewDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])} />
                           {d}
@@ -3095,9 +3095,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 {reviewFiltersActive && (
                   <button onClick={() => { setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' }); setReviewSign(''); setReviewDates([]); }} style={iconBtn}>Clear filters</button>
                 )}
-                {reviewFiltersActive && <span style={{ fontSize: 11, color: '#6B7280', alignSelf: 'center' }}>{filteredPeriodTx.length} of {periodTx.length} shown</span>}
+                {reviewFiltersActive && <span style={{ fontSize: 12, color: '#6B7280', alignSelf: 'center' }}>{filteredPeriodTx.length} of {periodTx.length} shown</span>}
               </div>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ padding: '4px' }}>
                     <input type="checkbox" checked={filteredPeriodTx.length > 0 && filteredPeriodTx.every(t => verified.includes(t.id))} onChange={() => toggleVerifiedAll(filteredPeriodTx)} />
@@ -3114,9 +3114,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                       {t.isJE ? (
                         <>
                           <td style={{ padding: '4px' }}>{t.date}</td>
-                          <td style={{ padding: '4px' }}>{t.description} <span style={{ fontSize: 10, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
+                          <td style={{ padding: '4px' }}>{t.description} <span style={{ fontSize: 11, color: '#6B7280' }}>(edit from Journal Entries tab)</span></td>
                           <td style={{ padding: '4px' }}>{money(t.amount)}</td>
-                          <td style={{ padding: '4px', color: '#6B7280', fontSize: 12 }}>—</td>
+                          <td style={{ padding: '4px', color: '#6B7280', fontSize: 13 }}>—</td>
                         </>
                       ) : (
                         <>
@@ -3135,7 +3135,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                   ))}
                 </tbody>
               </table>
-              {periodTx.length === 0 && <div style={{ fontSize: 13, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
+              {periodTx.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
                 <button onClick={() => { refreshReconciliation(r, liveLedger, verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
