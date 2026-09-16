@@ -982,6 +982,19 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   function confirmRow(id) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: t.gl ? 'AUTO' : 'REVIEW' } : t));
   }
+  function exportFilteredCSV() {
+    let csv = 'Date,Description,Amount,Category,Account,Status\n';
+    const escape = v => `"${String(v).replace(/"/g, '""')}"`;
+    filteredTransactions.forEach(t => {
+      csv += [t.date, escape(t.description), t.amount.toFixed(2), escape(glName(t.gl) || 'Uncategorized'), escape(glName(t.sourceGL) || ''), t.status].join(',') + '\n';
+    });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const glSuffix = filters.gl && !filters.gl.startsWith('__uncat') ? `_${filters.gl}` : '';
+    a.href = url; a.download = `transactions${glSuffix}_${todayStr()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
   function removeRow(id) {
     if (reconciledIds.has(id)) {
       alert("This transaction is part of an approved reconciliation and can't be deleted. Go to Reconciliation, reopen that period, and reset its approval first — then try again.");
@@ -1038,7 +1051,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Transactions</h2>
-        <button onClick={() => setShowImport(s => !s)} style={{ ...iconBtn, padding: '8px 14px' }}>Import bank CSV</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={exportFilteredCSV} style={{ ...iconBtn, padding: '8px 14px' }}>Export CSV ({filteredTransactions.length})</button>
+          <button onClick={() => setShowImport(s => !s)} style={{ ...iconBtn, padding: '8px 14px' }}>Import bank CSV</button>
+        </div>
       </div>
 
       {showImport && (
@@ -2419,12 +2435,25 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         }
         items.sort((a, b) => a.date.localeCompare(b.date));
         const total = items.reduce((s, i) => s + i.amount, 0);
+        function exportDrillDownCSV() {
+          let csv = 'Date,Description,Type,Amount\n';
+          const escape = v => `"${String(v).replace(/"/g, '""')}"`;
+          items.forEach(i => { csv += [i.date, escape(i.description), i.type, i.amount.toFixed(2)].join(',') + '\n'; });
+          const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `${(label || gl).replace(/[^a-z0-9]+/gi, '_')}_${from}_to_${to}.csv`; a.click();
+          URL.revokeObjectURL(url);
+        }
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 640, maxHeight: '85vh', overflow: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <div style={{ fontWeight: 600 }}>{label}</div>
-                <button onClick={() => setDrillDown(null)} style={iconBtn}><X size={14} /></button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {items.length > 0 && <button onClick={exportDrillDownCSV} style={iconBtn}>Export CSV</button>}
+                  <button onClick={() => setDrillDown(null)} style={iconBtn}><X size={14} /></button>
+                </div>
               </div>
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>
                 {mode === 'period' ? `Activity from ${from} to ${to}` : `Balance as of ${to}`} — {items.length} item{items.length === 1 ? '' : 's'}
