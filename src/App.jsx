@@ -1481,6 +1481,23 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
     });
   }, [invoices, filters]);
   const filtersActive = filters.search.trim() || filters.dateFrom || filters.dateTo || filters.status;
+  const monthYearOptions = useMemo(() => {
+    const months = new Set();
+    invoices.forEach(inv => months.add(inv.date.slice(0, 7)));
+    return Array.from(months).sort().reverse().map(m => {
+      const [y, mo] = m.split('-');
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const first = `${m}-01`;
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      const last = `${m}-${String(lastDay).padStart(2, '0')}`;
+      return { value: m, label, first, last };
+    });
+  }, [invoices]);
+  function applyMonthYear(value) {
+    if (!value) return;
+    const opt = monthYearOptions.find(o => o.value === value);
+    if (opt) setFilters(f => ({ ...f, dateFrom: opt.first, dateTo: opt.last }));
+  }
   const filteredTotal = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv), 0);
   const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
@@ -1590,6 +1607,11 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
               <option value="Pending">Pending</option>
               <option value="Partial">Partial</option>
               <option value="Paid">Paid</option>
+            </select></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Month/Year</label>
+            <select onChange={e => applyMonthYear(e.target.value)} defaultValue="">
+              <option value="">Select…</option>
+              {monthYearOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select></div>
           {filtersActive && (
             <button onClick={() => setFilters({ search: '', dateFrom: '', dateTo: '', status: '' })} style={iconBtn}>Clear filters</button>
