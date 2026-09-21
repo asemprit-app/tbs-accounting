@@ -192,6 +192,45 @@ function AccountSearchSelect({ value, onChange, accounts, emptyLabel, width }) {
 }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
+function CustomerSearchSelect({ value, onChange, customers }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const q = (value || '').trim().toLowerCase();
+  const filtered = q ? customers.filter(c => c.name.toLowerCase().includes(q)) : customers;
+
+  function pick(name) {
+    onChange(name);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: '100%' }}>
+      <input
+        style={{ width: '100%', boxSizing: 'border-box' }}
+        value={value}
+        placeholder="Customer name"
+        onFocus={() => setOpen(true)}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+      />
+      {open && (customers.length > 0) && (
+        <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 240, overflowY: 'auto', width: '100%', boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
+          {filtered.map(c => (
+            <div key={c.id} onClick={() => pick(c.name)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 14 }}>{c.name}</div>
+          ))}
+          {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No existing customer matches — this will be saved as a new name.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportHeader({ businessName, reportName }) {
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: '#FFFFFF', color: '#1B2333', width: '100%', boxSizing: 'border-box', marginBottom: 20 }}>
@@ -1476,7 +1515,9 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
     setError('');
-    const inv = { ...form, id: uid(), number: 'FAC-' + (invoices.length + 1001) };
+    const tbsCount = invoices.filter(i => i.number && i.number.startsWith('TBS-')).length;
+    const number = 'TBS-' + String(tbsCount + 1).padStart(4, '0');
+    const inv = { ...form, id: uid(), number };
     setInvoices(prev => [...prev, inv]);
     setForm(blankInvoice());
     setShowForm(false);
@@ -1495,8 +1536,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Customer</label>
-              <input style={{ width: '100%' }} value={form.client} onChange={e => setForm(f => ({ ...f, client: e.target.value }))} placeholder="Customer name" />
+              <label style={{ fontSize: 14, color: '#6B7280', display: 'block' }}>Customer</label>
+              <CustomerSearchSelect value={form.client} onChange={v => setForm(f => ({ ...f, client: v }))} customers={customers} />
             </div>
             <div>
               <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
