@@ -555,8 +555,11 @@ async function fetchAllRows(table, clientId, orderCol) {
     return { revenueMTD, salesYTD, arOpen, cash, review };
   }, [transactions, invoices, accounts]);
 
+  function invoiceSubtotal(inv) {
+    return inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+  }
   function invoiceTotal(inv) {
-    const sub = inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+    const sub = invoiceSubtotal(inv);
     const ret = inv.retention ? sub * (Number(inv.retentionPct) || 0) / 100 : 0;
     return sub - ret;
   }
@@ -587,12 +590,13 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
         {tab === 'invoices' && (
           <InvoicesView
+            invoiceSubtotal={invoiceSubtotal}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice}
           />
         )}
         {tab === 'customers' && (
-          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} onPrintStatement={setStatementClient} />
+          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
@@ -604,7 +608,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
       </div>
       {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} businessName={businessName} />}
-      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} onClose={() => setStatementClient(null)} businessName={businessName} />}
+      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onClose={() => setStatementClient(null)} businessName={businessName} />}
     </div>
   );
 }
@@ -1459,7 +1463,7 @@ function StatusBadge({ status }) {
   return <span style={{ background: s.bg, color: s.color, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
 }
 
-function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint }) {
+function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -1499,6 +1503,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
     if (opt) setFilters(f => ({ ...f, dateFrom: opt.first, dateTo: opt.last }));
   }
   const filteredTotal = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv), 0);
+  const filteredSubtotal = filteredInvoices.reduce((s, inv) => s + invoiceSubtotal(inv), 0);
   const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
   function applyPayment(inv) {
@@ -1633,6 +1638,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
               <th style={{ padding: '6px 4px' }}>No.</th>
               <th style={{ padding: '6px 4px' }}>Customer</th>
               <th style={{ padding: '6px 4px' }}>Date</th>
+              <th style={{ padding: '6px 4px' }}>Amount (before withholding)</th>
               <th style={{ padding: '6px 4px' }}>Total</th>
               <th style={{ padding: '6px 4px' }}>Status</th>
               <th style={{ padding: '6px 4px' }}></th>
@@ -1644,6 +1650,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
                 <td style={{ padding: '6px 4px' }}>{inv.number}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.client}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.date}</td>
+                <td style={{ padding: '6px 4px' }}>{money(invoiceSubtotal(inv))}</td>
                 <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(inv))}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.status}{inv.paid ? ` (${money(inv.paid)} paid)` : ''}</td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
@@ -1659,6 +1666,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, onPrint 
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                 <td colSpan={3} style={{ padding: '6px 4px' }}>Total ({filteredInvoices.length})</td>
+                <td style={{ padding: '6px 4px' }}>{money(filteredSubtotal)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(filteredTotal)}</td>
                 <td colSpan={2} style={{ padding: '6px 4px' }}>Outstanding: {money(filteredBalance)}</td>
               </tr>
@@ -1727,7 +1735,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName }) {
   );
 }
 
-function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrintStatement }) {
+function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoiceSubtotal, onPrintStatement }) {
   const [name, setName] = useState('');
   function addCustomer() {
     if (!name.trim()) return;
@@ -1741,8 +1749,17 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
     });
     return map;
   }, [invoices, invoiceTotal]);
+  const billedBeforeWithholding = useMemo(() => {
+    const map = {};
+    invoices.forEach(inv => {
+      map[inv.client] = (map[inv.client] || 0) + invoiceSubtotal(inv);
+    });
+    return map;
+  }, [invoices, invoiceSubtotal]);
 
   const allNames = Array.from(new Set([...customers.map(c => c.name), ...invoices.map(i => i.client)]));
+  const totalBilledBeforeWithholding = allNames.reduce((s, n) => s + (billedBeforeWithholding[n] || 0), 0);
+  const totalOpenBalance = allNames.reduce((s, n) => s + (balances[n] || 0), 0);
 
   return (
     <div>
@@ -1756,17 +1773,30 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Customer</th>
+            <th style={{ padding: '6px 4px' }}>Total billed (before withholding)</th>
+            <th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
           </tr></thead>
           <tbody>
             {allNames.map(n => (
               <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{n}</td>
+                <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
                 <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button></td>
               </tr>
             ))}
           </tbody>
+          {allNames.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                <td style={{ padding: '6px 4px' }}>Total ({allNames.length})</td>
+                <td style={{ padding: '6px 4px' }}>{money(totalBilledBeforeWithholding)}</td>
+                <td style={{ padding: '6px 4px' }}>{money(totalOpenBalance)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
         {allNames.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No customers yet.</div>}
       </Card>
@@ -1774,7 +1804,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, onPrin
   );
 }
 
-function CustomerStatementModal({ client, invoices, invoiceTotal, onClose, businessName }) {
+function CustomerStatementModal({ client, invoices, invoiceTotal, invoiceSubtotal, onClose, businessName }) {
   const rows = invoices.filter(i => i.client === client).sort((a, b) => a.date.localeCompare(b.date));
   const totalInvoiced = rows.reduce((s, i) => s + invoiceTotal(i), 0);
   const totalPaid = rows.reduce((s, i) => s + (i.paid || 0), 0);
