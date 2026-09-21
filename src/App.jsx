@@ -219,12 +219,13 @@ function CustomerSearchSelect({ value, onChange, customers }) {
         onFocus={() => setOpen(true)}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
       />
-      {open && (customers.length > 0) && (
+      {open && (
         <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 240, overflowY: 'auto', width: '100%', boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
           {filtered.map(c => (
             <div key={c.id} onClick={() => pick(c.name)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 14 }}>{c.name}</div>
           ))}
-          {filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No existing customer matches — this will be saved as a new name.</div>}
+          {customers.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No customers added yet in the Customers tab — this will be saved as a new name.</div>}
+          {customers.length > 0 && filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No existing customer matches — this will be saved as a new name.</div>}
         </div>
       )}
     </div>
