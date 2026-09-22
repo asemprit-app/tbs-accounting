@@ -291,6 +291,23 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authBusy, setAuthBusy] = useState(false);
+  const [addClientBusy, setAddClientBusy] = useState(false);
+
+  async function addClient(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    setAddClientBusy(true);
+    try {
+      const { data, error } = await supabase.from('clients').insert({ name: trimmed }).select().single();
+      if (error) { alert('Could not create the client: ' + error.message); return; }
+      await supabase.rpc('sync_chart_of_accounts_from_tbs');
+      setClients(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      window.localStorage.setItem('tbs_last_client_id', data.id);
+      setSelectedClientId(data.id);
+    } finally {
+      setAddClientBusy(false);
+    }
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -369,13 +386,15 @@ export default function App() {
       clients={clients}
       selectedClientId={selectedClientId}
       onSwitchClient={(id) => { window.localStorage.setItem('tbs_last_client_id', id); setSelectedClientId(id); }}
+      onAddClient={addClient}
+      addClientBusy={addClientBusy}
       onLogout={handleLogout}
       userEmail={session.user.email}
     />
   );
 }
 
-function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail }) {
+function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, addClientBusy, onLogout, userEmail }) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState('dashboard');
@@ -617,7 +636,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
@@ -666,7 +685,15 @@ async function fetchAllRows(table, clientId, orderCol) {
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onLogout, userEmail, businessName }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, addClientBusy, onLogout, userEmail, businessName }) {
+  const [addingClient, setAddingClient] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  function submitNewClient() {
+    if (!newClientName.trim()) return;
+    onAddClient(newClientName);
+    setNewClientName('');
+    setAddingClient(false);
+  }
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transactions', icon: Receipt, badge: reviewCount },
@@ -683,10 +710,29 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>{businessName || 'Accounting'}</div>
       {isStaff && (
-        <select value={selectedClientId} onChange={e => onSwitchClient(e.target.value)}
-          style={{ margin: '0 10px 16px', fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
-          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <>
+          <select value={selectedClientId} onChange={e => onSwitchClient(e.target.value)}
+            style={{ margin: '0 10px 8px', fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {!addingClient ? (
+            <button onClick={() => setAddingClient(true)} style={{ margin: '0 10px 16px', display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', color: '#fff', border: '1px dashed rgba(255,255,255,0.4)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>
+              <Plus size={13} /> New client
+            </button>
+          ) : (
+            <div style={{ margin: '0 10px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input autoFocus placeholder="Client name" value={newClientName} onChange={e => setNewClientName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitNewClient(); if (e.key === 'Escape') { setAddingClient(false); setNewClientName(''); } }}
+                style={{ fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={submitNewClient} disabled={addClientBusy} style={{ flex: 1, background: '#0F6E56', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>
+                  {addClientBusy ? 'Creating…' : 'Create'}
+                </button>
+                <button onClick={() => { setAddingClient(false); setNewClientName(''); }} style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
       {items.map(it => {
         const Icon = it.icon;
@@ -2725,6 +2771,8 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
     setEditingCode(null);
   }
   function removeAccount(code) {
+    const acc = accounts.find(a => a.code === code);
+    if (!window.confirm(`Delete account ${code} — ${acc?.name || ''}? This can't be undone, and if any transactions already use this account, they'll show as uncategorized.`)) return;
     setAccounts(prev => prev.filter(a => a.code !== code));
   }
 
