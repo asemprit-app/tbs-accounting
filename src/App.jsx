@@ -444,7 +444,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setDismissedSuggestionsRaw((ds.data || []).map(row => row.suggestion_key));
         setBusinessName(cl?.data?.name || 'Business');
         setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false })));
-        setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date })));
+        setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
         setPayrollLinesRaw((pl.data || []).map(row => ({
           ...row, payrollRunId: row.payroll_run_id, employeeId: row.employee_id,
           hours: row.hours === null ? '' : Number(row.hours), extraGross: Number(row.extra_gross) || 0,
@@ -562,7 +562,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setPayrollRuns = useCallback((updater) => {
     setPayrollRunsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      const toDb = arr => arr.map(r => ({ id: r.id, period_start: r.periodStart, period_end: r.periodEnd, pay_date: r.payDate, status: r.status }));
+      const toDb = arr => arr.map(r => ({ id: r.id, period_start: r.periodStart, period_end: r.periodEnd, pay_date: r.payDate, status: r.status, posted_je_id: r.postedJeId || null }));
       diffSync('payroll_runs', toDb(prev), toDb(next), clientId);
       return next;
     });
@@ -655,7 +655,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
-          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} />}
+          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
+          journalEntries={journalEntries} setJournalEntries={setJournalEntries} />}
         </>
         )}
       </div>
@@ -3081,10 +3082,76 @@ function lineNet(l) {
     - (Number(l.otherDeductions) || 0) + (Number(l.reimbursement) || 0);
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName }) {
+function findAccountCode(accounts, name) {
+  const acc = accounts.find(a => a.name.toLowerCase() === name.toLowerCase());
+  return acc ? acc.code : null;
+}
+
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
+
+  function postPayrollToJournal(run) {
+    const lines = payrollLines.filter(l => l.payrollRunId === run.id);
+    if (lines.length === 0) { alert('This run has no employees added yet.'); return; }
+    if (run.postedJeId && journalEntries.some(j => j.id === run.postedJeId)) {
+      alert('This payroll run was already posted to Journal Entries.');
+      return;
+    }
+    const totalGross = lines.reduce((s, l) => s + (Number(l.gross) || 0), 0);
+    const totalFederal = lines.reduce((s, l) => s + (Number(l.federalIncomeTax) || 0), 0);
+    const totalSS = lines.reduce((s, l) => s + (Number(l.socialSecurity) || 0), 0);
+    const totalMedicare = lines.reduce((s, l) => s + (Number(l.medicare) || 0), 0);
+    const totalFica = totalSS + totalMedicare;
+    const totalSinot = lines.reduce((s, l) => s + (Number(l.sinot) || 0), 0);
+    const totalPR = lines.reduce((s, l) => s + (Number(l.prIncomeTax) || 0), 0);
+    const totalOther = lines.reduce((s, l) => s + (Number(l.otherDeductions) || 0), 0);
+    const totalReimb = lines.reduce((s, l) => s + (Number(l.reimbursement) || 0), 0);
+    const totalNet = lines.reduce((s, l) => s + lineNet(l), 0);
+
+    const codes = {
+      wages: findAccountCode(accounts, 'Wages, Commissions and Employee Bonuses'),
+      payrollTaxExp: findAccountCode(accounts, 'Payroll Tax Expense (Employer Match)'),
+      ficaPayable: findAccountCode(accounts, 'FICA Taxes Payable'),
+      ficaWithheld: findAccountCode(accounts, 'FICA Taxes Withheld Payable'),
+      sinotPayable: findAccountCode(accounts, 'SINOT Payable'),
+      sinotWithheld: findAccountCode(accounts, 'SINOT Withheld Payable'),
+      incomeTax: findAccountCode(accounts, 'Income Taxes Payable'),
+      netPayable: findAccountCode(accounts, 'S&W Payroll Payable'),
+    };
+    const missing = Object.entries(codes).filter(([, v]) => !v).map(([k]) => k);
+    if (missing.length) {
+      alert('These accounts are missing from the Chart of Accounts: ' + missing.join(', ') + '. Run the payroll GL setup script first.');
+      return;
+    }
+
+    const jeLines = [{ gl: codes.wages, debit: totalGross.toFixed(2), credit: '', desc: 'Gross wages' }];
+    if (totalFica + totalSinot > 0) {
+      jeLines.push({ gl: codes.payrollTaxExp, debit: (totalFica + totalSinot).toFixed(2), credit: '', desc: 'Employer FICA + SINOT match' });
+    }
+    if (totalReimb > 0) {
+      jeLines.push({ gl: codes.wages, debit: totalReimb.toFixed(2), credit: '', desc: 'Reimbursements' });
+    }
+    if (totalFica > 0) {
+      jeLines.push({ gl: codes.ficaPayable, debit: '', credit: totalFica.toFixed(2), desc: 'FICA employer match payable' });
+      jeLines.push({ gl: codes.ficaWithheld, debit: '', credit: totalFica.toFixed(2), desc: 'FICA withheld from employees' });
+    }
+    if (totalSinot > 0) {
+      jeLines.push({ gl: codes.sinotPayable, debit: '', credit: totalSinot.toFixed(2), desc: 'SINOT employer match payable' });
+      jeLines.push({ gl: codes.sinotWithheld, debit: '', credit: totalSinot.toFixed(2), desc: 'SINOT withheld from employees' });
+    }
+    if (totalPR > 0) jeLines.push({ gl: codes.incomeTax, debit: '', credit: totalPR.toFixed(2), desc: 'PR income tax withheld' });
+    if (totalFederal > 0) jeLines.push({ gl: codes.incomeTax, debit: '', credit: totalFederal.toFixed(2), desc: 'Federal income tax withheld' });
+    if (totalOther > 0) jeLines.push({ gl: codes.incomeTax, debit: '', credit: totalOther.toFixed(2), desc: 'Other payroll deductions' });
+    jeLines.push({ gl: codes.netPayable, debit: '', credit: totalNet.toFixed(2), desc: 'Net pay payable to employees' });
+
+    const jeId = uid();
+    const je = { id: jeId, date: run.payDate, memo: `Payroll — ${run.periodStart} to ${run.periodEnd}`, lines: jeLines };
+    setJournalEntries(prev => [...prev, je]);
+    setPayrollRuns(prev => prev.map(r => r.id === run.id ? { ...r, postedJeId: jeId } : r));
+    alert('Posted to Journal Entries.');
+  }
 
   return (
     <div>
@@ -3099,11 +3166,11 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       {subTab === 'employees' && <EmployeesTab employees={employees} setEmployees={setEmployees} />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines}
-          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} />
+          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={postPayrollToJournal} />
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} />
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
@@ -3204,7 +3271,7 @@ function EmployeesTab({ employees, setEmployees }) {
   );
 }
 
-function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees, onOpenRun, onPrintRun }) {
+function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees, onOpenRun, onPrintRun, onPost }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
@@ -3271,6 +3338,9 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
                   <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                     <button onClick={() => onOpenRun(r.id)} style={iconBtn}>Open</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
+                    {r.postedJeId
+                      ? <span style={{ fontSize: 12, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted</span>
+                      : <button onClick={() => onPost(r)} style={iconBtn}>Post to JE</button>}
                     <button onClick={() => removeRun(r.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -3284,7 +3354,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
   );
 }
 
-function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint }) {
+function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const linesForRun = payrollLines.filter(l => l.payrollRunId === runId);
@@ -3338,7 +3408,12 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
           <button onClick={onBack} style={{ ...iconBtn, marginBottom: 8 }}>← Back to Payroll Runs</button>
           <div style={{ fontWeight: 700, fontSize: 18 }}>{run.periodStart} → {run.periodEnd} <span style={{ color: '#6B7280', fontWeight: 400, fontSize: 14 }}>(pay date {run.payDate})</span></div>
         </div>
-        <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
+          {run.postedJeId
+            ? <span style={{ fontSize: 13, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted to Journal Entries</span>
+            : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>}
+        </div>
       </div>
 
       <Card style={{ marginBottom: 16 }}>
