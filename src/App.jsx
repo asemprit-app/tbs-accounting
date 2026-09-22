@@ -450,8 +450,9 @@ async function fetchAllRows(table, clientId, orderCol) {
           hours: row.hours === null ? '' : Number(row.hours), extraGross: Number(row.extra_gross) || 0,
           gross: Number(row.gross), federalIncomeTax: Number(row.federal_income_tax) || 0,
           prIncomeTax: Number(row.pr_income_tax) || 0, socialSecurity: Number(row.social_security) || 0,
-          medicare: Number(row.medicare) || 0, otherDeductions: Number(row.other_deductions) || 0,
-          otherDeductionsDesc: row.other_deductions_desc || '',
+          medicare: Number(row.medicare) || 0, sinot: Number(row.sinot) || 0,
+          otherDeductions: Number(row.other_deductions) || 0, otherDeductionsDesc: row.other_deductions_desc || '',
+          reimbursement: Number(row.reimbursement) || 0,
         })));
       }
       setLoaded(true);
@@ -574,8 +575,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         hours: l.hours === '' ? null : Number(l.hours), extra_gross: Number(l.extraGross) || 0,
         gross: Number(l.gross), federal_income_tax: Number(l.federalIncomeTax) || 0,
         pr_income_tax: Number(l.prIncomeTax) || 0, social_security: Number(l.socialSecurity) || 0,
-        medicare: Number(l.medicare) || 0, other_deductions: Number(l.otherDeductions) || 0,
-        other_deductions_desc: l.otherDeductionsDesc || '',
+        medicare: Number(l.medicare) || 0, sinot: Number(l.sinot) || 0,
+        other_deductions: Number(l.otherDeductions) || 0, other_deductions_desc: l.otherDeductionsDesc || '',
+        reimbursement: Number(l.reimbursement) || 0,
       }));
       diffSync('payroll_lines', toDb(prev), toDb(next), clientId);
       return next;
@@ -3075,7 +3077,8 @@ function autoMedicare(gross) { return gross * MEDICARE_RATE; }
 
 function lineNet(l) {
   return (Number(l.gross) || 0) - (Number(l.federalIncomeTax) || 0) - (Number(l.prIncomeTax) || 0)
-    - (Number(l.socialSecurity) || 0) - (Number(l.medicare) || 0) - (Number(l.otherDeductions) || 0);
+    - (Number(l.socialSecurity) || 0) - (Number(l.medicare) || 0) - (Number(l.sinot) || 0)
+    - (Number(l.otherDeductions) || 0) + (Number(l.reimbursement) || 0);
 }
 
 function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName }) {
@@ -3294,8 +3297,8 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
     const emp = employees.find(e => e.id === employeeId);
     const line = {
       id: uid(), payrollRunId: runId, employeeId, hours: emp.payType === 'hourly' ? '' : '',
-      extraGross: 0, gross: 0, federalIncomeTax: 0, prIncomeTax: 0, socialSecurity: 0, medicare: 0,
-      otherDeductions: 0, otherDeductionsDesc: '',
+      extraGross: 0, gross: 0, federalIncomeTax: 0, prIncomeTax: 0, socialSecurity: 0, medicare: 0, sinot: 0,
+      otherDeductions: 0, otherDeductionsDesc: '', reimbursement: 0,
     };
     setPayrollLines(prev => [...prev, line]);
   }
@@ -3365,7 +3368,9 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
             <th style={{ padding: '4px' }}>PR Tax</th>
             <th style={{ padding: '4px' }}>Soc. Sec.</th>
             <th style={{ padding: '4px' }}>Medicare</th>
+            <th style={{ padding: '4px' }}>SINOT</th>
             <th style={{ padding: '4px' }}>Other</th>
+            <th style={{ padding: '4px' }}>Reimb.</th>
             <th style={{ padding: '4px' }}>Net Pay</th>
             <th></th>
           </tr></thead>
@@ -3388,7 +3393,9 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                     <input type="number" step="0.01" style={{ width: 80 }} value={l.socialSecurity} onChange={e => updateLine(l.id, { socialSecurity: e.target.value })} />
                   </td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.medicare} onChange={e => updateLine(l.id, { medicare: e.target.value })} /></td>
+                  <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.sinot} onChange={e => updateLine(l.id, { sinot: e.target.value })} /></td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.otherDeductions} onChange={e => updateLine(l.id, { otherDeductions: e.target.value })} /></td>
+                  <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.reimbursement} onChange={e => updateLine(l.id, { reimbursement: e.target.value })} /></td>
                   <td style={{ padding: '4px', fontWeight: 700 }}>{money(lineNet(l))}</td>
                   <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
                     <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate Social Security & Medicare">↻ FICA</button>
@@ -3403,7 +3410,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                 <td colSpan={3} style={{ padding: '4px' }}>Total ({linesForRun.length})</td>
                 <td style={{ padding: '4px' }}>{money(totalGross)}</td>
-                <td colSpan={5}></td>
+                <td colSpan={7}></td>
                 <td style={{ padding: '4px' }}>{money(totalNet)}</td>
                 <td></td>
               </tr>
@@ -3425,19 +3432,21 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     pr: acc.pr + (Number(l.prIncomeTax) || 0),
     ss: acc.ss + (Number(l.socialSecurity) || 0),
     medicare: acc.medicare + (Number(l.medicare) || 0),
+    sinot: acc.sinot + (Number(l.sinot) || 0),
     other: acc.other + (Number(l.otherDeductions) || 0),
+    reimbursement: acc.reimbursement + (Number(l.reimbursement) || 0),
     net: acc.net + lineNet(l),
-  }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, other: 0, net: 0 });
+  }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
 
   function exportCSV() {
-    let csv = 'Employee,Hours,Gross,Federal Tax,PR Tax,Social Security,Medicare,Other Deductions,Net Pay\n';
+    let csv = 'Employee,Hours,Gross,Federal Tax,PR Tax,Social Security,Medicare,SINOT,Other Deductions,Reimbursement,Net Pay\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
       csv += [esc(l.employee?.name || ''), l.hours || '', (Number(l.gross) || 0).toFixed(2), (Number(l.federalIncomeTax) || 0).toFixed(2),
         (Number(l.prIncomeTax) || 0).toFixed(2), (Number(l.socialSecurity) || 0).toFixed(2), (Number(l.medicare) || 0).toFixed(2),
-        (Number(l.otherDeductions) || 0).toFixed(2), lineNet(l).toFixed(2)].join(',') + '\n';
+        (Number(l.sinot) || 0).toFixed(2), (Number(l.otherDeductions) || 0).toFixed(2), (Number(l.reimbursement) || 0).toFixed(2), lineNet(l).toFixed(2)].join(',') + '\n';
     });
-    csv += `TOTAL,,${totals.gross.toFixed(2)},${totals.federal.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totals.other.toFixed(2)},${totals.net.toFixed(2)}\n`;
+    csv += `TOTAL,,${totals.gross.toFixed(2)},${totals.federal.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3448,7 +3457,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   if (!run) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 900, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
+      <div style={{ background: '#fff', width: 980, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Payroll Register</div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -3459,7 +3468,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         </div>
         <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={run.periodStart} periodEnd={run.periodEnd} logoUrl={null} />
         <div style={{ fontSize: 13, marginBottom: 14 }}>Pay date: <strong>{run.payDate}</strong></div>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginBottom: 16 }}>
+        <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Employee</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
@@ -3467,7 +3476,9 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             <th style={{ padding: '4px', textAlign: 'right' }}>PR Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Soc. Sec.</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Medicare</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>SINOT</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Other</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Reimb.</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Net Pay</th>
           </tr></thead>
           <tbody>
@@ -3479,7 +3490,9 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.prIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.socialSecurity)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.medicare)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.sinot)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.otherDeductions)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.reimbursement)}</td>
                 <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700 }}>{money(lineNet(l))}</td>
               </tr>
             ))}
@@ -3492,7 +3505,9 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.medicare)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.sinot)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.other)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.net)}</td>
             </tr>
           </tfoot>
