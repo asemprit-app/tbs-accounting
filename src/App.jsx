@@ -634,8 +634,8 @@ async function fetchAllRows(table, clientId, orderCol) {
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
             dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
-            journalEntries={journalEntries} reconciliations={reconciliations}
-            pendingReviewIds={reconcilingVerified}
+            journalEntries={journalEntries} reconciliations={reconciliations} setReconciliations={setReconciliations}
+            pendingReviewIds={reconcilingVerified} setReconcilingVerified={setReconcilingVerified}
           />
         )}
         {tab === 'invoices' && (
@@ -823,7 +823,7 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, pendingReviewIds }) {
+function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, setReconciliations, pendingReviewIds, setReconcilingVerified }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -1103,6 +1103,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }
 
   function openSplit(t) {
+    if (reconciledIds.has(t.id) || (pendingReviewIds || []).includes(t.id)) {
+      if (!window.confirm("This transaction is already marked in a reconciliation (approved or in review). Splitting it will carry that verified mark over to the new split lines automatically, so the reconciled total stays correct. Continue?")) return;
+    }
     setSplittingId(t.id);
     setSplitLines([{ gl: t.gl || '', amount: t.amount }, { gl: '', amount: 0 }]);
     setSplitError('');
@@ -1124,9 +1127,21 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setSplitError('');
     const newRows = splitLines.map(l => ({
       id: uid(), date: original.date, description: original.description + ' (split)',
-      amount: Number(l.amount), gl: l.gl, status: 'AUTO',
+      amount: Number(l.amount), gl: l.gl, sourceGL: original.sourceGL, status: 'AUTO',
     }));
+    const newIds = newRows.map(r => r.id);
     setTransactions(prev => [...prev.filter(t => t.id !== splittingId), ...newRows]);
+    // Si la transacción original ya estaba marcada en alguna reconciliación (aprobada o en revisión),
+    // las filas nuevas heredan esa marca en su lugar, para que el total siga cuadrando sin rehacer nada.
+    if (reconciledIds.has(splittingId) || (pendingReviewIds || []).includes(splittingId)) {
+      setReconciliations(prev => prev.map(r => {
+        if (!r.verifiedIds || !r.verifiedIds.includes(splittingId)) return r;
+        return { ...r, verifiedIds: [...r.verifiedIds.filter(id => id !== splittingId), ...newIds] };
+      }));
+      if ((pendingReviewIds || []).includes(splittingId) && setReconcilingVerified) {
+        setReconcilingVerified(prev => [...prev.filter(id => id !== splittingId), ...newIds]);
+      }
+    }
     setSplittingId(null);
   }
 
