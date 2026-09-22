@@ -3439,14 +3439,16 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
 
   function exportCSV() {
-    let csv = 'Employee,Hours,Gross,Federal Tax,PR Tax,Social Security,Medicare,SINOT,Other Deductions,Reimbursement,Net Pay\n';
+    let csv = 'Employee,Hours,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
-      csv += [esc(l.employee?.name || ''), l.hours || '', (Number(l.gross) || 0).toFixed(2), (Number(l.federalIncomeTax) || 0).toFixed(2),
-        (Number(l.prIncomeTax) || 0).toFixed(2), (Number(l.socialSecurity) || 0).toFixed(2), (Number(l.medicare) || 0).toFixed(2),
+      const fica = (Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0);
+      csv += [esc(l.employee?.name || ''), l.hours || '', (Number(l.gross) || 0).toFixed(2),
+        (Number(l.prIncomeTax) || 0).toFixed(2), (Number(l.socialSecurity) || 0).toFixed(2), (Number(l.medicare) || 0).toFixed(2), fica.toFixed(2),
         (Number(l.sinot) || 0).toFixed(2), (Number(l.otherDeductions) || 0).toFixed(2), (Number(l.reimbursement) || 0).toFixed(2), lineNet(l).toFixed(2)].join(',') + '\n';
     });
-    csv += `TOTAL,,${totals.gross.toFixed(2)},${totals.federal.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
+    const totalFica = totals.ss + totals.medicare;
+    csv += `TOTAL,,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3472,10 +3474,10 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Employee</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
-            <th style={{ padding: '4px', textAlign: 'right' }}>Federal Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>PR Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Soc. Sec.</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Medicare</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>FICA</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>SINOT</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Other</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Reimb.</th>
@@ -3486,10 +3488,10 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
               <tr key={l.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td style={{ padding: '4px 4px' }}>{l.employee?.name || '(deleted)'}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.gross)}</td>
-                <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.federalIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.prIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.socialSecurity)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.medicare)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money((Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0))}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.sinot)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.otherDeductions)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.reimbursement)}</td>
@@ -3501,10 +3503,10 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
               <td style={{ padding: '4px 4px' }}>Total ({lines.length})</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.federal)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.medicare)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss + totals.medicare)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.sinot)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.other)}</td>
               <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
