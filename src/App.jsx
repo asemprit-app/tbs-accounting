@@ -1968,6 +1968,7 @@ function getPeriodRange(preset, customFrom, customTo) {
   if (preset === 'last_month') return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
   if (preset === 'this_quarter') { const q = Math.floor(m / 3); return { from: iso(new Date(y, q * 3, 1)), to: iso(new Date(y, q * 3 + 3, 0)) }; }
   if (preset === 'this_year') return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
+  if (preset === 'last_year') return { from: iso(new Date(y - 1, 0, 1)), to: iso(new Date(y - 1, 11, 31)) };
   return { from: customFrom, to: customTo };
 }
 
@@ -2097,6 +2098,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     ['pnl', 'P&L (Income Statement)'],
     ['balance_sheet', 'Balance Sheet'],
     ['cash_flow', 'Cash Flow'],
+    ['trial_balance', 'Trial Balance'],
     ['ap', 'A/P (Accounts Payable)'],
     ['open_invoices', 'Open Invoices'],
     ['unreconciled', 'Unreconciled Transactions'],
@@ -2157,6 +2159,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
         ['', 'Net Cash Change', netCashChange],
       ];
       return { title: `Cash Flow — ${from} to ${to}`, header: ['Code', 'Line', 'Amount'], rows };
+    }
+    if (key === 'trial_balance') {
+      const trialRows = accounts.map(a => {
+        const bal = balanceAsOf(a.code, to);
+        const isDebitNormal = a.type === 'Asset' || a.type === 'Expense';
+        let debit = 0, credit = 0;
+        if (isDebitNormal) { if (bal >= 0) debit = bal; else credit = -bal; }
+        else { if (bal >= 0) credit = bal; else debit = -bal; }
+        return { code: a.code, name: a.name, type: a.type, debit, credit };
+      }).filter(r => r.debit !== 0 || r.credit !== 0);
+      const totalDebit = trialRows.reduce((s, r) => s + r.debit, 0);
+      const totalCredit = trialRows.reduce((s, r) => s + r.credit, 0);
+      const rows = [
+        ...trialRows.map(r => [r.code, r.name, r.type, r.debit || '', r.credit || '']),
+        ['', 'Total', '', totalDebit, totalCredit],
+      ];
+      return { title: `Trial Balance — as of ${to}`, header: ['Code', 'Account', 'Type', 'Debit', 'Credit'], rows };
     }
     if (key === 'ap') {
       const rows = [
@@ -2296,7 +2315,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
   const PRESETS = [
     ['this_month', 'This month'], ['last_month', 'Last month'], ['this_quarter', 'This quarter'],
-    ['this_year', 'This year'], ['custom', 'Custom'],
+    ['this_year', 'This year'], ['last_year', 'Last year'], ['custom', 'Custom'],
   ];
 
   const [drillDown, setDrillDown] = useState(null); // { gl, label, mode: 'period' | 'asOf' }
@@ -2548,6 +2567,51 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           </div>
         </Card>
       </div>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Trial Balance</div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>Every account's balance as of {to}, split into Debit or Credit — the two totals should match.</div>
+        {(() => {
+          const trialRows = accounts.map(a => {
+            const bal = balanceAsOf(a.code, to);
+            const isDebitNormal = a.type === 'Asset' || a.type === 'Expense';
+            let debit = 0, credit = 0;
+            if (isDebitNormal) { if (bal >= 0) debit = bal; else credit = -bal; }
+            else { if (bal >= 0) credit = bal; else debit = -bal; }
+            return { code: a.code, name: a.name, type: a.type, debit, credit };
+          }).filter(r => r.debit !== 0 || r.credit !== 0);
+          const totalDebit = trialRows.reduce((s, r) => s + r.debit, 0);
+          const totalCredit = trialRows.reduce((s, r) => s + r.credit, 0);
+          return (
+            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+                <th style={{ padding: '6px 4px' }}>Code</th><th style={{ padding: '6px 4px' }}>Account</th>
+                <th style={{ padding: '6px 4px' }}>Type</th>
+                <th style={{ padding: '6px 4px', textAlign: 'right' }}>Debit</th>
+                <th style={{ padding: '6px 4px', textAlign: 'right' }}>Credit</th>
+              </tr></thead>
+              <tbody>
+                {trialRows.map(r => (
+                  <tr key={r.code} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                    <td style={{ padding: '6px 4px' }}>{r.code}</td>
+                    <td style={{ padding: '6px 4px' }}>{r.name}</td>
+                    <td style={{ padding: '6px 4px', color: '#6B7280' }}>{r.type}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{r.debit ? money(r.debit) : ''}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{r.credit ? money(r.credit) : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                  <td colSpan={3} style={{ padding: '6px 4px' }}>Total</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{money(totalDebit)}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{money(totalCredit)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          );
+        })()}
+      </Card>
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>Open Invoices</div>
