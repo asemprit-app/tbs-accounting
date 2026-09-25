@@ -665,7 +665,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           />
         )}
         {tab === 'customers' && (
-          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
+          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
@@ -1863,26 +1863,41 @@ function InvoicePrintModal({ inv, total, onClose, businessName }) {
   );
 }
 
-function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoiceSubtotal, onPrintStatement }) {
+function CustomersView({ customers, setCustomers, invoices, setInvoices, invoiceTotal, invoiceSubtotal, onPrintStatement }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [editingName, setEditingName] = useState(null);
   const [editEmail, setEditEmail] = useState('');
+  const [editNameDraft, setEditNameDraft] = useState('');
   function addCustomer() {
     if (!name.trim()) return;
     setCustomers(prev => [...prev, { id: uid(), name: name.trim(), email: email.trim() }]);
     setName('');
     setEmail('');
   }
-  function startEditEmail(c) { setEditingName(c.name); setEditEmail(c.email || ''); }
+  function startEditEmail(c) { setEditingName(c.name); setEditEmail(c.email || ''); setEditNameDraft(c.name); }
   function saveEditEmail(c) {
+    const newName = editNameDraft.trim();
+    if (!newName) { setEditingName(null); return; }
+    const renamed = newName !== c.name;
     if (customers.some(x => x.name === c.name)) {
-      setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, email: editEmail.trim() } : x));
+      setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, name: newName, email: editEmail.trim() } : x));
     } else {
       // el nombre viene de una factura pero todavía no existe como Customer registrado
-      setCustomers(prev => [...prev, { id: uid(), name: c.name, email: editEmail.trim() }]);
+      setCustomers(prev => [...prev, { id: uid(), name: newName, email: editEmail.trim() }]);
+    }
+    if (renamed) {
+      setInvoices(prev => prev.map(inv => inv.client === c.name ? { ...inv, client: newName } : inv));
     }
     setEditingName(null);
+  }
+  function removeCustomer(c) {
+    const hasInvoices = invoices.some(inv => inv.client === c.name);
+    const msg = hasInvoices
+      ? `Delete ${c.name} from Customers? They still have invoices on file, so they'll keep showing in this list (without an email) until those invoices are gone.`
+      : `Delete ${c.name} from Customers?`;
+    if (!window.confirm(msg)) return;
+    setCustomers(prev => prev.filter(x => x.name !== c.name));
   }
   const balances = useMemo(() => {
     const map = {};
@@ -1926,23 +1941,37 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoic
               const c = customers.find(x => x.name === n);
               return (
                 <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
-                  <td style={{ padding: '6px 4px' }}>{n}</td>
-                  <td style={{ padding: '6px 4px' }}>
-                    {editingName === n ? (
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <input style={{ width: 160 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} />
-                        <button onClick={() => saveEditEmail({ name: n })} style={iconBtn}><Check size={14} /></button>
-                        <button onClick={() => setEditingName(null)} style={iconBtn}><X size={14} /></button>
-                      </div>
-                    ) : (
-                      <span onClick={() => startEditEmail({ name: n, email: c?.email })} style={{ cursor: 'pointer', color: c?.email ? '#1F2933' : '#9CA3AF' }}>
-                        {c?.email || 'Add email…'}
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
-                  <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
-                  <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button></td>
+                  {editingName === n ? (
+                    <>
+                      <td style={{ padding: '6px 4px' }}>
+                        <input style={{ width: 140 }} value={editNameDraft} onChange={e => setEditNameDraft(e.target.value)} />
+                      </td>
+                      <td style={{ padding: '6px 4px' }}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input style={{ width: 160 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" />
+                          <button onClick={() => saveEditEmail({ name: n, email: c?.email })} style={iconBtn}><Check size={14} /></button>
+                          <button onClick={() => setEditingName(null)} style={iconBtn}><X size={14} /></button>
+                        </div>
+                      </td>
+                      <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
+                      <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
+                      <td></td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: '6px 4px' }}>{n}</td>
+                      <td style={{ padding: '6px 4px' }}>
+                        <span style={{ color: c?.email ? '#1F2933' : '#9CA3AF' }}>{c?.email || 'No email'}</span>
+                      </td>
+                      <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
+                      <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
+                      <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
+                        <button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button>
+                        <button onClick={() => startEditEmail({ name: n, email: c?.email })} style={iconBtn}>Edit</button>
+                        <button onClick={() => removeCustomer({ name: n })} style={iconBtn}><Trash2 size={14} /></button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               );
             })}
