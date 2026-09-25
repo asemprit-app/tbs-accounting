@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet } from 'lucide-react';
+import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 
@@ -235,6 +235,49 @@ function AccountSearchSelect({ value, onChange, accounts, emptyLabel, width }) {
 }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
+function ProductSearchSelect({ value, onChange, onPick, products }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const active = products.filter(p => p.active !== false);
+  const q = (value || '').trim().toLowerCase();
+  const filtered = q ? active.filter(p => p.name.toLowerCase().includes(q)) : active;
+
+  function pick(p) {
+    onPick(p);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flex: 1 }}>
+      <input
+        style={{ width: '100%', boxSizing: 'border-box' }}
+        value={value}
+        placeholder="Service description"
+        onFocus={() => setOpen(true)}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+      />
+      {open && (
+        <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, maxHeight: 240, overflowY: 'auto', width: 280, boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }}>
+          {filtered.map(p => (
+            <div key={p.id} onClick={() => pick(p)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 14, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+              <span>{p.name}</span><span style={{ color: '#6B7280' }}>{money(p.price)}</span>
+            </div>
+          ))}
+          {active.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No products/services added yet in the Products & Services tab — you can still type a one-off description.</div>}
+          {active.length > 0 && filtered.length === 0 && <div style={{ padding: '8px 10px', fontSize: 13, color: '#6B7280' }}>No match — this stays as a one-off line.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CustomerSearchSelect({ value, onChange, customers }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -450,6 +493,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [reconciliations, setReconciliationsRaw] = useState([]);
   const [dismissedSuggestions, setDismissedSuggestionsRaw] = useState([]);
   const [employees, setEmployeesRaw] = useState([]);
+  const [products, setProductsRaw] = useState([]);
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
@@ -490,9 +534,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         supabase.from('employees').select('*').eq('client_id', clientId).order('name'),
         supabase.from('payroll_runs').select('*').eq('client_id', clientId).order('period_end'),
         fetchAllRows('payroll_lines', clientId),
+        supabase.from('products').select('*').eq('client_id', clientId).order('name'),
       ]);
-      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl] = results;
-      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl].find(x => x.error);
+      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod] = results;
+      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
@@ -516,6 +561,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           otherDeductions: Number(row.other_deductions) || 0, otherDeductionsDesc: row.other_deductions_desc || '',
           reimbursement: Number(row.reimbursement) || 0,
         })));
+        setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
       }
       setLoaded(true);
     })();
@@ -621,6 +667,14 @@ async function fetchAllRows(table, clientId, orderCol) {
       return next;
     });
   }, []);
+  const setProducts = useCallback((updater) => {
+    setProductsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const toDb = arr => arr.map(p => ({ id: p.id, name: p.name, description: p.description || '', price: p.price, active: p.active !== false }));
+      diffSync('products', toDb(prev), toDb(next), clientId);
+      return next;
+    });
+  }, []);
   const setPayrollRuns = useCallback((updater) => {
     setPayrollRunsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -705,7 +759,11 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoiceSubtotal={invoiceSubtotal}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
+            products={products}
           />
+        )}
+        {tab === 'products' && (
+          <ProductsView products={products} setProducts={setProducts} />
         )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
@@ -741,6 +799,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transactions', icon: Receipt, badge: reviewCount },
     { id: 'invoices', label: 'Invoices', icon: FileText },
+    { id: 'products', label: 'Products & Services', icon: Package },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
     { id: 'accounts', label: 'Chart of Accounts', icon: BookOpen },
@@ -1621,7 +1680,93 @@ function StatusBadge({ status }) {
   return <span style={{ background: s.bg, color: s.color, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
 }
 
-function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName }) {
+function ProductsView({ products, setProducts }) {
+  const [form, setForm] = useState({ name: '', description: '', price: '' });
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState({ name: '', description: '', price: '' });
+
+  function addProduct() {
+    if (!form.name.trim()) { setError('Enter a name.'); return; }
+    if (!form.price || Number(form.price) < 0) { setError('Enter a price.'); return; }
+    setError('');
+    setProducts(prev => [...prev, { id: uid(), name: form.name.trim(), description: form.description.trim(), price: Number(form.price), active: true }]);
+    setForm({ name: '', description: '', price: '' });
+  }
+  function startEdit(p) { setEditingId(p.id); setEditDraft({ name: p.name, description: p.description || '', price: p.price }); }
+  function saveEdit(id) {
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...editDraft, price: Number(editDraft.price) } : p));
+    setEditingId(null);
+  }
+  function toggleActive(p) { setProducts(prev => prev.map(x => x.id === p.id ? { ...x, active: !x.active } : x)); }
+  function removeProduct(id) {
+    if (!window.confirm('Delete this product/service? This will not change past invoices.')) return;
+    setProducts(prev => prev.filter(p => p.id !== id));
+  }
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 16px' }}>Products & Services</h2>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Add product or service</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Name</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+          <div style={{ flex: 1, minWidth: 200 }}><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Description (optional)</label>
+            <input style={{ width: '100%' }} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Default price</label>
+            <input type="number" step="0.01" style={{ width: 120 }} value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} /></div>
+          <button onClick={addProduct} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            <Plus size={15} /> Add
+          </button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+      </Card>
+
+      <Card>
+        <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Description</th>
+            <th style={{ padding: '6px 4px' }}>Default price</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+          </tr></thead>
+          <tbody>
+            {products.map(p => (
+              <tr key={p.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                {editingId === p.id ? (
+                  <>
+                    <td style={{ padding: '6px 4px' }}><input value={editDraft.name} onChange={e => setEditDraft(d => ({ ...d, name: e.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><input style={{ width: '100%' }} value={editDraft.description} onChange={e => setEditDraft(d => ({ ...d, description: e.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={editDraft.price} onChange={e => setEditDraft(d => ({ ...d, price: e.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}>{p.active ? 'Active' : 'Inactive'}</td>
+                    <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
+                      <button onClick={() => saveEdit(p.id)} style={iconBtn}><Check size={14} /></button>
+                      <button onClick={() => setEditingId(null)} style={iconBtn}><X size={14} /></button>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ padding: '6px 4px' }}>{p.name}</td>
+                    <td style={{ padding: '6px 4px', color: '#6B7280' }}>{p.description}</td>
+                    <td style={{ padding: '6px 4px' }}>{money(p.price)}</td>
+                    <td style={{ padding: '6px 4px' }}>{p.active ? 'Active' : 'Inactive'}</td>
+                    <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
+                      <button onClick={() => startEdit(p)} style={iconBtn}>Edit</button>
+                      <button onClick={() => toggleActive(p)} style={iconBtn}>{p.active ? 'Deactivate' : 'Activate'}</button>
+                      <button onClick={() => removeProduct(p.id)} style={iconBtn}><Trash2 size={14} /></button>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {products.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No products or services yet.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -1741,7 +1886,9 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
           {form.lines.map((l, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <input style={{ flex: 1 }} placeholder="Service description" value={l.desc} onChange={e => updateLine(i, 'desc', e.target.value)} />
+              <ProductSearchSelect value={l.desc} onChange={v => updateLine(i, 'desc', v)}
+                onPick={p => setForm(f => { const lines = f.lines.slice(); lines[i] = { ...lines[i], desc: p.description ? `${p.name} — ${p.description}` : p.name, rate: p.price }; return { ...f, lines }; })}
+                products={products} />
               <input type="number" style={{ width: 70 }} placeholder="Qty." value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} />
               <input type="number" step="0.01" style={{ width: 100 }} placeholder="Price" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} />
               <span style={{ width: 90, fontSize: 14, textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
