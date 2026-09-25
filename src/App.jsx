@@ -502,13 +502,16 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [replyToEmail, setReplyToEmail] = useState('');
   const [invoiceLanguage, setInvoiceLanguage] = useState('en');
   const [businessPhone, setBusinessPhone] = useState('');
+  const [invoicePrefix, setInvoicePrefix] = useState('TBS');
+  const [invoiceNumberPadding, setInvoiceNumberPadding] = useState(4);
   const [savingInvoiceSettings, setSavingInvoiceSettings] = useState(false);
-  async function saveInvoiceSettings({ sendingEmail: newEmail, logoDataUri: newLogo, replyToEmail: newReplyTo, invoiceLanguage: newLang, businessPhone: newPhone }) {
+  async function saveInvoiceSettings({ sendingEmail: newEmail, logoDataUri: newLogo, replyToEmail: newReplyTo, invoiceLanguage: newLang, businessPhone: newPhone, invoicePrefix: newPrefix, invoiceNumberPadding: newPadding }) {
     setSavingInvoiceSettings(true);
     try {
       const { error } = await supabase.from('clients').update({
         sending_email: newEmail, logo_data_uri: newLogo, reply_to_email: newReplyTo,
         invoice_language: newLang, business_phone: newPhone,
+        invoice_prefix: newPrefix, invoice_number_padding: newPadding,
       }).eq('id', clientId);
       if (error) { alert('Could not save: ' + error.message); return; }
       setSendingEmail(newEmail);
@@ -516,6 +519,8 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
       setReplyToEmail(newReplyTo);
       setInvoiceLanguage(newLang);
       setBusinessPhone(newPhone);
+      setInvoicePrefix(newPrefix);
+      setInvoiceNumberPadding(newPadding);
     } finally {
       setSavingInvoiceSettings(false);
     }
@@ -553,7 +558,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         fetchAllRows('journal_entries', clientId, 'date'),
         supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
         supabase.from('dismissed_suggestions').select('*').eq('client_id', clientId),
-        supabase.from('clients').select('name, sending_email, logo_data_uri, reply_to_email, invoice_language, business_phone').eq('id', clientId).single(),
+        supabase.from('clients').select('name, sending_email, logo_data_uri, reply_to_email, invoice_language, business_phone, invoice_prefix, invoice_number_padding').eq('id', clientId).single(),
         supabase.from('employees').select('*').eq('client_id', clientId).order('name'),
         supabase.from('payroll_runs').select('*').eq('client_id', clientId).order('period_end'),
         fetchAllRows('payroll_lines', clientId),
@@ -578,6 +583,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         setReplyToEmail(cl?.data?.reply_to_email || '');
         setInvoiceLanguage(cl?.data?.invoice_language || 'en');
         setBusinessPhone(cl?.data?.business_phone || '');
+        setInvoicePrefix(cl?.data?.invoice_prefix || 'TBS');
+        setInvoiceNumberPadding(cl?.data?.invoice_number_padding || 4);
         setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false })));
         setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
         setPayrollLinesRaw((pl.data || []).map(row => ({
@@ -793,6 +800,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             products={products}
             sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
             invoiceLanguage={invoiceLanguage} businessPhone={businessPhone}
+            invoicePrefix={invoicePrefix} invoiceNumberPadding={invoiceNumberPadding}
             onSaveInvoiceSettings={saveInvoiceSettings} savingInvoiceSettings={savingInvoiceSettings}
           />
         )}
@@ -1800,12 +1808,14 @@ function ProductsView({ products, setProducts }) {
   );
 }
 
-function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, onSave, saving, onClose }) {
+function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSave, saving, onClose }) {
   const [email, setEmail] = useState(sendingEmail || '');
   const [logo, setLogo] = useState(logoDataUri || '');
   const [replyTo, setReplyTo] = useState(replyToEmail || '');
   const [language, setLanguage] = useState(invoiceLanguage || 'en');
   const [phone, setPhone] = useState(businessPhone || '');
+  const [prefix, setPrefix] = useState(invoicePrefix || 'TBS');
+  const [padding, setPadding] = useState(invoiceNumberPadding || 4);
   const [error, setError] = useState('');
 
   function handleLogoFile(e) {
@@ -1864,6 +1874,18 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
           <input style={{ width: 160 }} placeholder="787-613-7994" value={phone} onChange={e => setPhone(e.target.value)} />
         </div>
         <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Invoice number prefix</label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input style={{ width: 80 }} placeholder="TBS" value={prefix} onChange={e => setPrefix(e.target.value.toUpperCase())} />
+            <span style={{ fontSize: 13, color: '#6B7280' }}>-</span>
+            <select value={padding} onChange={e => setPadding(Number(e.target.value))}>
+              <option value={3}>001</option>
+              <option value={4}>0001</option>
+              <option value={5}>00001</option>
+            </select>
+          </div>
+        </div>
+        <div>
           <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Logo (shown on invoices)</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {logo && <img src={logo} alt="Logo preview" style={{ height: 48, border: '1px solid #E2E5E9', borderRadius: 4, padding: 4 }} />}
@@ -1874,7 +1896,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
       </div>
       {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8 }}>{error}</div>}
       <div style={{ marginTop: 14 }}>
-        <button onClick={() => onSave({ sendingEmail: email.trim(), logoDataUri: logo, replyToEmail: replyTo.trim(), invoiceLanguage: language, businessPhone: phone.trim() })} disabled={saving}
+        <button onClick={() => onSave({ sendingEmail: email.trim(), logoDataUri: logo, replyToEmail: replyTo.trim(), invoiceLanguage: language, businessPhone: phone.trim(), invoicePrefix: prefix.trim() || 'TBS', invoiceNumberPadding: padding })} disabled={saving}
           style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: saving ? 'default' : 'pointer' }}>
           {saving ? 'Saving…' : 'Save settings'}
         </button>
@@ -1884,7 +1906,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, onSaveInvoiceSettings, savingInvoiceSettings }) {
+function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -1972,8 +1994,10 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
     setError('');
-    const tbsCount = invoices.filter(i => i.number && i.number.startsWith('TBS-')).length;
-    const number = 'TBS-' + String(tbsCount + 1).padStart(4, '0');
+    const prefix = invoicePrefix || 'TBS';
+    const padding = invoiceNumberPadding || 4;
+    const existingCount = invoices.filter(i => i.number && i.number.startsWith(prefix + '-')).length;
+    const number = prefix + '-' + String(existingCount + 1).padStart(padding, '0');
     const inv = { ...form, id: uid(), number };
     setInvoices(prev => [...prev, inv]);
     setForm(blankInvoice());
@@ -1996,7 +2020,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
       {showSettings && (
         <InvoiceSettingsPanel businessName={businessName} sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
-          invoiceLanguage={invoiceLanguage} businessPhone={businessPhone}
+          invoiceLanguage={invoiceLanguage} businessPhone={businessPhone} invoicePrefix={invoicePrefix} invoiceNumberPadding={invoiceNumberPadding}
           onSave={onSaveInvoiceSettings} saving={savingInvoiceSettings} onClose={() => setShowSettings(false)} />
       )}
 
