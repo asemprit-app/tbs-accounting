@@ -1649,6 +1649,18 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { desc: '', qty: 1, rate: '' }] })); }
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
+  function sendInvoiceEmail(inv) {
+    const customer = customers.find(c => c.name === inv.client);
+    const email = customer?.email || '';
+    if (!email) {
+      if (!window.confirm(`No email on file for ${inv.client} (add one in the Customers tab for next time). Open your email app anyway so you can type the address?`)) return;
+    }
+    const subject = encodeURIComponent(`Invoice ${inv.number}`);
+    const body = encodeURIComponent(
+      `Hi ${inv.client},\n\nPlease find attached Invoice ${inv.number}, dated ${inv.date}, for ${money(invoiceTotal(inv))}.\n\n(Tip: click "PDF" first to save the invoice, then attach that file to this email before sending.)\n\nThank you!`
+    );
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+  }
   function saveInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
@@ -1770,6 +1782,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 <td style={{ padding: '6px 4px' }}>{inv.status}{inv.paid ? ` (${money(inv.paid)} paid)` : ''}</td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   <button onClick={() => onPrint(inv)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> PDF</button>
+                  <button onClick={() => sendInvoiceEmail(inv)} style={iconBtn}>Email</button>
                   {inv.status !== 'Paid' && (
                     <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
@@ -1852,10 +1865,24 @@ function InvoicePrintModal({ inv, total, onClose, businessName }) {
 
 function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoiceSubtotal, onPrintStatement }) {
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [editingName, setEditingName] = useState(null);
+  const [editEmail, setEditEmail] = useState('');
   function addCustomer() {
     if (!name.trim()) return;
-    setCustomers(prev => [...prev, { id: uid(), name: name.trim() }]);
+    setCustomers(prev => [...prev, { id: uid(), name: name.trim(), email: email.trim() }]);
     setName('');
+    setEmail('');
+  }
+  function startEditEmail(c) { setEditingName(c.name); setEditEmail(c.email || ''); }
+  function saveEditEmail(c) {
+    if (customers.some(x => x.name === c.name)) {
+      setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, email: editEmail.trim() } : x));
+    } else {
+      // el nombre viene de una factura pero todavía no existe como Customer registrado
+      setCustomers(prev => [...prev, { id: uid(), name: c.name, email: editEmail.trim() }]);
+    }
+    setEditingName(null);
   }
   const balances = useMemo(() => {
     const map = {};
@@ -1882,6 +1909,7 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoic
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <input style={{ flex: 1 }} placeholder="New customer name" value={name} onChange={e => setName(e.target.value)} />
+          <input style={{ flex: 1 }} placeholder="Email (for sending invoices)" value={email} onChange={e => setEmail(e.target.value)} />
           <button onClick={addCustomer} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add</button>
         </div>
       </Card>
@@ -1889,23 +1917,41 @@ function CustomersView({ customers, setCustomers, invoices, invoiceTotal, invoic
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Customer</th>
+            <th style={{ padding: '6px 4px' }}>Email</th>
             <th style={{ padding: '6px 4px' }}>Total billed (before withholding)</th>
             <th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
           </tr></thead>
           <tbody>
-            {allNames.map(n => (
-              <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
-                <td style={{ padding: '6px 4px' }}>{n}</td>
-                <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
-                <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button></td>
-              </tr>
-            ))}
+            {allNames.map(n => {
+              const c = customers.find(x => x.name === n);
+              return (
+                <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                  <td style={{ padding: '6px 4px' }}>{n}</td>
+                  <td style={{ padding: '6px 4px' }}>
+                    {editingName === n ? (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <input style={{ width: 160 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} />
+                        <button onClick={() => saveEditEmail({ name: n })} style={iconBtn}><Check size={14} /></button>
+                        <button onClick={() => setEditingName(null)} style={iconBtn}><X size={14} /></button>
+                      </div>
+                    ) : (
+                      <span onClick={() => startEditEmail({ name: n, email: c?.email })} style={{ cursor: 'pointer', color: c?.email ? '#1F2933' : '#9CA3AF' }}>
+                        {c?.email || 'Add email…'}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
+                  <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
+                  <td style={{ padding: '6px 4px' }}><button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button></td>
+                </tr>
+              );
+            })}
           </tbody>
           {allNames.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                 <td style={{ padding: '6px 4px' }}>Total ({allNames.length})</td>
+                <td></td>
                 <td style={{ padding: '6px 4px' }}>{money(totalBilledBeforeWithholding)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(totalOpenBalance)}</td>
                 <td></td>
