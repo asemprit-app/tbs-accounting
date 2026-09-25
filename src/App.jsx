@@ -158,11 +158,11 @@ async function generatePdfBase64FromElement(elementId, filename) {
   }).output('blob');
   return blobToBase64(blob);
 }
-async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename }) {
+async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, from, replyTo }) {
   const res = await fetch('/api/send-invoice', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, text, pdfBase64, filename }),
+    body: JSON.stringify({ to, subject, text, pdfBase64, filename, from, replyTo }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Send failed.');
@@ -497,6 +497,29 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
+  const [sendingEmail, setSendingEmail] = useState('');
+  const [logoDataUri, setLogoDataUri] = useState('');
+  const [replyToEmail, setReplyToEmail] = useState('');
+  const [invoiceLanguage, setInvoiceLanguage] = useState('en');
+  const [businessPhone, setBusinessPhone] = useState('');
+  const [savingInvoiceSettings, setSavingInvoiceSettings] = useState(false);
+  async function saveInvoiceSettings({ sendingEmail: newEmail, logoDataUri: newLogo, replyToEmail: newReplyTo, invoiceLanguage: newLang, businessPhone: newPhone }) {
+    setSavingInvoiceSettings(true);
+    try {
+      const { error } = await supabase.from('clients').update({
+        sending_email: newEmail, logo_data_uri: newLogo, reply_to_email: newReplyTo,
+        invoice_language: newLang, business_phone: newPhone,
+      }).eq('id', clientId);
+      if (error) { alert('Could not save: ' + error.message); return; }
+      setSendingEmail(newEmail);
+      setLogoDataUri(newLogo);
+      setReplyToEmail(newReplyTo);
+      setInvoiceLanguage(newLang);
+      setBusinessPhone(newPhone);
+    } finally {
+      setSavingInvoiceSettings(false);
+    }
+  }
   const [reconcilingReviewId, setReconcilingReviewId] = useState(null);
   const [reconcilingVerified, setReconcilingVerified] = useState([]);
   const [printInvoice, setPrintInvoice] = useState(null);
@@ -530,7 +553,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         fetchAllRows('journal_entries', clientId, 'date'),
         supabase.from('reconciliations').select('*').eq('client_id', clientId).order('period_end'),
         supabase.from('dismissed_suggestions').select('*').eq('client_id', clientId),
-        supabase.from('clients').select('name').eq('id', clientId).single(),
+        supabase.from('clients').select('name, sending_email, logo_data_uri, reply_to_email, invoice_language, business_phone').eq('id', clientId).single(),
         supabase.from('employees').select('*').eq('client_id', clientId).order('name'),
         supabase.from('payroll_runs').select('*').eq('client_id', clientId).order('period_end'),
         fetchAllRows('payroll_lines', clientId),
@@ -542,7 +565,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setLoadError(firstErr.error.message);
       } else {
         setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount), sourceGL: row.source_gl })));
-        setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0 })));
+        setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0, ivuPct: Number(row.ivu_pct) || 0, paymentMethod: row.payment_method || '', notes: row.notes || '' })));
         setCustomersRaw(c.data || []);
         setAccountsRaw((a.data || []).map(row => ({ ...row, isCogs: !!row.is_cogs })));
         setRulesRaw(r.data || []);
@@ -550,6 +573,11 @@ async function fetchAllRows(table, clientId, orderCol) {
         setReconciliationsRaw((rec.data || []).map(row => ({ ...row, statementBalance: Number(row.statement_balance), ledgerBalance: Number(row.ledger_balance), difference: Number(row.difference), periodEnd: row.period_end, verifiedIds: row.verified_ids || [] })));
         setDismissedSuggestionsRaw((ds.data || []).map(row => row.suggestion_key));
         setBusinessName(cl?.data?.name || 'Business');
+        setSendingEmail(cl?.data?.sending_email || '');
+        setLogoDataUri(cl?.data?.logo_data_uri || '');
+        setReplyToEmail(cl?.data?.reply_to_email || '');
+        setInvoiceLanguage(cl?.data?.invoice_language || 'en');
+        setBusinessPhone(cl?.data?.business_phone || '');
         setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false })));
         setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
         setPayrollLinesRaw((pl.data || []).map(row => ({
@@ -581,10 +609,12 @@ async function fetchAllRows(table, clientId, orderCol) {
       const forDb = next.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
         retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+        ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
       }));
       const prevForDb = prev.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
         retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+        ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
       }));
       diffSync('invoices', prevForDb, forDb, clientId);
       return next;
@@ -727,7 +757,8 @@ async function fetchAllRows(table, clientId, orderCol) {
   function invoiceTotal(inv) {
     const sub = invoiceSubtotal(inv);
     const ret = inv.retention ? sub * (Number(inv.retentionPct) || 0) / 100 : 0;
-    return sub - ret;
+    const ivu = sub * (Number(inv.ivuPct) || 0) / 100;
+    return sub - ret + ivu;
   }
 
   return (
@@ -760,6 +791,9 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoices={invoices} setInvoices={setInvoices} customers={customers}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
             products={products}
+            sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
+            invoiceLanguage={invoiceLanguage} businessPhone={businessPhone}
+            onSaveInvoiceSettings={saveInvoiceSettings} savingInvoiceSettings={savingInvoiceSettings}
           />
         )}
         {tab === 'products' && (
@@ -780,7 +814,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         </>
         )}
       </div>
-      {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} businessName={businessName} customers={customers} />}
+      {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} businessName={businessName} customers={customers} sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail} invoiceLanguage={invoiceLanguage} businessPhone={businessPhone} />}
       {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onClose={() => setStatementClient(null)} businessName={businessName} />}
     </div>
   );
@@ -1766,7 +1800,91 @@ function ProductsView({ products, setProducts }) {
   );
 }
 
-function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products }) {
+function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, onSave, saving, onClose }) {
+  const [email, setEmail] = useState(sendingEmail || '');
+  const [logo, setLogo] = useState(logoDataUri || '');
+  const [replyTo, setReplyTo] = useState(replyToEmail || '');
+  const [language, setLanguage] = useState(invoiceLanguage || 'en');
+  const [phone, setPhone] = useState(businessPhone || '');
+  const [error, setError] = useState('');
+
+  function handleLogoFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setError('Please choose an image file.'); return; }
+    setError('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const targetW = 420;
+        const ratio = Math.min(1, targetW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * ratio;
+        canvas.height = img.height * ratio;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setLogo(canvas.toDataURL('image/png'));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <Card style={{ marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontWeight: 600 }}>Invoice Settings for {businessName}</div>
+        <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+      </div>
+      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+        <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Sending email (for "Send Invoice")</label>
+          <input style={{ width: 260 }} placeholder="invoices@thisclient.com" value={email} onChange={e => setEmail(e.target.value)} />
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4, maxWidth: 300 }}>
+            Only works once this domain is verified in Resend — otherwise sends fall back to the default address. Leave blank for Gmail/Outlook clients (use Reply-To instead).
+          </div>
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Reply-To (optional)</label>
+          <input style={{ width: 260 }} placeholder="e.g. brunoairservices@gmail.com" value={replyTo} onChange={e => setReplyTo(e.target.value)} />
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4, maxWidth: 300 }}>
+            Any address works here, including Gmail/Outlook — replies go here even though the email is sent from the address above.
+          </div>
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Invoice language</label>
+          <select value={language} onChange={e => setLanguage(e.target.value)}>
+            <option value="en">English</option>
+            <option value="es">Español</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Business phone (optional)</label>
+          <input style={{ width: 160 }} placeholder="787-613-7994" value={phone} onChange={e => setPhone(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Logo (shown on invoices)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {logo && <img src={logo} alt="Logo preview" style={{ height: 48, border: '1px solid #E2E5E9', borderRadius: 4, padding: 4 }} />}
+            <input type="file" accept="image/*" onChange={handleLogoFile} />
+            {logo && <button onClick={() => setLogo('')} style={iconBtn}>Remove</button>}
+          </div>
+        </div>
+      </div>
+      {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8 }}>{error}</div>}
+      <div style={{ marginTop: 14 }}>
+        <button onClick={() => onSave({ sendingEmail: email.trim(), logoDataUri: logo, replyToEmail: replyTo.trim(), invoiceLanguage: language, businessPhone: phone.trim() })} disabled={saving}
+          style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: saving ? 'default' : 'pointer' }}>
+          {saving ? 'Saving…' : 'Save settings'}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+
+function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, onSaveInvoiceSettings, savingInvoiceSettings }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -1824,7 +1942,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   }
 
   function blankInvoice() {
-    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0 };
+    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0, ivuPct: 0, paymentMethod: '', notes: '' };
   }
 
   function updateLine(i, field, val) {
@@ -1862,14 +1980,25 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     setShowForm(false);
   }
 
+  const [showSettings, setShowSettings] = useState(false);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Invoices</h2>
-        <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
-          <Plus size={15} /> New invoice
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowSettings(s => !s)} style={iconBtn}>Invoice Settings</button>
+          <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            <Plus size={15} /> New invoice
+          </button>
+        </div>
       </div>
+
+      {showSettings && (
+        <InvoiceSettingsPanel businessName={businessName} sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
+          invoiceLanguage={invoiceLanguage} businessPhone={businessPhone}
+          onSave={onSaveInvoiceSettings} saving={savingInvoiceSettings} onClose={() => setShowSettings(false)} />
+      )}
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
@@ -1897,7 +2026,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           ))}
           <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={form.retention} onChange={e => setForm(f => ({ ...f, retention: e.target.checked }))} />
               Apply withholding
@@ -1906,6 +2035,21 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
               <input type="number" style={{ width: 60 }} value={form.retentionPct} onChange={e => setForm(f => ({ ...f, retentionPct: e.target.value }))} />
             )}
             {form.retention && <span style={{ fontSize: 14 }}>%</span>}
+            <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
+              IVU/Sales tax
+              <input type="number" step="0.01" style={{ width: 60 }} value={form.ivuPct} onChange={e => setForm(f => ({ ...f, ivuPct: e.target.value }))} />
+              %
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Payment method (optional)</label>
+              <input style={{ width: '100%' }} placeholder="e.g. ATH Móvil, transfer, check, cash" value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Notes (optional)</label>
+              <input style={{ width: '100%' }} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
           </div>
 
           <div style={{ fontWeight: 700, marginBottom: 12 }}>Total: {money(invoiceTotal(form))}</div>
@@ -2019,12 +2163,26 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   );
 }
 
-function InvoicePrintModal({ inv, total, onClose, businessName, customers }) {
+function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone }) {
   const subtotal = inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
   const withholding = inv.retention ? subtotal * (Number(inv.retentionPct) || 0) / 100 : 0;
-  const showLogo = businessName === 'Twelve Business Strategies';
+  const ivu = subtotal * (Number(inv.ivuPct) || 0) / 100;
+  const showLogo = !!logoDataUri;
+  const isEs = invoiceLanguage === 'es';
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
+
+  const t = isEs ? {
+    title: 'FACTURA', billTo: 'FACTURAR A', invNumber: 'NÚMERO DE FACTURA', invDate: 'FECHA DE EMISIÓN',
+    items: 'SERVICIO O DESCRIPCIÓN', qty: 'CANT.', price: 'PRECIO', amount: 'IMPORTE',
+    subtotal: 'Subtotal', withholding: 'Retención', ivu: 'IVU', total: 'TOTAL',
+    paymentMethod: 'Método de pago', notes: 'Notas',
+  } : {
+    title: 'INVOICE', billTo: 'Bill to', invNumber: 'Invoice Number:', invDate: 'Invoice Date:',
+    items: 'Items', qty: 'Quantity', price: 'Price', amount: 'Amount',
+    subtotal: 'Total:', withholding: 'Withholding', ivu: 'Sales tax', total: 'Amount Due (USD):',
+    paymentMethod: 'Payment method', notes: 'Notes',
+  };
 
   async function handleSendInvoice() {
     const customer = customers.find(c => c.name === inv.client);
@@ -2035,7 +2193,9 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers }) {
     try {
       const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Invoice_${inv.number}.pdf`);
       const text = `Hi ${inv.client},\n\nHere's Invoice ${inv.number} for the amount of ${money(total)}.\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
-      await sendInvoiceViaResend({ to: email, subject: `Invoice ${inv.number}`, text, pdfBase64, filename: `Invoice_${inv.number}.pdf` });
+      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      const replyTo = replyToEmail || undefined;
+      await sendInvoiceViaResend({ to: email, subject: `Invoice ${inv.number}`, text, pdfBase64, filename: `Invoice_${inv.number}.pdf`, from, replyTo });
       setSendMsg(`Sent to ${email}.`);
     } catch (err) {
       setSendMsg('Could not send: ' + err.message);
@@ -2043,6 +2203,20 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers }) {
       setSending(false);
     }
   }
+
+  const logoEl = showLogo && <img src={logoDataUri} alt={businessName} style={{ height: 64 }} />;
+  const titleBlock = isEs ? (
+    <div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: '#1F2933' }}>{t.title}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>{businessName}</div>
+      {businessPhone && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{businessPhone}</div>}
+    </div>
+  ) : (
+    <div style={{ textAlign: 'right' }}>
+      <div style={{ fontSize: 28, letterSpacing: 2, color: '#1F2933' }}>{t.title}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>{businessName}</div>
+    </div>
+  );
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
@@ -2062,48 +2236,64 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers }) {
 
         <div id="invoice-content-only">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div>{showLogo && <img src={TWELVE_LOGO_DATA_URI} alt={businessName} style={{ height: 64 }} />}</div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 28, letterSpacing: 2, color: '#1F2933' }}>INVOICE</div>
-            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 6 }}>{businessName}</div>
-          </div>
+          {isEs ? (<>{titleBlock}<div>{logoEl}</div></>) : (<><div>{logoEl}</div>{titleBlock}</>)}
         </div>
         <div style={{ borderTop: '1px solid #D8DCE1', marginBottom: 18 }} />
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Bill to</div>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>{t.billTo}</div>
             <div style={{ fontSize: 13, fontWeight: 700 }}>{inv.client}</div>
           </div>
           <div style={{ fontSize: 13 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 3 }}>
-              <span style={{ color: '#6B7280' }}>Invoice Number:</span><span style={{ fontWeight: 700 }}>{inv.number}</span>
+              <span style={{ color: '#6B7280' }}>{t.invNumber}</span><span style={{ fontWeight: 700 }}>{inv.number}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 3 }}>
-              <span style={{ color: '#6B7280' }}>Invoice Date:</span><span style={{ fontWeight: 700 }}>{inv.date}</span>
+              <span style={{ color: '#6B7280' }}>{t.invDate}</span><span style={{ fontWeight: 700 }}>{inv.date}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 8 }}>
-              <span style={{ color: '#6B7280' }}>Payment Due:</span><span style={{ fontWeight: 700 }}>{inv.date}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, background: '#F3F4F6', padding: '6px 10px', borderRadius: 4 }}>
-              <span style={{ color: '#6B7280' }}>Amount Due (USD):</span><span style={{ fontWeight: 700 }}>{money(total)}</span>
+            {!isEs && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 8 }}>
+                <span style={{ color: '#6B7280' }}>Payment Due:</span><span style={{ fontWeight: 700 }}>{inv.date}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, background: '#F3F4F6', padding: '6px 10px', borderRadius: 4, marginTop: isEs ? 8 : 0 }}>
+              <span style={{ color: '#6B7280' }}>{isEs ? 'TOTAL:' : 'Amount Due (USD):'}</span><span style={{ fontWeight: 700 }}>{money(total)}</span>
             </div>
           </div>
         </div>
 
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ background: '#3B3F45', color: '#fff', textAlign: 'left' }}>
-            <th style={{ padding: '8px 10px' }}>Items</th>
-            <th style={{ padding: '8px 10px', textAlign: 'center' }}>Quantity</th>
-            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Price</th>
-            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount</th>
+            <th style={{ padding: '8px 10px' }}>{t.items}</th>
+            {isEs ? (
+              <>
+                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{t.price}</th>
+                <th style={{ padding: '8px 10px', textAlign: 'center' }}>{t.qty}</th>
+              </>
+            ) : (
+              <>
+                <th style={{ padding: '8px 10px', textAlign: 'center' }}>{t.qty}</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{t.price}</th>
+              </>
+            )}
+            <th style={{ padding: '8px 10px', textAlign: 'right' }}>{t.amount}</th>
           </tr></thead>
           <tbody>
             {inv.lines.map((l, i) => (
               <tr key={i} style={{ borderBottom: '1px solid #EEE' }}>
                 <td style={{ padding: '8px 10px', fontWeight: 600 }}>{l.desc}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'center' }}>{l.qty}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right' }}>{money(l.rate)}</td>
+                {isEs ? (
+                  <>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{money(l.rate)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>{l.qty}</td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>{l.qty}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{money(l.rate)}</td>
+                  </>
+                )}
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</td>
               </tr>
             ))}
@@ -2113,18 +2303,29 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ width: 240 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #D8DCE1' }}>
-              <span style={{ color: '#6B7280' }}>Total:</span><span>{money(subtotal)}</span>
+              <span style={{ color: '#6B7280' }}>{t.subtotal}</span><span>{money(subtotal)}</span>
             </div>
             {inv.retention && (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span style={{ color: '#6B7280' }}>Withholding ({inv.retentionPct}%):</span><span>-{money(withholding)}</span>
+                <span style={{ color: '#6B7280' }}>{t.withholding} ({inv.retentionPct}%):</span><span>-{money(withholding)}</span>
+              </div>
+            )}
+            {Number(inv.ivuPct) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                <span style={{ color: '#6B7280' }}>{t.ivu} ({inv.ivuPct}%):</span><span>{money(ivu)}</span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid #D8DCE1', fontWeight: 700 }}>
-              <span>Amount Due (USD):</span><span>{money(total)}</span>
+              <span>{t.total}</span><span>{money(total)}</span>
             </div>
           </div>
         </div>
+        {(inv.paymentMethod || inv.notes) && (
+          <div style={{ marginTop: 20, fontSize: 12, color: '#4B5563' }}>
+            {inv.paymentMethod && <div style={{ marginBottom: 4 }}><strong>{t.paymentMethod}:</strong> {inv.paymentMethod}</div>}
+            {inv.notes && <div><strong>{t.notes}:</strong> {inv.notes}</div>}
+          </div>
+        )}
         </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
