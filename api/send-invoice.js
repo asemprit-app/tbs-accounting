@@ -1,13 +1,18 @@
-// api/send-invoice.js
-// Función de backend (Vercel Serverless Function). Se ejecuta en el servidor,
-// nunca en el navegador — por eso aquí sí es seguro usar la llave de Resend.
-//
-// Necesita la variable de entorno RESEND_API_KEY configurada en Vercel
-// (Project Settings -> Environment Variables), y opcionalmente RESEND_FROM
-// (por ejemplo: "Twelve Business Strategies <invoices@twelvestrategies.com>").
-// El dominio usado en RESEND_FROM tiene que estar verificado en tu cuenta de Resend.
+// api/send-invoice.js — VERSIÓN TEMPORAL DE DIAGNÓSTICO
+// (después de confirmar el problema, hay que volver a poner la versión real)
 
 export default async function handler(req, res) {
+  if (req.method === 'GET') {
+    res.status(200).json({
+      diagnostic: true,
+      has_RESEND_API_KEY: !!process.env.RESEND_API_KEY,
+      RESEND_API_KEY_length: process.env.RESEND_API_KEY ? process.env.RESEND_API_KEY.length : 0,
+      has_RESEND_FROM: !!process.env.RESEND_FROM,
+      RESEND_FROM_value: process.env.RESEND_FROM || null,
+    });
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
