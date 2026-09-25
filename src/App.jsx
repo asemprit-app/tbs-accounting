@@ -1655,13 +1655,14 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     const customer = customers.find(c => c.name === inv.client);
     const email = customer?.email || '';
     if (!email) {
-      if (!window.confirm(`No email on file for ${inv.client} (add one in the Customers tab for next time). Open your email app anyway so you can type the address?`)) return;
+      if (!window.confirm(`No email on file for ${inv.client} (add one in the Customers tab for next time). Open Gmail anyway so you can type the address?`)) return;
     }
     const subject = encodeURIComponent(`Invoice ${inv.number}`);
     const body = encodeURIComponent(
       `Hi ${inv.client},\n\nHere's Invoice ${inv.number} for the amount of ${money(invoiceTotal(inv))}.\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`
     );
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&tf=1&to=${encodeURIComponent(email)}&su=${subject}&body=${body}&authuser=asemprit%40twelvestrategies.com`;
+    window.open(gmailUrl, '_blank');
   }
   function saveInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
