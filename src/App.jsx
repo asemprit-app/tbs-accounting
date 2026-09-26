@@ -4382,6 +4382,24 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
   const [selected, setSelected] = useState([]);
+  const [reconSort, setReconSort] = useState({ column: null, dir: 'asc' });
+  function toggleReconSort(column) {
+    setReconSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
+  const sortedReconciliations = useMemo(() => {
+    const arr = reconciliations.slice().reverse();
+    if (!reconSort.column) return arr;
+    return arr.slice().sort((a, b) => {
+      let cmp = 0;
+      if (reconSort.column === 'gl') cmp = a.gl.localeCompare(b.gl);
+      else if (reconSort.column === 'periodEnd') cmp = a.periodEnd.localeCompare(b.periodEnd);
+      else if (reconSort.column === 'statementBalance') cmp = a.statementBalance - b.statementBalance;
+      else if (reconSort.column === 'ledgerBalance') cmp = a.ledgerBalance - b.ledgerBalance;
+      else if (reconSort.column === 'difference') cmp = a.difference - b.difference;
+      else if (reconSort.column === 'status') cmp = a.status.localeCompare(b.status);
+      return reconSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [reconciliations, reconSort]);
   const [reviewFilters, setReviewFilters] = useState({ dateFrom: '', dateTo: '', description: '', amount: '' });
   const [reviewSort, setReviewSort] = useState({ column: null, dir: 'asc' });
   const [reviewSign, setReviewSign] = useState(''); // '' | 'positive' | 'negative'
@@ -4534,12 +4552,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             <th style={{ padding: '6px 4px' }}>
               <input type="checkbox" checked={reconciliations.length > 0 && reconciliations.every(r => selected.includes(r.id))} onChange={toggleSelectAll} />
             </th>
-            <th style={{ padding: '6px 4px' }}>Account</th><th style={{ padding: '6px 4px' }}>As of</th>
-            <th style={{ padding: '6px 4px' }}>Statement</th><th style={{ padding: '6px 4px' }}>Book</th>
-            <th style={{ padding: '6px 4px' }}>Difference</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('gl')}>Account {reconSort.column === 'gl' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('periodEnd')}>As of {reconSort.column === 'periodEnd' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('statementBalance')}>Statement {reconSort.column === 'statementBalance' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('ledgerBalance')}>Book {reconSort.column === 'ledgerBalance' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('difference')}>Difference {reconSort.column === 'difference' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('status')}>Status {reconSort.column === 'status' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th><th></th>
           </tr></thead>
           <tbody>
-            {reconciliations.slice().reverse().map(r => (
+            {sortedReconciliations.map(r => (
               <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3', background: selected.includes(r.id) ? '#F0F5FA' : 'transparent' }}>
                 <td style={{ padding: '6px 4px' }}>
                   <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggleSelect(r.id)} />
