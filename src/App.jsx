@@ -2003,8 +2003,34 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     setForm(blankInvoice());
     setShowForm(false);
   }
+  function startEditInvoice(inv) {
+    setForm({ ...inv, lines: inv.lines.map(l => ({ ...l })) });
+    setEditingId(inv.id);
+    setShowForm(true);
+    setError('');
+  }
+  function saveEditedInvoice() {
+    if (!form.client.trim()) { setError("Enter the customer's name."); return; }
+    if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
+    setError('');
+    setInvoices(prev => prev.map(i => i.id === editingId ? { ...form, id: editingId, number: i.number } : i));
+    setForm(blankInvoice());
+    setEditingId(null);
+    setShowForm(false);
+  }
+  function cancelInvoiceForm() {
+    setForm(blankInvoice());
+    setEditingId(null);
+    setShowForm(false);
+    setError('');
+  }
+  function removeInvoice(inv) {
+    if (!window.confirm(`Delete invoice ${inv.number} for ${inv.client}? This cannot be undone.${inv.paid ? ' It has a payment recorded against it.' : ''}`)) return;
+    setInvoices(prev => prev.filter(i => i.id !== inv.id));
+  }
 
   const [showSettings, setShowSettings] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   return (
     <div>
@@ -2012,7 +2038,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         <h2 style={{ margin: 0 }}>Invoices</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowSettings(s => !s)} style={iconBtn}>Invoice Settings</button>
-          <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+          <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> New invoice
           </button>
         </div>
@@ -2026,6 +2052,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
+          {editingId && <div style={{ fontWeight: 600, marginBottom: 10 }}>Editing invoice {form.number}</div>}
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
               <label style={{ fontSize: 14, color: '#6B7280', display: 'block' }}>Customer</label>
@@ -2078,7 +2105,12 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
           <div style={{ fontWeight: 700, marginBottom: 12 }}>Total: {money(invoiceTotal(form))}</div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
-          <button onClick={saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Save invoice</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={editingId ? saveEditedInvoice : saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+              {editingId ? 'Update invoice' : 'Save invoice'}
+            </button>
+            {editingId && <button onClick={cancelInvoiceForm} style={iconBtn}>Cancel</button>}
+          </div>
         </Card>
       )}
 
@@ -2142,9 +2174,11 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   <button onClick={() => onPrint(inv)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> PDF</button>
                   <button onClick={() => sendInvoiceEmail(inv)} style={iconBtn}>Email</button>
+                  <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
                   {inv.status !== 'Paid' && (
                     <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
+                  <button onClick={() => removeInvoice(inv)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
             ))}
