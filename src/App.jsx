@@ -1741,6 +1741,21 @@ function ProductsView({ products, setProducts }) {
     setEditingId(null);
   }
   function toggleActive(p) { setProducts(prev => prev.map(x => x.id === p.id ? { ...x, active: !x.active } : x)); }
+  const [prodSort, setProdSort] = useState({ column: null, dir: 'asc' });
+  function toggleProdSort(column) {
+    setProdSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
+  const sortedProducts = useMemo(() => {
+    if (!prodSort.column) return products;
+    return products.slice().sort((a, b) => {
+      let cmp = 0;
+      if (prodSort.column === 'name') cmp = a.name.localeCompare(b.name);
+      else if (prodSort.column === 'description') cmp = (a.description || '').localeCompare(b.description || '');
+      else if (prodSort.column === 'price') cmp = a.price - b.price;
+      else if (prodSort.column === 'active') cmp = (a.active === b.active) ? 0 : (a.active ? -1 : 1);
+      return prodSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [products, prodSort]);
   function removeProduct(id) {
     if (!window.confirm('Delete this product/service? This will not change past invoices.')) return;
     setProducts(prev => prev.filter(p => p.id !== id));
@@ -1768,11 +1783,13 @@ function ProductsView({ products, setProducts }) {
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Description</th>
-            <th style={{ padding: '6px 4px' }}>Default price</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleProdSort('name')}>Name {prodSort.column === 'name' ? (prodSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleProdSort('description')}>Description {prodSort.column === 'description' ? (prodSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleProdSort('price')}>Default price {prodSort.column === 'price' ? (prodSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleProdSort('active')}>Status {prodSort.column === 'active' ? (prodSort.dir === 'asc' ? '▲' : '▼') : ''}</th><th></th>
           </tr></thead>
           <tbody>
-            {products.map(p => (
+            {sortedProducts.map(p => (
               <tr key={p.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 {editingId === p.id ? (
                   <>
@@ -1946,6 +1963,25 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     if (opt) setFilters(f => ({ ...f, dateFrom: opt.first, dateTo: opt.last }));
   }
   const filteredTotal = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv), 0);
+  const [invSort, setInvSort] = useState({ column: null, dir: 'asc' });
+  function toggleInvSort(column) {
+    setInvSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
+  const sortedInvoices = useMemo(() => {
+    const arr = filteredInvoices.slice().reverse();
+    if (!invSort.column) return arr;
+    const sorted = arr.slice().sort((a, b) => {
+      let cmp = 0;
+      if (invSort.column === 'number') cmp = a.number.localeCompare(b.number);
+      else if (invSort.column === 'client') cmp = a.client.localeCompare(b.client);
+      else if (invSort.column === 'date') cmp = a.date.localeCompare(b.date);
+      else if (invSort.column === 'subtotal') cmp = invoiceSubtotal(a) - invoiceSubtotal(b);
+      else if (invSort.column === 'total') cmp = invoiceTotal(a) - invoiceTotal(b);
+      else if (invSort.column === 'status') cmp = a.status.localeCompare(b.status);
+      return invSort.dir === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [filteredInvoices, invSort]);
   const filteredSubtotal = filteredInvoices.reduce((s, inv) => s + invoiceSubtotal(inv), 0);
   const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
@@ -2153,17 +2189,17 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-              <th style={{ padding: '6px 4px' }}>No.</th>
-              <th style={{ padding: '6px 4px' }}>Customer</th>
-              <th style={{ padding: '6px 4px' }}>Date</th>
-              <th style={{ padding: '6px 4px' }}>Amount (before withholding)</th>
-              <th style={{ padding: '6px 4px' }}>Total</th>
-              <th style={{ padding: '6px 4px' }}>Status</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('number')}>No. {invSort.column === 'number' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('client')}>Customer {invSort.column === 'client' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('date')}>Date {invSort.column === 'date' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('subtotal')}>Amount (before withholding) {invSort.column === 'subtotal' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('total')}>Total {invSort.column === 'total' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('status')}>Status {invSort.column === 'status' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
               <th style={{ padding: '6px 4px' }}></th>
             </tr>
           </thead>
           <tbody>
-            {filteredInvoices.slice().reverse().map(inv => (
+            {sortedInvoices.map(inv => (
               <tr key={inv.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{inv.number}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.client}</td>
@@ -2445,6 +2481,21 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
   const allNames = Array.from(new Set([...customers.map(c => c.name), ...invoices.map(i => i.client)]));
   const totalBilledBeforeWithholding = allNames.reduce((s, n) => s + (billedBeforeWithholding[n] || 0), 0);
   const totalOpenBalance = allNames.reduce((s, n) => s + (balances[n] || 0), 0);
+  const [custSort, setCustSort] = useState({ column: null, dir: 'asc' });
+  function toggleCustSort(column) {
+    setCustSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
+  const sortedNames = useMemo(() => {
+    if (!custSort.column) return allNames;
+    return allNames.slice().sort((a, b) => {
+      let cmp = 0;
+      if (custSort.column === 'name') cmp = a.localeCompare(b);
+      else if (custSort.column === 'email') cmp = (customers.find(c => c.name === a)?.email || '').localeCompare(customers.find(c => c.name === b)?.email || '');
+      else if (custSort.column === 'billed') cmp = (billedBeforeWithholding[a] || 0) - (billedBeforeWithholding[b] || 0);
+      else if (custSort.column === 'balance') cmp = (balances[a] || 0) - (balances[b] || 0);
+      return custSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [allNames, custSort, customers, billedBeforeWithholding, balances]);
 
   return (
     <div>
@@ -2459,13 +2510,13 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Customer</th>
-            <th style={{ padding: '6px 4px' }}>Email</th>
-            <th style={{ padding: '6px 4px' }}>Total billed (before withholding)</th>
-            <th style={{ padding: '6px 4px' }}>Open balance (A/R)</th><th></th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('name')}>Customer {custSort.column === 'name' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('email')}>Email {custSort.column === 'email' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('billed')}>Total billed (before withholding) {custSort.column === 'billed' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('balance')}>Open balance (A/R) {custSort.column === 'balance' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th><th></th>
           </tr></thead>
           <tbody>
-            {allNames.map(n => {
+            {sortedNames.map(n => {
               const c = customers.find(x => x.name === n);
               return (
                 <tr key={n} style={{ borderBottom: '1px solid #F0F1F3' }}>
