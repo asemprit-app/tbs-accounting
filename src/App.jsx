@@ -1763,6 +1763,15 @@ function serviceCalc(s) {
   const netPay = subtotal + (Number(s.reimbursement) || 0);
   return { tipsNet, gross, subtotal, netPay };
 }
+// Si el nombre escrito coincide con un empleado ya configurado en Payroll, usa su
+// PR Tax % + SINOT % para calcular la Retención automáticamente (Gross × ese %).
+function autoRetentionFor(s, employees) {
+  const emp = employees.find(e => e.name === s.employeeName);
+  if (!emp) return s.retentionAmount;
+  const pct = (Number(emp.prTaxPct) || 0) + (Number(emp.sinotPct) || 0);
+  const { gross } = serviceCalc(s);
+  return Number((gross * pct / 100).toFixed(2));
+}
 
 function ServicesView({ services, setServices, employees }) {
   function blankService() {
@@ -1844,21 +1853,28 @@ function ServicesView({ services, setServices, employees }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee / Worker</label>
-            <input list="services-employee-list" style={{ width: 160 }} value={form.employeeName} onChange={e => setForm(f => ({ ...f, employeeName: e.target.value }))} />
+            <input list="services-employee-list" style={{ width: 160 }} value={form.employeeName}
+              onChange={e => setForm(f => { const next = { ...f, employeeName: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} />
             <datalist id="services-employee-list">{employees.map(e => <option key={e.id} value={e.name} />)}</datalist>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
-            <input type="number" step="0.01" style={{ width: 70 }} value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} /></div>
+            <input type="number" step="0.01" style={{ width: 70 }} value={form.hours}
+              onChange={e => setForm(f => { const next = { ...f, hours: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Pay rate</label>
-            <input type="number" step="0.01" style={{ width: 80 }} value={form.payRate} onChange={e => setForm(f => ({ ...f, payRate: e.target.value }))} /></div>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.payRate}
+              onChange={e => setForm(f => { const next = { ...f, payRate: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tips (raw)</label>
-            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRaw} onChange={e => setForm(f => ({ ...f, tipsRaw: e.target.value }))} /></div>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRaw}
+              onChange={e => setForm(f => { const next = { ...f, tipsRaw: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tips retention %</label>
-            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRetentionPct} onChange={e => setForm(f => ({ ...f, tipsRetentionPct: e.target.value }))} /></div>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRetentionPct}
+              onChange={e => setForm(f => { const next = { ...f, tipsRetentionPct: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Retención ($)</label>
-            <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} /></div>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} />
+            {employees.some(e => e.name === form.employeeName) && <div style={{ fontSize: 11, color: '#6B7280' }}>auto ({((employees.find(e => e.name === form.employeeName)?.prTaxPct || 0) + (employees.find(e => e.name === form.employeeName)?.sinotPct || 0))}%)</div>}
+          </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reembolso</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.reimbursement} onChange={e => setForm(f => ({ ...f, reimbursement: e.target.value }))} /></div>
           <button onClick={addService} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
@@ -1891,13 +1907,18 @@ function ServicesView({ services, setServices, employees }) {
                 <tr key={s.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   {editingId === s.id ? (
                     <>
-                      <td style={{ padding: '4px' }}><input style={{ width: 120 }} value={editDraft.employeeName} onChange={e => setEditDraft(d => ({ ...d, employeeName: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}><input style={{ width: 120 }} value={editDraft.employeeName}
+                        onChange={e => setEditDraft(d => { const next = { ...d, employeeName: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
                       <td style={{ padding: '4px' }}><input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} /></td>
-                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours} onChange={e => setEditDraft(d => ({ ...d, hours: e.target.value }))} /></td>
-                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.payRate} onChange={e => setEditDraft(d => ({ ...d, payRate: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours}
+                        onChange={e => setEditDraft(d => { const next = { ...d, hours: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.payRate}
+                        onChange={e => setEditDraft(d => { const next = { ...d, payRate: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
                       <td style={{ padding: '4px' }}>
-                        <input type="number" step="0.01" style={{ width: 70 }} value={editDraft.tipsRaw} onChange={e => setEditDraft(d => ({ ...d, tipsRaw: e.target.value }))} placeholder="Tips raw" />
-                        <input type="number" step="0.01" style={{ width: 60, marginLeft: 4 }} value={editDraft.tipsRetentionPct} onChange={e => setEditDraft(d => ({ ...d, tipsRetentionPct: e.target.value }))} placeholder="%" />
+                        <input type="number" step="0.01" style={{ width: 70 }} value={editDraft.tipsRaw}
+                          onChange={e => setEditDraft(d => { const next = { ...d, tipsRaw: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} placeholder="Tips raw" />
+                        <input type="number" step="0.01" style={{ width: 60, marginLeft: 4 }} value={editDraft.tipsRetentionPct}
+                          onChange={e => setEditDraft(d => { const next = { ...d, tipsRetentionPct: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} placeholder="%" />
                       </td>
                       <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).tipsNet)}</td>
                       <td style={{ padding: '4px', fontWeight: 600 }}>{money(serviceCalc(editDraft).gross)}</td>
