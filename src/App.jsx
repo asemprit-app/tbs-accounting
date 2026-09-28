@@ -608,6 +608,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
           retentionAmount: Number(row.retention_amount) || 0, reimbursement: Number(row.reimbursement) || 0,
+          status: row.status || 'DRAFT', postedJeId: row.posted_je_id || null,
         })));
       }
       setLoaded(true);
@@ -732,6 +733,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
         retention_amount: Number(s.retentionAmount) || 0, reimbursement: Number(s.reimbursement) || 0,
+        status: s.status || 'DRAFT', posted_je_id: s.postedJeId || null,
       }));
       diffSync('services', toDb(prev), toDb(next), clientId);
       return next;
@@ -838,7 +840,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
         {tab === 'services' && (
           <ServicesView services={services} setServices={setServices} employees={employees}
-            businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
+            businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+            accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} />
         )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
@@ -1774,7 +1777,7 @@ function autoRetentionFor(s, employees) {
   return Number((gross * pct / 100).toFixed(2));
 }
 
-function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
   function blankService() {
     return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', retentionAmount: '', reimbursement: '' };
   }
@@ -1784,6 +1787,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   const [editDraft, setEditDraft] = useState(blankService());
   const [sort, setSort] = useState({ column: null, dir: 'asc' });
   const [receiptId, setReceiptId] = useState(null);
+  const [showRegister, setShowRegister] = useState(false);
 
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
@@ -1810,6 +1814,45 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   function removeService(id) {
     if (!window.confirm('Delete this service entry?')) return;
     setServices(prev => prev.filter(s => s.id !== id));
+  }
+  function finalizeService(id) {
+    setServices(prev => prev.map(s => s.id === id ? { ...s, status: 'FINAL' } : s));
+  }
+  function reopenService(id) {
+    if (!window.confirm('Reopen this entry for editing? It will show as DRAFT again.')) return;
+    setServices(prev => prev.map(s => s.id === id ? { ...s, status: 'DRAFT' } : s));
+  }
+  function postServiceToJournal(s) {
+    if (s.postedJeId && journalEntries.some(j => j.id === s.postedJeId)) {
+      alert('This entry was already posted to Journal Entries.');
+      return;
+    }
+    const c = serviceCalc(s);
+    const findCode = name => accounts.find(a => a.name.toLowerCase() === name.toLowerCase())?.code;
+    const codes = {
+      wages: findCode('Service Wages Expense'),
+      retentionPayable: findCode('Service Retention Payable'),
+      netPayPayable: findCode('Service Net Pay Payable'),
+    };
+    const missing = Object.entries(codes).filter(([, v]) => !v).map(([k]) => k);
+    if (missing.length) {
+      alert('These accounts are missing from the Chart of Accounts: ' + missing.join(', ') + '. Run the services GL setup script first.');
+      return;
+    }
+    const jeLines = [{ gl: codes.wages, debit: c.gross.toFixed(2), credit: '', desc: `Service pay — ${s.employeeName}` }];
+    if (Number(s.reimbursement) > 0) {
+      jeLines.push({ gl: codes.wages, debit: Number(s.reimbursement).toFixed(2), credit: '', desc: 'Reimbursement' });
+    }
+    if (Number(s.retentionAmount) > 0) {
+      jeLines.push({ gl: codes.retentionPayable, debit: '', credit: Number(s.retentionAmount).toFixed(2), desc: 'Retention' });
+    }
+    jeLines.push({ gl: codes.netPayPayable, debit: '', credit: c.netPay.toFixed(2), desc: 'Net pay payable' });
+
+    const jeId = uid();
+    const je = { id: jeId, date: s.date, memo: `Services — ${s.employeeName} (${s.date})`, lines: jeLines };
+    setJournalEntries(prev => [...prev, je]);
+    setServices(prev => prev.map(x => x.id === s.id ? { ...x, postedJeId: jeId } : x));
+    alert('Posted to Journal Entries.');
   }
   function toggleSort(column) {
     setSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
@@ -1849,7 +1892,10 @@ function ServicesView({ services, setServices, employees, businessName, logoData
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Services</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Services</h2>
+        <button onClick={() => setShowRegister(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Receipt Register</button>
+      </div>
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Add service entry</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -1904,6 +1950,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
             {th('subtotal', 'Sub-Total')}
             {th('reimbursement', 'Reembolso')}
             {th('netPay', 'Net-Pay')}
+            <th style={{ padding: '6px 4px' }}>Status</th>
             <th></th>
           </tr></thead>
           <tbody>
@@ -1936,6 +1983,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).subtotal)}</td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.reimbursement} onChange={e => setEditDraft(d => ({ ...d, reimbursement: e.target.value }))} /></td>
                       <td style={{ padding: '4px', fontWeight: 700 }}>{money(serviceCalc(editDraft).netPay)}</td>
+                      <td style={{ padding: '4px' }}></td>
                       <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
                         <button onClick={() => saveEdit(s.id)} style={iconBtn}><Check size={14} /></button>
                         <button onClick={() => setEditingId(null)} style={iconBtn}><X size={14} /></button>
@@ -1954,9 +2002,18 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       <td style={{ padding: '4px' }}>{money(c.subtotal)}</td>
                       <td style={{ padding: '4px' }}>{money(s.reimbursement)}</td>
                       <td style={{ padding: '4px', fontWeight: 700 }}>{money(c.netPay)}</td>
-                      <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
+                      <td style={{ padding: '4px' }}>
+                        <span style={{ color: s.status === 'FINAL' ? '#0F6E56' : '#6B7280', fontWeight: s.status === 'FINAL' ? 600 : 400 }}>{s.status}</span>
+                      </td>
+                      <td style={{ padding: '4px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => setReceiptId(s.id)} style={iconBtn}>Receipt</button>
                         <button onClick={() => startEdit(s)} style={iconBtn}>Edit</button>
+                        {s.status === 'DRAFT'
+                          ? <button onClick={() => finalizeService(s.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
+                          : <button onClick={() => reopenService(s.id)} style={iconBtn}>Reopen</button>}
+                        {s.postedJeId
+                          ? <span style={{ fontSize: 12, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted</span>
+                          : <button onClick={() => postServiceToJournal(s)} style={iconBtn}>Post to JE</button>}
                         <button onClick={() => removeService(s.id)} style={iconBtn}><Trash2 size={14} /></button>
                       </td>
                     </>
@@ -1978,6 +2035,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                 <td style={{ padding: '4px' }}>{money(totals.reimbursement)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.netPay)}</td>
                 <td></td>
+                <td></td>
               </tr>
             </tfoot>
           )}
@@ -1989,6 +2047,104 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
           onClose={() => setReceiptId(null)} />
       )}
+      {showRegister && (
+        <ReceiptRegisterModal services={services} businessName={businessName} onClose={() => setShowRegister(false)} />
+      )}
+    </div>
+  );
+}
+
+function ReceiptRegisterModal({ services, businessName, onClose }) {
+  const rows = services.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const totals = rows.reduce((t, s) => {
+    const c = serviceCalc(s);
+    return {
+      hours: t.hours + (Number(s.hours) || 0), tipsNet: t.tipsNet + c.tipsNet, gross: t.gross + c.gross,
+      retention: t.retention + (Number(s.retentionAmount) || 0), subtotal: t.subtotal + c.subtotal,
+      reimbursement: t.reimbursement + (Number(s.reimbursement) || 0), netPay: t.netPay + c.netPay,
+    };
+  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
+
+  function exportCSV() {
+    let csv = 'Employee,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    rows.forEach(s => {
+      const c = serviceCalc(s);
+      csv += [esc(s.employeeName), s.date, s.hours, s.payRate.toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
+        s.retentionAmount.toFixed(2), c.subtotal.toFixed(2), s.reimbursement.toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
+    });
+    csv += `TOTAL,,${totals.hours},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Receipt_Register.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 980, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt Register</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+        <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={rows[0]?.date} periodEnd={rows[rows.length - 1]?.date} logoUrl={null} />
+        <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
+          <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
+            <th style={{ padding: '4px 4px' }}>Employee</th>
+            <th style={{ padding: '4px' }}>Date</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Hours</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Pay Rate</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Tips</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Retention</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Sub-Total</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Reimb.</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Net Pay</th>
+            <th style={{ padding: '4px' }}>Status</th>
+          </tr></thead>
+          <tbody>
+            {rows.map(s => {
+              const c = serviceCalc(s);
+              return (
+                <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '4px 4px' }}>{s.employeeName}</td>
+                  <td style={{ padding: '4px' }}>{s.date}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{s.hours}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.payRate)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.tipsNet)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.gross)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.retentionAmount)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.subtotal)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.reimbursement)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700 }}>{money(c.netPay)}</td>
+                  <td style={{ padding: '4px' }}>{s.status}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
+              <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
+              <td></td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours}</td>
+              <td></td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.tipsNet)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.retention)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.subtotal)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
+              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.netPay)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
