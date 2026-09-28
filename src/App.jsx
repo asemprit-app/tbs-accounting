@@ -702,7 +702,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setEmployees = useCallback((updater) => {
     setEmployeesRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false, pr_tax_pct: e.prTaxPct || 0 }));
+      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false, pr_tax_pct: e.prTaxPct || 0, email: e.email || '' }));
       diffSync('employees', toDb(prev), toDb(next), clientId);
       return next;
     });
@@ -824,7 +824,8 @@ async function fetchAllRows(table, clientId, orderCol) {
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
-          journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri} />}
+          journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
+          sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
         </>
         )}
       </div>
@@ -3836,7 +3837,7 @@ const SS_RATE = 0.062;
 const MEDICARE_RATE = 0.0145;
 const SS_WAGE_BASE_DEFAULT = 168600; // tope anual de Social Security — verifica/actualiza cada año
 
-function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '' }; }
+function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '', email: '' }; }
 
 const OT_MULTIPLIER = 1.5;
 const DOUBLE_OT_MULTIPLIER = 2;
@@ -3892,7 +3893,7 @@ function findAccountCode(accounts, name) {
   return acc ? acc.code : null;
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries, logoDataUri }) {
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -3976,7 +3977,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
-          businessName={businessName} logoDataUri={logoDataUri} />
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
@@ -3996,10 +3997,10 @@ function EmployeesTab({ employees, setEmployees }) {
     if (!form.name.trim()) { setError('Enter the employee name.'); return; }
     if (!form.rate || Number(form.rate) <= 0) { setError(form.payType === 'hourly' ? 'Enter an hourly rate.' : 'Enter the salary amount per period.'); return; }
     setError('');
-    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0 }]);
+    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0, email: form.email.trim() }]);
     setForm(blankEmployee());
   }
-  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0 }); }
+  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0, email: e.email || '' }); }
   function saveEdit(id) {
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...editDraft, rate: Number(editDraft.rate), prTaxPct: Number(editDraft.prTaxPct) || 0 } : e));
     setEditingId(null);
@@ -4026,6 +4027,8 @@ function EmployeesTab({ employees, setEmployees }) {
             <input type="number" step="0.01" style={{ width: 120 }} value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>PR Tax %</label>
             <input type="number" step="0.01" style={{ width: 80 }} placeholder="0" value={form.prTaxPct} onChange={e => setForm(f => ({ ...f, prTaxPct: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Email (for Pay Stubs)</label>
+            <input style={{ width: 180 }} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
           <button onClick={addEmployee} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> Add
           </button>
@@ -4037,7 +4040,7 @@ function EmployeesTab({ employees, setEmployees }) {
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Pay type</th>
-            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>Email</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
             {employees.map(e => (
@@ -4051,6 +4054,7 @@ function EmployeesTab({ employees, setEmployees }) {
                       </select></td>
                     <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={editDraft.rate} onChange={ev => setEditDraft(d => ({ ...d, rate: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.prTaxPct} onChange={ev => setEditDraft(d => ({ ...d, prTaxPct: ev.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><input style={{ width: 160 }} value={editDraft.email} onChange={ev => setEditDraft(d => ({ ...d, email: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
                       <button onClick={() => saveEdit(e.id)} style={iconBtn}><Check size={14} /></button>
@@ -4063,6 +4067,7 @@ function EmployeesTab({ employees, setEmployees }) {
                     <td style={{ padding: '6px 4px', color: '#6B7280' }}>{e.payType === 'hourly' ? 'Hourly' : 'Salary'}</td>
                     <td style={{ padding: '6px 4px' }}>{money(e.rate)}{e.payType === 'hourly' ? '/hr' : '/period'}</td>
                     <td style={{ padding: '6px 4px' }}>{e.prTaxPct || 0}%</td>
+                    <td style={{ padding: '6px 4px', color: e.email ? '#1F2933' : '#9CA3AF' }}>{e.email || 'No email'}</td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
                       <button onClick={() => startEdit(e)} style={iconBtn}>Edit</button>
@@ -4174,7 +4179,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
   );
 }
 
-function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri }) {
+function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
@@ -4353,15 +4358,17 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       </Card>
       {payStubLineId && (
         <PayStubModal line={linesForRun.find(l => l.id === payStubLineId)} run={run} employees={employees}
-          businessName={businessName} logoDataUri={logoDataUri} onClose={() => setPayStubLineId(null)} />
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
       )}
     </div>
   );
 }
 
-function PayStubModal({ line, run, employees, businessName, logoDataUri, onClose }) {
+function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
   const emp = employees.find(e => e.id === line.employeeId);
   const rate = Number(emp?.rate) || 0;
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
   const hourRows = emp?.payType === 'hourly' ? [
     ['Regular', line.regularHours, rate, 1],
     ['Vacation', line.vacationHours, rate, 1],
@@ -4370,6 +4377,25 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, onClose
     ['Overtime (1.5x)', line.overtimeHours, rate * OT_MULTIPLIER, OT_MULTIPLIER],
     ['Double-OT (2x)', line.doubleOvertimeHours, rate * DOUBLE_OT_MULTIPLIER, DOUBLE_OT_MULTIPLIER],
   ].filter(([, hrs]) => Number(hrs) > 0) : [];
+
+  async function handleSendPayStub() {
+    const email = emp?.email || '';
+    if (!email) { setSendMsg('No email on file for this employee — add one in the Employees tab first.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
+      const text = `Hi ${emp.name},\n\nAttached is your pay stub for the period ${run.periodStart} to ${run.periodEnd} (pay date ${run.payDate}).\n\nNet Pay: ${money(lineNet(line))}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
+      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      const replyTo = replyToEmail || undefined;
+      await sendInvoiceViaResend({ to: email, subject: `Pay Stub — ${run.payDate}`, text, pdfBase64, filename: `PayStub_${emp.name}_${run.payDate}.pdf`, from, replyTo });
+      setSendMsg(`Sent to ${email}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
 
   function exportCSV() {
     let csv = 'Employee,Pay Date,Period Start,Period End\n';
@@ -4399,7 +4425,11 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, onClose
       <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
+            <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+              {sending ? 'Sending…' : 'Send Pay Stub'}
+            </button>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
             <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
