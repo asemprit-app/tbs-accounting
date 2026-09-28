@@ -837,7 +837,8 @@ async function fetchAllRows(table, clientId, orderCol) {
           <ProductsView products={products} setProducts={setProducts} />
         )}
         {tab === 'services' && (
-          <ServicesView services={services} setServices={setServices} employees={employees} />
+          <ServicesView services={services} setServices={setServices} employees={employees}
+            businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
         )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
@@ -1773,7 +1774,7 @@ function autoRetentionFor(s, employees) {
   return Number((gross * pct / 100).toFixed(2));
 }
 
-function ServicesView({ services, setServices, employees }) {
+function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   function blankService() {
     return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', retentionAmount: '', reimbursement: '' };
   }
@@ -1782,6 +1783,7 @@ function ServicesView({ services, setServices, employees }) {
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(blankService());
   const [sort, setSort] = useState({ column: null, dir: 'asc' });
+  const [receiptId, setReceiptId] = useState(null);
 
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
@@ -1953,6 +1955,7 @@ function ServicesView({ services, setServices, employees }) {
                       <td style={{ padding: '4px' }}>{money(s.reimbursement)}</td>
                       <td style={{ padding: '4px', fontWeight: 700 }}>{money(c.netPay)}</td>
                       <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
+                        <button onClick={() => setReceiptId(s.id)} style={iconBtn}>Receipt</button>
                         <button onClick={() => startEdit(s)} style={iconBtn}>Edit</button>
                         <button onClick={() => removeService(s.id)} style={iconBtn}><Trash2 size={14} /></button>
                       </td>
@@ -1981,6 +1984,81 @@ function ServicesView({ services, setServices, employees }) {
         </table>
         {sortedServices.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No service entries yet.</div>}
       </Card>
+      {receiptId && (
+        <ServiceReceiptModal service={services.find(s => s.id === receiptId)} employees={employees}
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+          onClose={() => setReceiptId(null)} />
+      )}
+    </div>
+  );
+}
+
+function ServiceReceiptModal({ service, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
+  const c = serviceCalc(service);
+  const emp = employees.find(e => e.name === service.employeeName);
+  const showHours = Number(service.hours) > 0;
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
+
+  async function handleSend() {
+    const email = emp?.email || '';
+    if (!email) { setSendMsg('No email on file for this person — add one in the Employees tab first.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_${service.employeeName}_${service.date}.pdf`);
+      const text = `Hi ${service.employeeName},\n\nAttached is your payment receipt for ${service.date}.\n\nNet Pay: ${money(c.netPay)}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
+      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      const replyTo = replyToEmail || undefined;
+      await sendInvoiceViaResend({ to: email, subject: `Payment Receipt — ${service.date}`, text, pdfBase64, filename: `Receipt_${service.employeeName}_${service.date}.pdf`, from, replyTo });
+      setSendMsg(`Sent to ${email}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 480, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt — {service.employeeName}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 180 }}>{sendMsg}</span>}
+            <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+              {sending ? 'Sending…' : 'Send Receipt'}
+            </button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+
+        <div id="invoice-content-only">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>{logoDataUri && <img src={logoDataUri} alt={businessName} style={{ height: 56 }} />}</div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 20, letterSpacing: 1, color: '#1F2933' }}>PAYMENT RECEIPT</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>{businessName}</div>
+            </div>
+          </div>
+          <div style={{ borderTop: '1px solid #D8DCE1', marginBottom: 16 }} />
+
+          <div style={{ fontSize: 13 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Nombre</span><span style={{ fontWeight: 700 }}>{service.employeeName}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Fecha de pago</span><span style={{ fontWeight: 700 }}>{service.date}</span></div>
+            {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Horas</span><span>{service.hours}</span></div>}
+            {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Pay rate</span><span>{money(service.payRate)}</span></div>}
+            {c.tipsNet > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Tips</span><span>{money(c.tipsNet)}</span></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #E2E5E9', marginTop: 6, fontWeight: 700 }}><span>Gross</span><span>{money(c.gross)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Retention</span><span>-{money(service.retentionAmount)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Sub-Total</span><span>{money(c.subtotal)}</span></div>
+            {Number(service.reimbursement) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Reembolso</span><span>+{money(service.reimbursement)}</span></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #1F2933', marginTop: 10, paddingTop: 10, fontWeight: 700, fontSize: 16 }}><span>Net-Pay</span><span>{money(c.netPay)}</span></div>
+          </div>
+        </div>
+      </div>
+      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
