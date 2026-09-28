@@ -585,7 +585,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setBusinessPhone(cl?.data?.business_phone || '');
         setInvoicePrefix(cl?.data?.invoice_prefix || 'TBS');
         setInvoiceNumberPadding(cl?.data?.invoice_number_padding || 4);
-        setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false, prTaxPct: Number(row.pr_tax_pct) || 0 })));
+        setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false, prTaxPct: Number(row.pr_tax_pct) || 0, sinotPct: Number(row.sinot_pct) || 0 })));
         setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
         setPayrollLinesRaw((pl.data || []).map(row => ({
           ...row, payrollRunId: row.payroll_run_id, employeeId: row.employee_id,
@@ -702,7 +702,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setEmployees = useCallback((updater) => {
     setEmployeesRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false, pr_tax_pct: e.prTaxPct || 0, email: e.email || '' }));
+      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false, pr_tax_pct: e.prTaxPct || 0, email: e.email || '', sinot_pct: e.sinotPct || 0 }));
       diffSync('employees', toDb(prev), toDb(next), clientId);
       return next;
     });
@@ -3837,7 +3837,7 @@ const SS_RATE = 0.062;
 const MEDICARE_RATE = 0.0145;
 const SS_WAGE_BASE_DEFAULT = 168600; // tope anual de Social Security — verifica/actualiza cada año
 
-function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '', email: '' }; }
+function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '', email: '', sinotPct: '' }; }
 
 const OT_MULTIPLIER = 1.5;
 const DOUBLE_OT_MULTIPLIER = 2;
@@ -3997,10 +3997,10 @@ function EmployeesTab({ employees, setEmployees }) {
     if (!form.name.trim()) { setError('Enter the employee name.'); return; }
     if (!form.rate || Number(form.rate) <= 0) { setError(form.payType === 'hourly' ? 'Enter an hourly rate.' : 'Enter the salary amount per period.'); return; }
     setError('');
-    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0, email: form.email.trim() }]);
+    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0, email: form.email.trim(), sinotPct: Number(form.sinotPct) || 0 }]);
     setForm(blankEmployee());
   }
-  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0, email: e.email || '' }); }
+  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0, email: e.email || '', sinotPct: e.sinotPct || 0 }); }
   function saveEdit(id) {
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...editDraft, rate: Number(editDraft.rate), prTaxPct: Number(editDraft.prTaxPct) || 0 } : e));
     setEditingId(null);
@@ -4027,6 +4027,8 @@ function EmployeesTab({ employees, setEmployees }) {
             <input type="number" step="0.01" style={{ width: 120 }} value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>PR Tax %</label>
             <input type="number" step="0.01" style={{ width: 80 }} placeholder="0" value={form.prTaxPct} onChange={e => setForm(f => ({ ...f, prTaxPct: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>SINOT %</label>
+            <input type="number" step="0.01" style={{ width: 80 }} placeholder="0" value={form.sinotPct} onChange={e => setForm(f => ({ ...f, sinotPct: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Email (for Pay Stubs)</label>
             <input style={{ width: 180 }} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
           <button onClick={addEmployee} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
@@ -4040,7 +4042,7 @@ function EmployeesTab({ employees, setEmployees }) {
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Pay type</th>
-            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>Email</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>SINOT %</th><th style={{ padding: '6px 4px' }}>Email</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
             {employees.map(e => (
@@ -4054,6 +4056,7 @@ function EmployeesTab({ employees, setEmployees }) {
                       </select></td>
                     <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={editDraft.rate} onChange={ev => setEditDraft(d => ({ ...d, rate: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.prTaxPct} onChange={ev => setEditDraft(d => ({ ...d, prTaxPct: ev.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.sinotPct} onChange={ev => setEditDraft(d => ({ ...d, sinotPct: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}><input style={{ width: 160 }} value={editDraft.email} onChange={ev => setEditDraft(d => ({ ...d, email: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
@@ -4067,6 +4070,7 @@ function EmployeesTab({ employees, setEmployees }) {
                     <td style={{ padding: '6px 4px', color: '#6B7280' }}>{e.payType === 'hourly' ? 'Hourly' : 'Salary'}</td>
                     <td style={{ padding: '6px 4px' }}>{money(e.rate)}{e.payType === 'hourly' ? '/hr' : '/period'}</td>
                     <td style={{ padding: '6px 4px' }}>{e.prTaxPct || 0}%</td>
+                    <td style={{ padding: '6px 4px' }}>{e.sinotPct || 0}%</td>
                     <td style={{ padding: '6px 4px', color: e.email ? '#1F2933' : '#9CA3AF' }}>{e.email || 'No email'}</td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
@@ -4215,6 +4219,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
         updated.socialSecurity = Number(autoSocialSecurity(gross, ytdBefore, ssWageBase).toFixed(2));
         updated.medicare = Number(autoMedicare(gross).toFixed(2));
         updated.prIncomeTax = Number((gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2));
+        updated.sinot = Number((gross * (Number(emp?.sinotPct) || 0) / 100).toFixed(2));
       }
       return updated;
     }));
@@ -4231,6 +4236,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       socialSecurity: Number(autoSocialSecurity(l.gross, ytdBefore, ssWageBase).toFixed(2)),
       medicare: Number(autoMedicare(l.gross).toFixed(2)),
       prIncomeTax: Number((l.gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2)),
+      sinot: Number((l.gross * (Number(emp?.sinotPct) || 0) / 100).toFixed(2)),
     });
   }
 
@@ -4334,7 +4340,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.reimbursement} onChange={e => updateLine(l.id, { reimbursement: e.target.value })} /></td>
                   <td style={{ padding: '4px', fontWeight: 700 }}>{money(lineNet(l))}</td>
                   <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
-                    <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate FICA & PR Tax">↻ FICA/PR Tax</button>
+                    <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate FICA, PR Tax & SINOT">↻ FICA/PR/SINOT</button>
                     <button onClick={() => setPayStubLineId(l.id)} style={iconBtn}>Pay Stub</button>
                     <button onClick={() => removeLine(l.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
