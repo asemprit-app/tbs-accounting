@@ -585,7 +585,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setBusinessPhone(cl?.data?.business_phone || '');
         setInvoicePrefix(cl?.data?.invoice_prefix || 'TBS');
         setInvoiceNumberPadding(cl?.data?.invoice_number_padding || 4);
-        setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false })));
+        setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false, prTaxPct: Number(row.pr_tax_pct) || 0 })));
         setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
         setPayrollLinesRaw((pl.data || []).map(row => ({
           ...row, payrollRunId: row.payroll_run_id, employeeId: row.employee_id,
@@ -699,7 +699,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setEmployees = useCallback((updater) => {
     setEmployeesRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false }));
+      const toDb = arr => arr.map(e => ({ id: e.id, name: e.name, pay_type: e.payType, rate: e.rate, active: e.active !== false, pr_tax_pct: e.prTaxPct || 0 }));
       diffSync('employees', toDb(prev), toDb(next), clientId);
       return next;
     });
@@ -3830,7 +3830,7 @@ const SS_RATE = 0.062;
 const MEDICARE_RATE = 0.0145;
 const SS_WAGE_BASE_DEFAULT = 168600; // tope anual de Social Security — verifica/actualiza cada año
 
-function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true }; }
+function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '' }; }
 
 function computeGross(employee, hours, extraGross) {
   const extra = Number(extraGross) || 0;
@@ -3971,12 +3971,12 @@ function EmployeesTab({ employees, setEmployees }) {
     if (!form.name.trim()) { setError('Enter the employee name.'); return; }
     if (!form.rate || Number(form.rate) <= 0) { setError(form.payType === 'hourly' ? 'Enter an hourly rate.' : 'Enter the salary amount per period.'); return; }
     setError('');
-    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true }]);
+    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0 }]);
     setForm(blankEmployee());
   }
-  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active }); }
+  function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0 }); }
   function saveEdit(id) {
-    setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...editDraft, rate: Number(editDraft.rate) } : e));
+    setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...editDraft, rate: Number(editDraft.rate), prTaxPct: Number(editDraft.prTaxPct) || 0 } : e));
     setEditingId(null);
   }
   function toggleActive(e) { setEmployees(prev => prev.map(x => x.id === e.id ? { ...x, active: !x.active } : x)); }
@@ -3999,6 +3999,8 @@ function EmployeesTab({ employees, setEmployees }) {
             </select></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>{form.payType === 'hourly' ? 'Hourly rate' : 'Salary per period'}</label>
             <input type="number" step="0.01" style={{ width: 120 }} value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>PR Tax %</label>
+            <input type="number" step="0.01" style={{ width: 80 }} placeholder="0" value={form.prTaxPct} onChange={e => setForm(f => ({ ...f, prTaxPct: e.target.value }))} /></div>
           <button onClick={addEmployee} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> Add
           </button>
@@ -4010,7 +4012,7 @@ function EmployeesTab({ employees, setEmployees }) {
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Pay type</th>
-            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
+            <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
             {employees.map(e => (
@@ -4023,6 +4025,7 @@ function EmployeesTab({ employees, setEmployees }) {
                         <option value="hourly">Hourly</option><option value="salary">Salary (per period)</option>
                       </select></td>
                     <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={editDraft.rate} onChange={ev => setEditDraft(d => ({ ...d, rate: ev.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.prTaxPct} onChange={ev => setEditDraft(d => ({ ...d, prTaxPct: ev.target.value }))} /></td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
                       <button onClick={() => saveEdit(e.id)} style={iconBtn}><Check size={14} /></button>
@@ -4034,6 +4037,7 @@ function EmployeesTab({ employees, setEmployees }) {
                     <td style={{ padding: '6px 4px' }}>{e.name}</td>
                     <td style={{ padding: '6px 4px', color: '#6B7280' }}>{e.payType === 'hourly' ? 'Hourly' : 'Salary'}</td>
                     <td style={{ padding: '6px 4px' }}>{money(e.rate)}{e.payType === 'hourly' ? '/hr' : '/period'}</td>
+                    <td style={{ padding: '6px 4px' }}>{e.prTaxPct || 0}%</td>
                     <td style={{ padding: '6px 4px' }}>{e.active ? 'Active' : 'Inactive'}</td>
                     <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
                       <button onClick={() => startEdit(e)} style={iconBtn}>Edit</button>
@@ -4165,6 +4169,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       if (patch.hours !== undefined || patch.extraGross !== undefined) {
         updated.socialSecurity = Number(autoSocialSecurity(gross, ytdBefore, ssWageBase).toFixed(2));
         updated.medicare = Number(autoMedicare(gross).toFixed(2));
+        updated.prIncomeTax = Number((gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2));
       }
       return updated;
     }));
@@ -4175,8 +4180,13 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
   function recalcFica(id) {
     const l = linesForRun.find(x => x.id === id);
     if (!l) return;
+    const emp = employees.find(e => e.id === l.employeeId);
     const ytdBefore = ytdGrossBeforeRun(l.employeeId, run, payrollRuns, payrollLines.filter(x => x.id !== id));
-    updateLine(id, { socialSecurity: Number(autoSocialSecurity(l.gross, ytdBefore, ssWageBase).toFixed(2)), medicare: Number(autoMedicare(l.gross).toFixed(2)) });
+    updateLine(id, {
+      socialSecurity: Number(autoSocialSecurity(l.gross, ytdBefore, ssWageBase).toFixed(2)),
+      medicare: Number(autoMedicare(l.gross).toFixed(2)),
+      prIncomeTax: Number((l.gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2)),
+    });
   }
 
   const totalGross = linesForRun.reduce((s, l) => s + (Number(l.gross) || 0), 0);
@@ -4254,7 +4264,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.reimbursement} onChange={e => updateLine(l.id, { reimbursement: e.target.value })} /></td>
                   <td style={{ padding: '4px', fontWeight: 700 }}>{money(lineNet(l))}</td>
                   <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
-                    <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate Social Security & Medicare">↻ FICA</button>
+                    <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate FICA & PR Tax">↻ FICA/PR Tax</button>
                     <button onClick={() => removeLine(l.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
                 </tr>
