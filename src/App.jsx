@@ -4099,6 +4099,13 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
     if (!window.confirm('Delete this payroll run and all its lines? This cannot be undone.')) return;
     setPayrollRuns(prev => prev.filter(r => r.id !== id));
   }
+  function finalizeRun(id) {
+    setPayrollRuns(prev => prev.map(r => r.id === id ? { ...r, status: 'FINAL' } : r));
+  }
+  function reopenRun(id) {
+    if (!window.confirm('Reopen this payroll run for editing? It will show as DRAFT again.')) return;
+    setPayrollRuns(prev => prev.map(r => r.id === id ? { ...r, status: 'DRAFT' } : r));
+  }
   function runTotals(runId) {
     const lines = payrollLines.filter(l => l.payrollRunId === runId);
     return { gross: lines.reduce((s, l) => s + (Number(l.gross) || 0), 0), net: lines.reduce((s, l) => s + lineNet(l), 0), count: lines.length };
@@ -4148,6 +4155,9 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
                   <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                     <button onClick={() => onOpenRun(r.id)} style={iconBtn}>Open</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
+                    {r.status === 'DRAFT'
+                      ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
+                      : <button onClick={() => reopenRun(r.id)} style={iconBtn}>Reopen</button>}
                     {r.postedJeId
                       ? <span style={{ fontSize: 12, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted</span>
                       : <button onClick={() => onPost(r)} style={iconBtn}>Post to JE</button>}
