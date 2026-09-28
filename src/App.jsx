@@ -1854,7 +1854,11 @@ function ServicesView({ services, setServices, employees }) {
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee / Worker</label>
             <input list="services-employee-list" style={{ width: 160 }} value={form.employeeName}
-              onChange={e => setForm(f => { const next = { ...f, employeeName: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} />
+              onChange={e => setForm(f => {
+                const emp = employees.find(x => x.name === e.target.value);
+                const next = { ...f, employeeName: e.target.value, payRate: emp ? emp.rate : f.payRate };
+                return { ...next, retentionAmount: autoRetentionFor(next, employees) };
+              })} />
             <datalist id="services-employee-list">{employees.map(e => <option key={e.id} value={e.name} />)}</datalist>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
@@ -1908,7 +1912,11 @@ function ServicesView({ services, setServices, employees }) {
                   {editingId === s.id ? (
                     <>
                       <td style={{ padding: '4px' }}><input style={{ width: 120 }} value={editDraft.employeeName}
-                        onChange={e => setEditDraft(d => { const next = { ...d, employeeName: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
+                        onChange={e => setEditDraft(d => {
+                          const emp = employees.find(x => x.name === e.target.value);
+                          const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
+                          return { ...next, retentionAmount: autoRetentionFor(next, employees) };
+                        })} /></td>
                       <td style={{ padding: '4px' }}><input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} /></td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours}
                         onChange={e => setEditDraft(d => { const next = { ...d, hours: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
