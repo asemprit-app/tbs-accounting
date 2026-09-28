@@ -595,6 +595,9 @@ async function fetchAllRows(table, clientId, orderCol) {
           medicare: Number(row.medicare) || 0, sinot: Number(row.sinot) || 0,
           otherDeductions: Number(row.other_deductions) || 0, otherDeductionsDesc: row.other_deductions_desc || '',
           reimbursement: Number(row.reimbursement) || 0,
+          regularHours: Number(row.regular_hours) || 0, vacationHours: Number(row.vacation_hours) || 0,
+          sickHours: Number(row.sick_hours) || 0, overtimeHours: Number(row.overtime_hours) || 0,
+          doubleOvertimeHours: Number(row.double_overtime_hours) || 0, holidayHours: Number(row.holiday_hours) || 0,
         })));
         setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
       }
@@ -731,6 +734,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         medicare: Number(l.medicare) || 0, sinot: Number(l.sinot) || 0,
         other_deductions: Number(l.otherDeductions) || 0, other_deductions_desc: l.otherDeductionsDesc || '',
         reimbursement: Number(l.reimbursement) || 0,
+        regular_hours: Number(l.regularHours) || 0, vacation_hours: Number(l.vacationHours) || 0,
+        sick_hours: Number(l.sickHours) || 0, overtime_hours: Number(l.overtimeHours) || 0,
+        double_overtime_hours: Number(l.doubleOvertimeHours) || 0, holiday_hours: Number(l.holidayHours) || 0,
       }));
       diffSync('payroll_lines', toDb(prev), toDb(next), clientId);
       return next;
@@ -818,7 +824,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
-          journalEntries={journalEntries} setJournalEntries={setJournalEntries} />}
+          journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri} />}
         </>
         )}
       </div>
@@ -3832,6 +3838,24 @@ const SS_WAGE_BASE_DEFAULT = 168600; // tope anual de Social Security — verifi
 
 function blankEmployee() { return { name: '', payType: 'hourly', rate: '', active: true, prTaxPct: '' }; }
 
+const OT_MULTIPLIER = 1.5;
+const DOUBLE_OT_MULTIPLIER = 2;
+
+function lineTotalHours(l) {
+  return (Number(l.regularHours) || 0) + (Number(l.vacationHours) || 0) + (Number(l.sickHours) || 0)
+    + (Number(l.overtimeHours) || 0) + (Number(l.doubleOvertimeHours) || 0) + (Number(l.holidayHours) || 0);
+}
+function computeGrossFromHours(employee, hoursBreakdown, extraGross) {
+  const extra = Number(extraGross) || 0;
+  if (!employee) return extra;
+  if (employee.payType !== 'hourly') return (Number(employee.rate) || 0) + extra;
+  const rate = Number(employee.rate) || 0;
+  const straightHours = (Number(hoursBreakdown.regularHours) || 0) + (Number(hoursBreakdown.vacationHours) || 0)
+    + (Number(hoursBreakdown.sickHours) || 0) + (Number(hoursBreakdown.holidayHours) || 0);
+  const otHours = Number(hoursBreakdown.overtimeHours) || 0;
+  const doubleOtHours = Number(hoursBreakdown.doubleOvertimeHours) || 0;
+  return straightHours * rate + otHours * rate * OT_MULTIPLIER + doubleOtHours * rate * DOUBLE_OT_MULTIPLIER + extra;
+}
 function computeGross(employee, hours, extraGross) {
   const extra = Number(extraGross) || 0;
   if (!employee) return extra;
@@ -3868,7 +3892,7 @@ function findAccountCode(accounts, name) {
   return acc ? acc.code : null;
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries }) {
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries, logoDataUri }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -3951,7 +3975,8 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal} />
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
+          businessName={businessName} logoDataUri={logoDataUri} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
@@ -4139,9 +4164,11 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
   );
 }
 
-function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost }) {
+function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
+  const [hoursPopoverId, setHoursPopoverId] = useState(null);
+  const [payStubLineId, setPayStubLineId] = useState(null);
   const linesForRun = payrollLines.filter(l => l.payrollRunId === runId);
   const employeeIdsInRun = new Set(linesForRun.map(l => l.employeeId));
   const availableToAdd = employees.filter(e => e.active && !employeeIdsInRun.has(e.id));
@@ -4154,19 +4181,22 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       id: uid(), payrollRunId: runId, employeeId, hours: emp.payType === 'hourly' ? '' : '',
       extraGross: 0, gross: 0, federalIncomeTax: 0, prIncomeTax: 0, socialSecurity: 0, medicare: 0, sinot: 0,
       otherDeductions: 0, otherDeductionsDesc: '', reimbursement: 0,
+      regularHours: 0, vacationHours: 0, sickHours: 0, overtimeHours: 0, doubleOvertimeHours: 0, holidayHours: 0,
     };
     setPayrollLines(prev => [...prev, line]);
   }
+  const HOUR_FIELDS = ['regularHours', 'vacationHours', 'sickHours', 'overtimeHours', 'doubleOvertimeHours', 'holidayHours'];
   function updateLine(id, patch) {
     setPayrollLines(prev => prev.map(l => {
       if (l.id !== id) return l;
       const updated = { ...l, ...patch };
       const emp = employees.find(e => e.id === updated.employeeId);
-      const gross = computeGross(emp, updated.hours, updated.extraGross);
+      const gross = computeGrossFromHours(emp, updated, updated.extraGross);
       const ytdBefore = ytdGrossBeforeRun(updated.employeeId, run, payrollRuns, payrollLines.filter(x => x.id !== id));
       updated.gross = gross;
-      // Solo re-calcula automático SS/Medicare si el usuario no los tocó manualmente ya (heurística simple: siempre recalcula al cambiar horas/extra, el usuario puede sobreescribir después).
-      if (patch.hours !== undefined || patch.extraGross !== undefined) {
+      // Solo re-calcula automático SS/Medicare/PR Tax si cambiaron las horas o el extra (el usuario puede sobreescribir después).
+      const hoursChanged = HOUR_FIELDS.some(f => patch[f] !== undefined);
+      if (hoursChanged || patch.extraGross !== undefined) {
         updated.socialSecurity = Number(autoSocialSecurity(gross, ytdBefore, ssWageBase).toFixed(2));
         updated.medicare = Number(autoMedicare(gross).toFixed(2));
         updated.prIncomeTax = Number((gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2));
@@ -4246,10 +4276,35 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
               return (
                 <tr key={l.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   <td style={{ padding: '4px', fontWeight: 600 }}>{emp?.name || '(deleted employee)'}</td>
-                  <td style={{ padding: '4px' }}>
-                    {emp?.payType === 'hourly'
-                      ? <input type="number" step="0.01" style={{ width: 70 }} value={l.hours} onChange={e => updateLine(l.id, { hours: e.target.value })} />
-                      : <span style={{ color: '#6B7280' }}>—</span>}
+                  <td style={{ padding: '4px', position: 'relative' }}>
+                    {emp?.payType === 'hourly' ? (
+                      <>
+                        <button onClick={() => setHoursPopoverId(hoursPopoverId === l.id ? null : l.id)} style={{ ...iconBtn, fontWeight: 600 }}>
+                          {lineTotalHours(l)} hrs ▾
+                        </button>
+                        {hoursPopoverId === l.id && (
+                          <div style={{ position: 'absolute', zIndex: 60, top: '100%', left: 0, background: '#fff', border: '1px solid #E2E5E9', borderRadius: 6, boxShadow: '0 4px 14px rgba(0,0,0,0.15)', padding: 12, width: 220 }}>
+                            {[
+                              ['regularHours', 'Regular'],
+                              ['vacationHours', 'Vacation'],
+                              ['sickHours', 'Sick'],
+                              ['overtimeHours', 'Overtime (1.5x)'],
+                              ['doubleOvertimeHours', 'Double-OT (2x)'],
+                              ['holidayHours', 'Holiday'],
+                            ].map(([field, label]) => (
+                              <div key={field} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <label style={{ fontSize: 12, color: '#6B7280' }}>{label}</label>
+                                <input type="number" step="0.01" style={{ width: 70 }} value={l[field]} onChange={e => updateLine(l.id, { [field]: e.target.value })} />
+                              </div>
+                            ))}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 13, borderTop: '1px solid #E2E5E9', paddingTop: 6, marginTop: 4, marginBottom: 8 }}>
+                              <span>Total</span><span>{lineTotalHours(l)} hrs</span>
+                            </div>
+                            <button onClick={() => setHoursPopoverId(null)} style={{ ...iconBtn, width: '100%' }}>Done</button>
+                          </div>
+                        )}
+                      </>
+                    ) : <span style={{ color: '#6B7280' }}>—</span>}
                   </td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.extraGross} onChange={e => updateLine(l.id, { extraGross: e.target.value })} /></td>
                   <td style={{ padding: '4px', fontWeight: 600 }}>{money(l.gross)}</td>
@@ -4265,6 +4320,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                   <td style={{ padding: '4px', fontWeight: 700 }}>{money(lineNet(l))}</td>
                   <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
                     <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate FICA & PR Tax">↻ FICA/PR Tax</button>
+                    <button onClick={() => setPayStubLineId(l.id)} style={iconBtn}>Pay Stub</button>
                     <button onClick={() => removeLine(l.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -4285,6 +4341,135 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
         </table>
         {linesForRun.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No employees added to this run yet — use the dropdown above.</div>}
       </Card>
+      {payStubLineId && (
+        <PayStubModal line={linesForRun.find(l => l.id === payStubLineId)} run={run} employees={employees}
+          businessName={businessName} logoDataUri={logoDataUri} onClose={() => setPayStubLineId(null)} />
+      )}
+    </div>
+  );
+}
+
+function PayStubModal({ line, run, employees, businessName, logoDataUri, onClose }) {
+  const emp = employees.find(e => e.id === line.employeeId);
+  const rate = Number(emp?.rate) || 0;
+  const hourRows = emp?.payType === 'hourly' ? [
+    ['Regular', line.regularHours, rate, 1],
+    ['Vacation', line.vacationHours, rate, 1],
+    ['Sick', line.sickHours, rate, 1],
+    ['Holiday', line.holidayHours, rate, 1],
+    ['Overtime (1.5x)', line.overtimeHours, rate * OT_MULTIPLIER, OT_MULTIPLIER],
+    ['Double-OT (2x)', line.doubleOvertimeHours, rate * DOUBLE_OT_MULTIPLIER, DOUBLE_OT_MULTIPLIER],
+  ].filter(([, hrs]) => Number(hrs) > 0) : [];
+
+  function exportCSV() {
+    let csv = 'Employee,Pay Date,Period Start,Period End\n';
+    csv += `"${emp?.name || ''}",${run.payDate},${run.periodStart},${run.periodEnd}\n\n`;
+    csv += 'Hour Type,Hours,Rate,Amount\n';
+    hourRows.forEach(([label, hrs, effRate]) => {
+      csv += `${label},${hrs},${effRate.toFixed(2)},${(Number(hrs) * effRate).toFixed(2)}\n`;
+    });
+    csv += `\nGross,,,${line.gross.toFixed(2)}\n`;
+    csv += `Federal Tax,,,${(-line.federalIncomeTax).toFixed(2)}\n`;
+    csv += `PR Tax,,,${(-line.prIncomeTax).toFixed(2)}\n`;
+    csv += `Social Security,,,${(-line.socialSecurity).toFixed(2)}\n`;
+    csv += `Medicare,,,${(-line.medicare).toFixed(2)}\n`;
+    csv += `SINOT,,,${(-line.sinot).toFixed(2)}\n`;
+    csv += `Other Deductions,,,${(-line.otherDeductions).toFixed(2)}\n`;
+    csv += `Reimbursement,,,${line.reimbursement.toFixed(2)}\n`;
+    csv += `Net Pay,,,${lineNet(line).toFixed(2)}\n`;
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `PayStub_${(emp?.name || 'employee').replace(/[^a-z0-9]+/gi, '_')}_${run.payDate}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+
+        <div id="invoice-content-only">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>{logoDataUri && <img src={logoDataUri} alt={businessName} style={{ height: 56 }} />}</div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 22, letterSpacing: 1, color: '#1F2933' }}>PAY STUB</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>{businessName}</div>
+            </div>
+          </div>
+          <div style={{ borderTop: '1px solid #D8DCE1', marginBottom: 16 }} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, fontSize: 13 }}>
+            <div>
+              <div style={{ color: '#6B7280', fontSize: 12 }}>Employee</div>
+              <div style={{ fontWeight: 700 }}>{emp?.name || '(deleted)'}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div><span style={{ color: '#6B7280' }}>Pay Period: </span><strong>{run.periodStart} – {run.periodEnd}</strong></div>
+              <div><span style={{ color: '#6B7280' }}>Pay Date: </span><strong>{run.payDate}</strong></div>
+            </div>
+          </div>
+
+          {hourRows.length > 0 && (
+            <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 16 }}>
+              <thead><tr style={{ background: '#3B3F45', color: '#fff', textAlign: 'left' }}>
+                <th style={{ padding: '6px 8px' }}>Hour Type</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Hours</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Rate</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Amount</th>
+              </tr></thead>
+              <tbody>
+                {hourRows.map(([label, hrs, effRate]) => (
+                  <tr key={label} style={{ borderBottom: '1px solid #EEE' }}>
+                    <td style={{ padding: '6px 8px' }}>{label}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{hrs}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{money(effRate)}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{money(Number(hrs) * effRate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '1px solid #D8DCE1', fontWeight: 700 }}>
+                  <td style={{ padding: '6px 8px' }}>Total ({lineTotalHours(line)} hrs)</td>
+                  <td colSpan={2}></td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>{money(line.gross - (Number(line.extraGross) || 0))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ width: '48%' }}>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Earnings</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
+                <span>Gross Pay</span><span>{money(line.gross)}</span>
+              </div>
+            </div>
+            <div style={{ width: '48%' }}>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Deductions</div>
+              {line.federalIncomeTax > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>Federal Tax</span><span>-{money(line.federalIncomeTax)}</span></div>}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>PR Tax</span><span>-{money(line.prIncomeTax)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>Social Security</span><span>-{money(line.socialSecurity)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>Medicare</span><span>-{money(line.medicare)}</span></div>
+              {line.sinot > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>SINOT</span><span>-{money(line.sinot)}</span></div>}
+              {line.otherDeductions > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>{line.otherDeductionsDesc || 'Other'}</span><span>-{money(line.otherDeductions)}</span></div>}
+              {line.reimbursement > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}><span>Reimbursement</span><span>+{money(line.reimbursement)}</span></div>}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #1F2933', marginTop: 14, paddingTop: 10, fontWeight: 700, fontSize: 15 }}>
+            <span>Net Pay</span><span>{money(lineNet(line))}</span>
+          </div>
+        </div>
+      </div>
+      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
@@ -4309,7 +4494,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
       const fica = (Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0);
-      csv += [esc(l.employee?.name || ''), l.hours || '', (Number(l.gross) || 0).toFixed(2),
+      csv += [esc(l.employee?.name || ''), lineTotalHours(l) || '', (Number(l.gross) || 0).toFixed(2),
         (Number(l.prIncomeTax) || 0).toFixed(2), (Number(l.socialSecurity) || 0).toFixed(2), (Number(l.medicare) || 0).toFixed(2), fica.toFixed(2),
         (Number(l.sinot) || 0).toFixed(2), (Number(l.otherDeductions) || 0).toFixed(2), (Number(l.reimbursement) || 0).toFixed(2), lineNet(l).toFixed(2)].join(',') + '\n';
     });
