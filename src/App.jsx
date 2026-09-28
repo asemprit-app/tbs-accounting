@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package } from 'lucide-react';
+import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 
@@ -494,6 +494,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [dismissedSuggestions, setDismissedSuggestionsRaw] = useState([]);
   const [employees, setEmployeesRaw] = useState([]);
   const [products, setProductsRaw] = useState([]);
+  const [services, setServicesRaw] = useState([]);
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
@@ -563,9 +564,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         supabase.from('payroll_runs').select('*').eq('client_id', clientId).order('period_end'),
         fetchAllRows('payroll_lines', clientId),
         supabase.from('products').select('*').eq('client_id', clientId).order('name'),
+        supabase.from('services').select('*').eq('client_id', clientId).order('service_date'),
       ]);
-      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod] = results;
-      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod].find(x => x.error);
+      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod, svc] = results;
+      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod, svc].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
@@ -598,8 +600,15 @@ async function fetchAllRows(table, clientId, orderCol) {
           regularHours: Number(row.regular_hours) || 0, vacationHours: Number(row.vacation_hours) || 0,
           sickHours: Number(row.sick_hours) || 0, overtimeHours: Number(row.overtime_hours) || 0,
           doubleOvertimeHours: Number(row.double_overtime_hours) || 0, holidayHours: Number(row.holiday_hours) || 0,
+          tips: Number(row.tips) || 0,
         })));
         setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
+        setServicesRaw((svc.data || []).map(row => ({
+          ...row, employeeName: row.employee_name, date: row.service_date,
+          hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
+          tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
+          retentionAmount: Number(row.retention_amount) || 0, reimbursement: Number(row.reimbursement) || 0,
+        })));
       }
       setLoaded(true);
     })();
@@ -715,6 +724,19 @@ async function fetchAllRows(table, clientId, orderCol) {
       return next;
     });
   }, []);
+  const setServices = useCallback((updater) => {
+    setServicesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const toDb = arr => arr.map(s => ({
+        id: s.id, employee_name: s.employeeName, service_date: s.date,
+        hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
+        tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
+        retention_amount: Number(s.retentionAmount) || 0, reimbursement: Number(s.reimbursement) || 0,
+      }));
+      diffSync('services', toDb(prev), toDb(next), clientId);
+      return next;
+    });
+  }, []);
   const setPayrollRuns = useCallback((updater) => {
     setPayrollRunsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -737,6 +759,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         regular_hours: Number(l.regularHours) || 0, vacation_hours: Number(l.vacationHours) || 0,
         sick_hours: Number(l.sickHours) || 0, overtime_hours: Number(l.overtimeHours) || 0,
         double_overtime_hours: Number(l.doubleOvertimeHours) || 0, holiday_hours: Number(l.holidayHours) || 0,
+        tips: Number(l.tips) || 0,
       }));
       diffSync('payroll_lines', toDb(prev), toDb(next), clientId);
       return next;
@@ -813,6 +836,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'products' && (
           <ProductsView products={products} setProducts={setProducts} />
         )}
+        {tab === 'services' && (
+          <ServicesView services={services} setServices={setServices} employees={employees} />
+        )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
@@ -856,6 +882,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
     { id: 'journal', label: 'Journal Entries', icon: FileText },
     { id: 'reconciliation', label: 'Reconciliation', icon: Landmark },
     { id: 'payroll', label: 'Payroll', icon: Wallet },
+    { id: 'services', label: 'Services', icon: DollarSign },
   ];
   return (
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
@@ -1727,6 +1754,206 @@ function StatusBadge({ status }) {
   };
   const s = styles[status] || styles.REVIEW;
   return <span style={{ background: s.bg, color: s.color, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 10 }}>{status}</span>;
+}
+
+function serviceCalc(s) {
+  const tipsNet = (Number(s.tipsRaw) || 0) * (1 - (Number(s.tipsRetentionPct) || 0) / 100);
+  const gross = (Number(s.hours) || 0) * (Number(s.payRate) || 0) + tipsNet;
+  const subtotal = gross - (Number(s.retentionAmount) || 0);
+  const netPay = subtotal + (Number(s.reimbursement) || 0);
+  return { tipsNet, gross, subtotal, netPay };
+}
+
+function ServicesView({ services, setServices, employees }) {
+  function blankService() {
+    return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', retentionAmount: '', reimbursement: '' };
+  }
+  const [form, setForm] = useState(blankService());
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState(blankService());
+  const [sort, setSort] = useState({ column: null, dir: 'asc' });
+
+  function addService() {
+    if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
+    if (!form.hours || Number(form.hours) < 0) { setError('Enter hours.'); return; }
+    setError('');
+    setServices(prev => [...prev, {
+      id: uid(), employeeName: form.employeeName.trim(), date: form.date,
+      hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
+      tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
+      retentionAmount: Number(form.retentionAmount) || 0, reimbursement: Number(form.reimbursement) || 0,
+    }]);
+    setForm(blankService());
+  }
+  function startEdit(s) { setEditingId(s.id); setEditDraft({ ...s }); }
+  function saveEdit(id) {
+    setServices(prev => prev.map(s => s.id === id ? {
+      ...s, ...editDraft,
+      hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
+      tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
+      retentionAmount: Number(editDraft.retentionAmount) || 0, reimbursement: Number(editDraft.reimbursement) || 0,
+    } : s));
+    setEditingId(null);
+  }
+  function removeService(id) {
+    if (!window.confirm('Delete this service entry?')) return;
+    setServices(prev => prev.filter(s => s.id !== id));
+  }
+  function toggleSort(column) {
+    setSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
+  }
+  const sortedServices = useMemo(() => {
+    const arr = services.slice();
+    if (!sort.column) return arr;
+    return arr.sort((a, b) => {
+      let cmp = 0;
+      if (sort.column === 'employeeName') cmp = a.employeeName.localeCompare(b.employeeName);
+      else if (sort.column === 'date') cmp = a.date.localeCompare(b.date);
+      else if (sort.column === 'hours') cmp = a.hours - b.hours;
+      else if (sort.column === 'payRate') cmp = a.payRate - b.payRate;
+      else if (sort.column === 'tipsNet') cmp = serviceCalc(a).tipsNet - serviceCalc(b).tipsNet;
+      else if (sort.column === 'gross') cmp = serviceCalc(a).gross - serviceCalc(b).gross;
+      else if (sort.column === 'retentionAmount') cmp = a.retentionAmount - b.retentionAmount;
+      else if (sort.column === 'subtotal') cmp = serviceCalc(a).subtotal - serviceCalc(b).subtotal;
+      else if (sort.column === 'reimbursement') cmp = a.reimbursement - b.reimbursement;
+      else if (sort.column === 'netPay') cmp = serviceCalc(a).netPay - serviceCalc(b).netPay;
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [services, sort]);
+
+  const totals = sortedServices.reduce((t, s) => {
+    const c = serviceCalc(s);
+    return {
+      hours: t.hours + (Number(s.hours) || 0), tipsNet: t.tipsNet + c.tipsNet, gross: t.gross + c.gross,
+      retention: t.retention + (Number(s.retentionAmount) || 0), subtotal: t.subtotal + c.subtotal,
+      reimbursement: t.reimbursement + (Number(s.reimbursement) || 0), netPay: t.netPay + c.netPay,
+    };
+  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
+
+  const arrow = col => sort.column === col ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const th = (col, label) => (
+    <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(col)}>{label}{arrow(col)}</th>
+  );
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 16px' }}>Services</h2>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Add service entry</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee / Worker</label>
+            <input list="services-employee-list" style={{ width: 160 }} value={form.employeeName} onChange={e => setForm(f => ({ ...f, employeeName: e.target.value }))} />
+            <datalist id="services-employee-list">{employees.map(e => <option key={e.id} value={e.name} />)}</datalist>
+          </div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
+            <input type="number" step="0.01" style={{ width: 70 }} value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Pay rate</label>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.payRate} onChange={e => setForm(f => ({ ...f, payRate: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tips (raw)</label>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRaw} onChange={e => setForm(f => ({ ...f, tipsRaw: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tips retention %</label>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRetentionPct} onChange={e => setForm(f => ({ ...f, tipsRetentionPct: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Retención ($)</label>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reembolso</label>
+            <input type="number" step="0.01" style={{ width: 80 }} value={form.reimbursement} onChange={e => setForm(f => ({ ...f, reimbursement: e.target.value }))} /></div>
+          <button onClick={addService} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            <Plus size={15} /> Add
+          </button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+      </Card>
+
+      <Card>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+            {th('employeeName', 'Employee')}
+            {th('date', 'Date')}
+            {th('hours', 'Hours')}
+            {th('payRate', 'Pay rate')}
+            <th style={{ padding: '6px 4px' }}>Tips retention %</th>
+            {th('tipsNet', 'Tips (after retention)')}
+            {th('gross', 'Gross')}
+            {th('retentionAmount', 'Retención')}
+            {th('subtotal', 'Sub-Total')}
+            {th('reimbursement', 'Reembolso')}
+            {th('netPay', 'Net-Pay')}
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {sortedServices.map(s => {
+              const c = serviceCalc(s);
+              return (
+                <tr key={s.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                  {editingId === s.id ? (
+                    <>
+                      <td style={{ padding: '4px' }}><input style={{ width: 120 }} value={editDraft.employeeName} onChange={e => setEditDraft(d => ({ ...d, employeeName: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}><input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours} onChange={e => setEditDraft(d => ({ ...d, hours: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.payRate} onChange={e => setEditDraft(d => ({ ...d, payRate: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <input type="number" step="0.01" style={{ width: 70 }} value={editDraft.tipsRaw} onChange={e => setEditDraft(d => ({ ...d, tipsRaw: e.target.value }))} placeholder="Tips raw" />
+                        <input type="number" step="0.01" style={{ width: 60, marginLeft: 4 }} value={editDraft.tipsRetentionPct} onChange={e => setEditDraft(d => ({ ...d, tipsRetentionPct: e.target.value }))} placeholder="%" />
+                      </td>
+                      <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).tipsNet)}</td>
+                      <td style={{ padding: '4px', fontWeight: 600 }}>{money(serviceCalc(editDraft).gross)}</td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.retentionAmount} onChange={e => setEditDraft(d => ({ ...d, retentionAmount: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).subtotal)}</td>
+                      <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.reimbursement} onChange={e => setEditDraft(d => ({ ...d, reimbursement: e.target.value }))} /></td>
+                      <td style={{ padding: '4px', fontWeight: 700 }}>{money(serviceCalc(editDraft).netPay)}</td>
+                      <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
+                        <button onClick={() => saveEdit(s.id)} style={iconBtn}><Check size={14} /></button>
+                        <button onClick={() => setEditingId(null)} style={iconBtn}><X size={14} /></button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: '4px' }}>{s.employeeName}</td>
+                      <td style={{ padding: '4px' }}>{s.date}</td>
+                      <td style={{ padding: '4px' }}>{s.hours}</td>
+                      <td style={{ padding: '4px' }}>{money(s.payRate)}</td>
+                      <td style={{ padding: '4px' }}>{s.tipsRetentionPct}%</td>
+                      <td style={{ padding: '4px' }}>{money(c.tipsNet)}</td>
+                      <td style={{ padding: '4px', fontWeight: 600 }}>{money(c.gross)}</td>
+                      <td style={{ padding: '4px' }}>{money(s.retentionAmount)}</td>
+                      <td style={{ padding: '4px' }}>{money(c.subtotal)}</td>
+                      <td style={{ padding: '4px' }}>{money(s.reimbursement)}</td>
+                      <td style={{ padding: '4px', fontWeight: 700 }}>{money(c.netPay)}</td>
+                      <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
+                        <button onClick={() => startEdit(s)} style={iconBtn}>Edit</button>
+                        <button onClick={() => removeService(s.id)} style={iconBtn}><Trash2 size={14} /></button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+          {sortedServices.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                <td style={{ padding: '4px' }} colSpan={2}>Total ({sortedServices.length})</td>
+                <td style={{ padding: '4px' }}>{totals.hours}</td>
+                <td></td><td></td>
+                <td style={{ padding: '4px' }}>{money(totals.tipsNet)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.gross)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.retention)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.subtotal)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.reimbursement)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.netPay)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+        {sortedServices.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No service entries yet.</div>}
+      </Card>
+    </div>
+  );
 }
 
 function ProductsView({ products, setProducts }) {
@@ -4201,6 +4428,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       extraGross: 0, gross: 0, federalIncomeTax: 0, prIncomeTax: 0, socialSecurity: 0, medicare: 0, sinot: 0,
       otherDeductions: 0, otherDeductionsDesc: '', reimbursement: 0,
       regularHours: 0, vacationHours: 0, sickHours: 0, overtimeHours: 0, doubleOvertimeHours: 0, holidayHours: 0,
+      tips: 0,
     };
     setPayrollLines(prev => [...prev, line]);
   }
@@ -4210,12 +4438,12 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       if (l.id !== id) return l;
       const updated = { ...l, ...patch };
       const emp = employees.find(e => e.id === updated.employeeId);
-      const gross = computeGrossFromHours(emp, updated, updated.extraGross);
+      const gross = computeGrossFromHours(emp, updated, updated.extraGross) + (Number(updated.tips) || 0);
       const ytdBefore = ytdGrossBeforeRun(updated.employeeId, run, payrollRuns, payrollLines.filter(x => x.id !== id));
       updated.gross = gross;
-      // Solo re-calcula automático SS/Medicare/PR Tax si cambiaron las horas o el extra (el usuario puede sobreescribir después).
+      // Solo re-calcula automático SS/Medicare/PR Tax/SINOT si cambiaron las horas, tips, o el extra (el usuario puede sobreescribir después).
       const hoursChanged = HOUR_FIELDS.some(f => patch[f] !== undefined);
-      if (hoursChanged || patch.extraGross !== undefined) {
+      if (hoursChanged || patch.extraGross !== undefined || patch.tips !== undefined) {
         updated.socialSecurity = Number(autoSocialSecurity(gross, ytdBefore, ssWageBase).toFixed(2));
         updated.medicare = Number(autoMedicare(gross).toFixed(2));
         updated.prIncomeTax = Number((gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2));
@@ -4279,6 +4507,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '4px' }}>Employee</th>
             <th style={{ padding: '4px' }}>Hours</th>
+            <th style={{ padding: '4px' }}>Tips</th>
             <th style={{ padding: '4px' }}>Extra (bonus/OT)</th>
             <th style={{ padding: '4px' }}>Gross</th>
             <th style={{ padding: '4px' }}>Federal Tax</th>
@@ -4327,6 +4556,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                       </>
                     ) : <span style={{ color: '#6B7280' }}>—</span>}
                   </td>
+                  <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.tips} onChange={e => updateLine(l.id, { tips: e.target.value })} /></td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.extraGross} onChange={e => updateLine(l.id, { extraGross: e.target.value })} /></td>
                   <td style={{ padding: '4px', fontWeight: 600 }}>{money(l.gross)}</td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.federalIncomeTax} onChange={e => updateLine(l.id, { federalIncomeTax: e.target.value })} /></td>
@@ -4494,6 +4724,11 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <div style={{ width: '48%' }}>
               <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Earnings</div>
+              {Number(line.tips) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}>
+                  <span>Tips</span><span>{money(line.tips)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
                 <span>Gross Pay</span><span>{money(line.gross)}</span>
               </div>
