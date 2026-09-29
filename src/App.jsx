@@ -1829,14 +1829,19 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     }
     const c = serviceCalc(s);
     const findCode = name => accounts.find(a => a.name.toLowerCase() === name.toLowerCase())?.code;
-    const codes = {
-      wages: findCode('Service Wages Expense'),
-      retentionPayable: findCode('Service Retention Payable'),
-      netPayPayable: findCode('Service Net Pay Payable'),
+    const ACCOUNT_NAMES = {
+      wages: 'Service Wages Expense',
+      retentionPayable: 'Income Tax Withheld Payable 10%',
+      netPayPayable: 'Professional Service Payable',
     };
-    const missing = Object.entries(codes).filter(([, v]) => !v).map(([k]) => k);
+    const codes = {
+      wages: findCode(ACCOUNT_NAMES.wages),
+      retentionPayable: findCode(ACCOUNT_NAMES.retentionPayable),
+      netPayPayable: findCode(ACCOUNT_NAMES.netPayPayable),
+    };
+    const missing = Object.entries(codes).filter(([, v]) => !v).map(([k]) => ACCOUNT_NAMES[k]);
     if (missing.length) {
-      alert('These accounts are missing from the Chart of Accounts: ' + missing.join(', ') + '. Run the services GL setup script first.');
+      alert('These accounts are missing from the Chart of Accounts: ' + missing.join(', ') + '.');
       return;
     }
     const jeLines = [{ gl: codes.wages, debit: c.gross.toFixed(2), credit: '', desc: `Service pay — ${s.employeeName}` }];
@@ -2048,14 +2053,17 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           onClose={() => setReceiptId(null)} />
       )}
       {showRegister && (
-        <ReceiptRegisterModal services={services} businessName={businessName} onClose={() => setShowRegister(false)} />
+        <ReceiptRegisterModal services={services} businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setShowRegister(false)} />
       )}
     </div>
   );
 }
 
-function ReceiptRegisterModal({ services, businessName, onClose }) {
+function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEmail, onClose }) {
   const rows = services.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const [sendTo, setSendTo] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
   const totals = rows.reduce((t, s) => {
     const c = serviceCalc(s);
     return {
@@ -2064,6 +2072,24 @@ function ReceiptRegisterModal({ services, businessName, onClose }) {
       reimbursement: t.reimbursement + (Number(s.reimbursement) || 0), netPay: t.netPay + c.netPay,
     };
   }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
+
+  async function handleSend() {
+    if (!sendTo.trim()) { setSendMsg('Enter a recipient email.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_Register.pdf`);
+      const text = `Hi,\n\nAttached is the Receipt Register.\n\nTotal Net Pay: ${money(totals.netPay)}\n\nThank you,\n\n${businessName}`;
+      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      const replyTo = replyToEmail || undefined;
+      await sendInvoiceViaResend({ to: sendTo.trim(), subject: `Receipt Register`, text, pdfBase64, filename: `Receipt_Register.pdf`, from, replyTo });
+      setSendMsg(`Sent to ${sendTo.trim()}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
 
   function exportCSV() {
     let csv = 'Employee,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
@@ -2084,7 +2110,7 @@ function ReceiptRegisterModal({ services, businessName, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
       <div style={{ background: '#fff', width: 980, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt Register</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
@@ -2092,6 +2118,14 @@ function ReceiptRegisterModal({ services, businessName, onClose }) {
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }} className="print-hide">
+          <input placeholder="Send to email…" style={{ width: 220 }} value={sendTo} onChange={e => setSendTo(e.target.value)} />
+          <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+            {sending ? 'Sending…' : 'Send Register'}
+          </button>
+          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+        </div>
+        <div id="invoice-content-only">
         <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={rows[0]?.date} periodEnd={rows[rows.length - 1]?.date} logoUrl={null} />
         <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
@@ -2143,6 +2177,7 @@ function ReceiptRegisterModal({ services, businessName, onClose }) {
             </tr>
           </tfoot>
         </table>
+        </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
@@ -4471,7 +4506,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
-          businessName={businessName} onClose={() => setPrintRunId(null)} />
+          businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPrintRunId(null)} />
       )}
     </div>
   );
@@ -5018,9 +5053,12 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
   );
 }
 
-function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, businessName, onClose }) {
+function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, businessName, sendingEmail, replyToEmail, onClose }) {
   const run = payrollRuns.find(r => r.id === runId);
   const lines = payrollLines.filter(l => l.payrollRunId === runId).map(l => ({ ...l, employee: employees.find(e => e.id === l.employeeId) }));
+  const [sendTo, setSendTo] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
   const totals = lines.reduce((acc, l) => ({
     gross: acc.gross + (Number(l.gross) || 0),
     federal: acc.federal + (Number(l.federalIncomeTax) || 0),
@@ -5032,6 +5070,24 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     reimbursement: acc.reimbursement + (Number(l.reimbursement) || 0),
     net: acc.net + lineNet(l),
   }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
+
+  async function handleSend() {
+    if (!sendTo.trim()) { setSendMsg('Enter a recipient email.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Payroll_Register_${run.payDate}.pdf`);
+      const text = `Hi,\n\nAttached is the Payroll Register for the period ${run.periodStart} to ${run.periodEnd} (pay date ${run.payDate}).\n\nTotal Net Pay: ${money(totals.net)}\n\nThank you,\n\n${businessName}`;
+      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      const replyTo = replyToEmail || undefined;
+      await sendInvoiceViaResend({ to: sendTo.trim(), subject: `Payroll Register — ${run.payDate}`, text, pdfBase64, filename: `Payroll_Register_${run.payDate}.pdf`, from, replyTo });
+      setSendMsg(`Sent to ${sendTo.trim()}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
 
   function exportCSV() {
     let csv = 'Employee,Hours,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
@@ -5055,14 +5111,22 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
       <div style={{ background: '#fff', width: 980, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Payroll Register</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
             <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }} className="print-hide">
+          <input placeholder="Send to email…" style={{ width: 220 }} value={sendTo} onChange={e => setSendTo(e.target.value)} />
+          <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+            {sending ? 'Sending…' : 'Send Register'}
+          </button>
+          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+        </div>
+        <div id="invoice-content-only">
         <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={run.periodStart} periodEnd={run.periodEnd} logoUrl={null} />
         <div style={{ fontSize: 13, marginBottom: 14 }}>Pay date: <strong>{run.payDate}</strong></div>
         <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
@@ -5109,6 +5173,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             </tr>
           </tfoot>
         </table>
+        </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
