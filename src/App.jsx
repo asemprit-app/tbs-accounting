@@ -4239,6 +4239,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   const [form, setForm] = useState(blankJE());
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
+  const [copiedFromId, setCopiedFromId] = useState(null);
 
   function blankJE() {
     return { date: todayStr(), memo: '', lines: [{ gl: '', debit: '', credit: '', desc: '' }, { gl: '', debit: '', credit: '', desc: '' }] };
@@ -4264,17 +4265,31 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     }
     setForm(blankJE());
     setEditingId(null);
+    setCopiedFromId(null);
     setShowForm(false);
   }
   function editJE(je) {
     setForm({ date: je.date, memo: je.memo, lines: je.lines.map(l => ({ ...l })) });
     setEditingId(je.id);
+    setCopiedFromId(null);
+    setShowForm(true);
+    setError('');
+  }
+  function copyJE(je) {
+    setForm({
+      date: todayStr(),
+      memo: je.memo || '',
+      lines: je.lines.map(l => ({ ...l })),
+    });
+    setEditingId(null);
+    setCopiedFromId(je.id);
     setShowForm(true);
     setError('');
   }
   function cancelForm() {
     setForm(blankJE());
     setEditingId(null);
+    setCopiedFromId(null);
     setShowForm(false);
     setError('');
   }
@@ -4286,14 +4301,16 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Journal Entries</h2>
-        <button onClick={() => { if (showForm) { cancelForm(); } else { setForm(blankJE()); setEditingId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+        <button onClick={() => { if (showForm) { cancelForm(); } else { setForm(blankJE()); setEditingId(null); setCopiedFromId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
           <Plus size={15} /> New entry
         </button>
       </div>
 
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, marginBottom: 10 }}>{editingId ? 'Editing entry' : 'New entry'}</div>
+          <div style={{ fontWeight: 600, marginBottom: 10 }}>
+            {editingId ? 'Editing entry' : copiedFromId ? 'Copied entry — review before saving' : 'New entry'}
+          </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Date</label>
@@ -4326,8 +4343,10 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>{editingId ? 'Update entry' : 'Save entry'}</button>
-            {editingId && <button onClick={cancelForm} style={iconBtn}>Cancel</button>}
+            <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+              {editingId ? 'Update entry' : copiedFromId ? 'Save copy' : 'Save entry'}
+            </button>
+            {(editingId || copiedFromId) && <button onClick={cancelForm} style={iconBtn}>Cancel</button>}
           </div>
         </Card>
       )}
@@ -4339,6 +4358,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
               <span>{je.date} — {je.memo || 'No memo'}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => editJE(je)} style={iconBtn}>Edit</button>
+                <button onClick={() => copyJE(je)} style={iconBtn}>Copy</button>
                 <button onClick={() => removeJE(je.id)} style={iconBtn}><Trash2 size={14} /></button>
               </div>
             </div>
