@@ -3280,6 +3280,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
 
   const openInvoicesForExport = invoices.filter(i => i.status !== 'Paid').sort((a, b) => a.date.localeCompare(b.date));
 
+  const uncategorizedTransactions = useMemo(() => {
+    return transactions
+      .filter(t => !t.gl && t.date >= from && t.date <= to)
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [transactions, from, to]);
+  const uncategorizedNet = uncategorizedTransactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
   const REPORT_OPTIONS = [
     ['pnl', 'P&L (Income Statement)'],
     ['balance_sheet', 'Balance Sheet'],
@@ -3287,6 +3295,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     ['trial_balance', 'Trial Balance'],
     ['ap', 'A/P (Accounts Payable)'],
     ['open_invoices', 'Open Invoices'],
+    ['uncategorized', 'Uncategorized Transactions'],
     ['unreconciled', 'Unreconciled Transactions'],
   ];
 
@@ -3373,6 +3382,17 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     if (key === 'open_invoices') {
       const rows = openInvoicesForExport.map(i => [i.number, i.client, i.date, invoiceTotal(i), invoiceTotal(i) - (i.paid || 0), i.status]);
       return { title: `Open Invoices — as of ${todayStr()}`, header: ['Invoice #', 'Customer', 'Date', 'Total', 'Balance', 'Status'], rows };
+    }
+    if (key === 'uncategorized') {
+      const rows = uncategorizedTransactions.map(t => [
+        t.date,
+        t.description,
+        Number(t.amount) >= 0 ? 'Income' : 'Expense',
+        Number(t.amount) || 0,
+        t.sourceGL ? `${t.sourceGL} — ${accounts.find(a => a.code === t.sourceGL)?.name || ''}` : 'Unassigned',
+        t.status || 'REVIEW',
+      ]);
+      return { title: `Uncategorized Transactions — ${from} to ${to}`, header: ['Date', 'Description', 'Type', 'Amount', 'Source Account', 'Status'], rows };
     }
     if (key === 'unreconciled') {
       const latestApproved = {};
@@ -3593,6 +3613,50 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8 }}>Each column will be one {breakdown === 'monthly' ? 'month' : breakdown === 'quarterly' ? 'quarter' : 'year'} within your custom period.</div>
         )}
       </Card>
+
+      {selectedReport === 'uncategorized' && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Uncategorized Transactions</div>
+              <div style={{ fontSize: 13, color: '#6B7280', marginTop: 3 }}>{from} to {to}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 18, fontSize: 13 }}>
+              <div><span style={{ color: '#6B7280' }}>Transactions:</span> <strong>{uncategorizedTransactions.length}</strong></div>
+              <div><span style={{ color: '#6B7280' }}>Net:</span> <strong>{money(uncategorizedNet)}</strong></div>
+            </div>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #E2E5E9', textAlign: 'left' }}>
+                  <th style={{ padding: '7px 6px' }}>Date</th>
+                  <th style={{ padding: '7px 6px' }}>Description</th>
+                  <th style={{ padding: '7px 6px' }}>Type</th>
+                  <th style={{ padding: '7px 6px', textAlign: 'right' }}>Amount</th>
+                  <th style={{ padding: '7px 6px' }}>Source Account</th>
+                  <th style={{ padding: '7px 6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uncategorizedTransactions.map(t => (
+                  <tr key={t.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                    <td style={{ padding: '7px 6px', whiteSpace: 'nowrap' }}>{t.date}</td>
+                    <td style={{ padding: '7px 6px' }}>{t.description}</td>
+                    <td style={{ padding: '7px 6px' }}>{Number(t.amount) >= 0 ? 'Income' : 'Expense'}</td>
+                    <td style={{ padding: '7px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>{money(Number(t.amount) || 0)}</td>
+                    <td style={{ padding: '7px 6px' }}>{t.sourceGL ? `${t.sourceGL} — ${accounts.find(a => a.code === t.sourceGL)?.name || ''}` : 'Unassigned'}</td>
+                    <td style={{ padding: '7px 6px' }}>{t.status || 'REVIEW'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {uncategorizedTransactions.length === 0 && (
+            <div style={{ fontSize: 14, color: '#6B7280', padding: '12px 4px 4px' }}>No uncategorized transactions in this period.</div>
+          )}
+        </Card>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         <Card>
