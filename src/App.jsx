@@ -407,19 +407,26 @@ export default function App() {
 
     if (currentClient.name === trimmed) return true;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('clients')
       .update({ name: trimmed })
-      .eq('id', id);
+      .eq('id', id)
+      .select('id, name');
 
     if (error) {
       alert('Could not update the client: ' + error.message);
       return false;
     }
 
+    if (!data || data.length === 0) {
+      alert('The client was not updated in Supabase. Please verify the UPDATE policy for the clients table.');
+      return false;
+    }
+
+    const saved = data[0];
     setClients(prev =>
       prev
-        .map(c => c.id === id ? { ...c, name: trimmed } : c)
+        .map(c => c.id === id ? { ...c, name: saved.name } : c)
         .sort((a, b) => a.name.localeCompare(b.name))
     );
 
@@ -438,9 +445,19 @@ export default function App() {
       return false;
     }
 
-    const { error } = await supabase.from('clients').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('clients')
+      .delete()
+      .eq('id', id)
+      .select('id');
+
     if (error) {
       alert('Could not delete the client: ' + error.message);
+      return false;
+    }
+
+    if (!data || data.length === 0) {
+      alert('The client was not deleted in Supabase. Please verify the DELETE policy for the clients table.');
       return false;
     }
 
