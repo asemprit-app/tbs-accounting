@@ -398,12 +398,31 @@ export default function App() {
   async function editClient(id, name) {
     const trimmed = (name || '').trim();
     if (!id || !trimmed) return false;
-    const { data, error } = await supabase.from('clients').update({ name: trimmed }).eq('id', id).select().single();
+
+    const currentClient = clients.find(c => c.id === id);
+    if (!currentClient) {
+      alert('Client not found.');
+      return false;
+    }
+
+    if (currentClient.name === trimmed) return true;
+
+    const { error } = await supabase
+      .from('clients')
+      .update({ name: trimmed })
+      .eq('id', id);
+
     if (error) {
       alert('Could not update the client: ' + error.message);
       return false;
     }
-    setClients(prev => prev.map(c => c.id === id ? { ...c, ...data } : c).sort((a, b) => a.name.localeCompare(b.name)));
+
+    setClients(prev =>
+      prev
+        .map(c => c.id === id ? { ...c, name: trimmed } : c)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
+
     return true;
   }
 
