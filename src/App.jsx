@@ -566,10 +566,17 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
 
+  const selectedClientName = useMemo(() => {
+    const currentClient = clients.find(c => String(c.id) === String(clientId));
+    return currentClient?.name || businessName || 'Accounting';
+  }, [clients, clientId, businessName]);
+
   useEffect(() => {
-    const currentClient = clients.find(c => c.id === clientId);
-    if (currentClient?.name) setBusinessName(currentClient.name);
-  }, [clients, clientId]);
+    const currentClient = clients.find(c => String(c.id) === String(clientId));
+    if (currentClient?.name && currentClient.name !== businessName) {
+      setBusinessName(currentClient.name);
+    }
+  }, [clients, clientId, businessName]);
 
   const [sendingEmail, setSendingEmail] = useState('');
   const [logoDataUri, setLogoDataUri] = useState('');
@@ -875,7 +882,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={selectedClientName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
@@ -913,20 +920,20 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
         {tab === 'services' && (
           <ServicesView services={services} setServices={setServices} employees={employees}
-            businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+            businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
             accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} />
         )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={selectedClientName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
         {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
-          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
+          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={selectedClientName} accounts={accounts}
           journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
           sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
         </>
@@ -2178,7 +2185,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       </Card>
       {receiptId && (
         <ServiceReceiptModal service={services.find(s => s.id === receiptId)} employees={employees}
-          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
           onClose={() => setReceiptId(null)} />
       )}
       {showRegister && (
@@ -4715,7 +4722,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
-          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
+          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
@@ -5105,7 +5112,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       </Card>
       {payStubLineId && (
         <PayStubModal line={linesForRun.find(l => l.id === payStubLineId)} run={run} employees={employees}
-          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
+          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
       )}
     </div>
   );
