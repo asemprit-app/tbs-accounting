@@ -436,28 +436,28 @@ export default function App() {
   async function deleteClient(id) {
     const client = clients.find(c => c.id === id);
     if (!client) return false;
+
     if (client.name === 'Twelve Business Strategies') {
       alert('Twelve Business Strategies is the master client and cannot be deleted.');
       return false;
     }
+
     if (clients.length <= 1) {
       alert('At least one client must remain in the system.');
       return false;
     }
 
-    const { data, error } = await supabase
-      .from('clients')
-      .delete()
-      .eq('id', id)
-      .select('id');
+    const { data, error } = await supabase.rpc('delete_client_cascade', {
+      target_client_id: id,
+    });
 
     if (error) {
       alert('Could not delete the client: ' + error.message);
       return false;
     }
 
-    if (!data || data.length === 0) {
-      alert('The client was not deleted in Supabase. Please verify the DELETE policy for the clients table.');
+    if (data !== true) {
+      alert('Supabase did not confirm the client deletion.');
       return false;
     }
 
@@ -465,7 +465,10 @@ export default function App() {
     setClients(remaining);
 
     if (selectedClientId === id) {
-      const nextClient = remaining.find(c => c.name === 'Twelve Business Strategies') || remaining[0];
+      const nextClient =
+        remaining.find(c => c.name === 'Twelve Business Strategies') ||
+        remaining[0];
+
       if (nextClient) {
         window.localStorage.setItem('tbs_last_client_id', nextClient.id);
         setSelectedClientId(nextClient.id);
@@ -474,6 +477,7 @@ export default function App() {
         setSelectedClientId(null);
       }
     }
+
     return true;
   }
 
