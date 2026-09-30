@@ -395,6 +395,52 @@ export default function App() {
     }
   }
 
+  async function editClient(id, name) {
+    const trimmed = (name || '').trim();
+    if (!id || !trimmed) return false;
+    const { data, error } = await supabase.from('clients').update({ name: trimmed }).eq('id', id).select().single();
+    if (error) {
+      alert('Could not update the client: ' + error.message);
+      return false;
+    }
+    setClients(prev => prev.map(c => c.id === id ? { ...c, ...data } : c).sort((a, b) => a.name.localeCompare(b.name)));
+    return true;
+  }
+
+  async function deleteClient(id) {
+    const client = clients.find(c => c.id === id);
+    if (!client) return false;
+    if (client.name === 'Twelve Business Strategies') {
+      alert('Twelve Business Strategies is the master client and cannot be deleted.');
+      return false;
+    }
+    if (clients.length <= 1) {
+      alert('At least one client must remain in the system.');
+      return false;
+    }
+
+    const { error } = await supabase.from('clients').delete().eq('id', id);
+    if (error) {
+      alert('Could not delete the client: ' + error.message);
+      return false;
+    }
+
+    const remaining = clients.filter(c => c.id !== id);
+    setClients(remaining);
+
+    if (selectedClientId === id) {
+      const nextClient = remaining.find(c => c.name === 'Twelve Business Strategies') || remaining[0];
+      if (nextClient) {
+        window.localStorage.setItem('tbs_last_client_id', nextClient.id);
+        setSelectedClientId(nextClient.id);
+      } else {
+        window.localStorage.removeItem('tbs_last_client_id');
+        setSelectedClientId(null);
+      }
+    }
+    return true;
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
@@ -473,6 +519,8 @@ export default function App() {
       selectedClientId={selectedClientId}
       onSwitchClient={(id) => { window.localStorage.setItem('tbs_last_client_id', id); setSelectedClientId(id); }}
       onAddClient={addClient}
+      onEditClient={editClient}
+      onDeleteClient={deleteClient}
       addClientBusy={addClientBusy}
       onLogout={handleLogout}
       userEmail={session.user.email}
@@ -480,7 +528,7 @@ export default function App() {
   );
 }
 
-function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, addClientBusy, onLogout, userEmail }) {
+function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail }) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState('dashboard');
@@ -498,6 +546,12 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
+
+  useEffect(() => {
+    const currentClient = clients.find(c => c.id === clientId);
+    if (currentClient?.name) setBusinessName(currentClient.name);
+  }, [clients, clientId]);
+
   const [sendingEmail, setSendingEmail] = useState('');
   const [logoDataUri, setLogoDataUri] = useState('');
   const [replyToEmail, setReplyToEmail] = useState('');
@@ -802,7 +856,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
@@ -865,9 +919,40 @@ async function fetchAllRows(table, clientId, orderCol) {
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, addClientBusy, onLogout, userEmail, businessName }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, businessName }) {
   const [addingClient, setAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  const [editingClient, setEditingClient] = useState(false);
+  const [editClientName, setEditClientName] = useState('');
+
+  function beginEditClient() {
+    const client = clients.find(c => c.id === selectedClientId);
+    if (!client) return;
+    setEditClientName(client.name || '');
+    setEditingClient(true);
+    setAddingClient(false);
+  }
+
+  async function submitEditClient() {
+    if (!editClientName.trim()) return;
+    const ok = await onEditClient(selectedClientId, editClientName);
+    if (ok) {
+      setEditingClient(false);
+      setEditClientName('');
+    }
+  }
+
+  async function confirmDeleteClient() {
+    const client = clients.find(c => c.id === selectedClientId);
+    if (!client) return;
+    if (!window.confirm(`Delete "${client.name}"?\n\nThis action cannot be undone. If the client has related accounting data and Supabase does not allow cascading deletion, the deletion will be blocked.`)) return;
+    const ok = await onDeleteClient(selectedClientId);
+    if (ok) {
+      setEditingClient(false);
+      setEditClientName('');
+    }
+  }
+
   function submitNewClient() {
     if (!newClientName.trim()) return;
     onAddClient(newClientName);
@@ -897,11 +982,21 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
             style={{ margin: '0 10px 8px', fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }}>
             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          {!addingClient ? (
-            <button onClick={() => setAddingClient(true)} style={{ margin: '0 10px 16px', display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', color: '#fff', border: '1px dashed rgba(255,255,255,0.4)', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>
-              <Plus size={13} /> New client
-            </button>
-          ) : (
+          {!addingClient && !editingClient && (
+            <div style={{ margin: '0 10px 16px', display: 'flex', gap: 6 }}>
+              <button onClick={() => setAddingClient(true)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: 'transparent', color: '#fff', border: '1px dashed rgba(255,255,255,0.4)', borderRadius: 6, padding: '5px 6px', cursor: 'pointer', fontSize: 11 }}>
+                <Plus size={12} /> New
+              </button>
+              <button onClick={beginEditClient} style={{ flex: 1, background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 6px', cursor: 'pointer', fontSize: 11 }}>
+                Edit
+              </button>
+              <button onClick={confirmDeleteClient} style={{ background: 'rgba(226,75,74,0.25)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 7px', cursor: 'pointer', fontSize: 11 }} title="Delete selected client">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
+
+          {addingClient && (
             <div style={{ margin: '0 10px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
               <input autoFocus placeholder="Client name" value={newClientName} onChange={e => setNewClientName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') submitNewClient(); if (e.key === 'Escape') { setAddingClient(false); setNewClientName(''); } }}
@@ -911,6 +1006,21 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
                   {addClientBusy ? 'Creating…' : 'Create'}
                 </button>
                 <button onClick={() => { setAddingClient(false); setNewClientName(''); }} style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {editingClient && (
+            <div style={{ margin: '0 10px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ fontSize: 11, opacity: 0.8 }}>Edit selected client</div>
+              <input autoFocus placeholder="Client name" value={editClientName} onChange={e => setEditClientName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitEditClient(); if (e.key === 'Escape') { setEditingClient(false); setEditClientName(''); } }}
+                style={{ fontSize: 13, borderRadius: 6, border: 'none', padding: '6px 8px' }} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={submitEditClient} style={{ flex: 1, background: '#0F6E56', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>
+                  Save
+                </button>
+                <button onClick={() => { setEditingClient(false); setEditClientName(''); }} style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
               </div>
             </div>
           )}
