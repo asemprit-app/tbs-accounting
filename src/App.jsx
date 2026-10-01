@@ -5469,8 +5469,21 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     });
     return list;
   }
+  function sourceAccountAmount(gl, rawAmount) {
+    const acct = accounts.find(a => a.code === gl);
+    const amount = Number(rawAmount) || 0;
+
+    // Bank / cash accounts (Assets): keep the imported sign.
+    // Credit cards / payables (Liabilities): invert the imported bank-feed sign
+    // so purchases increase the liability and payments reduce it.
+    if (acct?.type === 'Liability') return -amount;
+    return amount;
+  }
+
   function ledgerBalanceFor(gl, periodEnd) {
-    const txTotal = transactions.filter(t => t.sourceGL === gl && t.date <= periodEnd).reduce((s, t) => s + t.amount, 0);
+    const txTotal = transactions
+      .filter(t => t.sourceGL === gl && t.date <= periodEnd)
+      .reduce((s, t) => s + sourceAccountAmount(gl, t.amount), 0);
     const jeTotal = jePostingsFor(gl, periodEnd).reduce((s, p) => s + p.amount, 0);
     return txTotal + jeTotal;
   }
@@ -5485,12 +5498,14 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   function currentPeriodPostings(gl, periodEnd, previousPeriodEnd = '') {
-    return [
-      ...transactions
-        .filter(t => t.sourceGL === gl && t.date <= periodEnd && (!previousPeriodEnd || t.date > previousPeriodEnd)),
-      ...jePostingsFor(gl, periodEnd)
-        .filter(p => !previousPeriodEnd || p.date > previousPeriodEnd),
-    ].sort((a, b) => a.date.localeCompare(b.date));
+    const tx = transactions
+      .filter(t => t.sourceGL === gl && t.date <= periodEnd && (!previousPeriodEnd || t.date > previousPeriodEnd))
+      .map(t => ({ ...t, amount: sourceAccountAmount(gl, t.amount), rawAmount: t.amount }));
+
+    const je = jePostingsFor(gl, periodEnd)
+      .filter(p => !previousPeriodEnd || p.date > previousPeriodEnd);
+
+    return [...tx, ...je].sort((a, b) => a.date.localeCompare(b.date));
   }
 
   function nsmLedgerFor(gl, periodEnd, excludeId = null) {
@@ -5669,7 +5684,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
           reconciliations.filter(x => x.gl === r.gl && x.status === 'PASS' && x.periodEnd < r.periodEnd && x.id !== r.id)
             .forEach(x => (x.verifiedIds || []).forEach(id => priorApprovedVerified.add(id)));
           const allMatching = [
-            ...transactions.filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd),
+            ...transactions
+              .filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd)
+              .map(t => ({ ...t, amount: sourceAccountAmount(r.gl, t.amount), rawAmount: t.amount })),
             ...jePostingsFor(r.gl, r.periodEnd),
           ];
           openingBalance = allMatching.filter(t => priorApprovedVerified.has(t.id)).reduce((s, t) => s + t.amount, 0);
@@ -5721,11 +5738,22 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified</span>
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 12 }}>
-                <span>Verified debits: <strong>{money(verifiedDebits)}</strong></span>
-                <span>Verified credits: <strong>{money(verifiedCredits)}</strong></span>
+                {accounts.find(a => a.code === r.gl)?.type === 'Liability' ? (
+                  <>
+                    <span>Charges / increases: <strong>{money(verifiedDebits)}</strong></span>
+                    <span>Payments / decreases: <strong>{money(Math.abs(verifiedCredits))}</strong></span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verified debits: <strong>{money(verifiedDebits)}</strong></span>
+                    <span>Verified credits: <strong>{money(verifiedCredits)}</strong></span>
+                  </>
+                )}
               </div>
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
-                Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don't match, then check it once it's correct, and click Recalculate to save.
+                {accounts.find(a => a.code === r.gl)?.type === 'Liability'
+                  ? 'For credit cards and other liabilities, purchases increase the balance and payments reduce it. Check off each transaction that matches the statement, then click Recalculate to save.'
+                  : 'Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don\'t match, then check it once it\'s correct, and click Recalculate to save.'}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
                 <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
@@ -5793,7 +5821,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                         <>
                           <td style={{ padding: '4px' }}><input type="date" style={{ width: 130 }} value={t.date} onChange={e => editTxDate(t.id, e.target.value)} /></td>
                           <td style={{ padding: '4px' }}>{t.description}</td>
-                          <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={t.amount} onChange={e => editTxAmount(t.id, e.target.value)} /></td>
+                          <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 100 }} value={t.rawAmount !== undefined ? t.rawAmount : t.amount} onChange={e => editTxAmount(t.id, e.target.value)} /></td>
                           <td style={{ padding: '4px' }}>
                             <select value={t.sourceGL || ''} onChange={e => editTxAccount(t.id, e.target.value)}>
                               <option value="">—</option>
