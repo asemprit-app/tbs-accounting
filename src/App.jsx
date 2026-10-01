@@ -398,66 +398,30 @@ export default function App() {
   async function editClient(id, name) {
     const trimmed = (name || '').trim();
     if (!id || !trimmed) return false;
-
-    const currentClient = clients.find(c => c.id === id);
-    if (!currentClient) {
-      alert('Client not found.');
-      return false;
-    }
-
-    if (currentClient.name === trimmed) return true;
-
-    const { data, error } = await supabase
-      .from('clients')
-      .update({ name: trimmed })
-      .eq('id', id)
-      .select('id, name');
-
+    const { data, error } = await supabase.from('clients').update({ name: trimmed }).eq('id', id).select().single();
     if (error) {
       alert('Could not update the client: ' + error.message);
       return false;
     }
-
-    if (!data || data.length === 0) {
-      alert('The client was not updated in Supabase. Please verify the UPDATE policy for the clients table.');
-      return false;
-    }
-
-    const saved = data[0];
-    setClients(prev =>
-      prev
-        .map(c => c.id === id ? { ...c, name: saved.name } : c)
-        .sort((a, b) => a.name.localeCompare(b.name))
-    );
-
+    setClients(prev => prev.map(c => c.id === id ? { ...c, ...data } : c).sort((a, b) => a.name.localeCompare(b.name)));
     return true;
   }
 
   async function deleteClient(id) {
     const client = clients.find(c => c.id === id);
     if (!client) return false;
-
     if (client.name === 'Twelve Business Strategies') {
       alert('Twelve Business Strategies is the master client and cannot be deleted.');
       return false;
     }
-
     if (clients.length <= 1) {
       alert('At least one client must remain in the system.');
       return false;
     }
 
-    const { data, error } = await supabase.rpc('delete_client_cascade', {
-      target_client_id: id,
-    });
-
+    const { error } = await supabase.from('clients').delete().eq('id', id);
     if (error) {
       alert('Could not delete the client: ' + error.message);
-      return false;
-    }
-
-    if (data !== true) {
-      alert('Supabase did not confirm the client deletion.');
       return false;
     }
 
@@ -465,10 +429,7 @@ export default function App() {
     setClients(remaining);
 
     if (selectedClientId === id) {
-      const nextClient =
-        remaining.find(c => c.name === 'Twelve Business Strategies') ||
-        remaining[0];
-
+      const nextClient = remaining.find(c => c.name === 'Twelve Business Strategies') || remaining[0];
       if (nextClient) {
         window.localStorage.setItem('tbs_last_client_id', nextClient.id);
         setSelectedClientId(nextClient.id);
@@ -477,7 +438,6 @@ export default function App() {
         setSelectedClientId(null);
       }
     }
-
     return true;
   }
 
@@ -587,17 +547,10 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
 
-  const selectedClientName = useMemo(() => {
-    const currentClient = clients.find(c => String(c.id) === String(clientId));
-    return currentClient?.name || businessName || 'Accounting';
-  }, [clients, clientId, businessName]);
-
   useEffect(() => {
-    const currentClient = clients.find(c => String(c.id) === String(clientId));
-    if (currentClient?.name && currentClient.name !== businessName) {
-      setBusinessName(currentClient.name);
-    }
-  }, [clients, clientId, businessName]);
+    const currentClient = clients.find(c => c.id === clientId);
+    if (currentClient?.name) setBusinessName(currentClient.name);
+  }, [clients, clientId]);
 
   const [sendingEmail, setSendingEmail] = useState('');
   const [logoDataUri, setLogoDataUri] = useState('');
@@ -903,7 +856,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
       <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={selectedClientName} />
+        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
@@ -941,20 +894,20 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
         {tab === 'services' && (
           <ServicesView services={services} setServices={setServices} employees={employees}
-            businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+            businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
             accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} />
         )}
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={selectedClientName} reconciliations={reconciliations} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
         {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
-          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={selectedClientName} accounts={accounts}
+          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
           journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
           sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
         </>
@@ -2206,7 +2159,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       </Card>
       {receiptId && (
         <ServiceReceiptModal service={services.find(s => s.id === receiptId)} employees={employees}
-          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
           onClose={() => setReceiptId(null)} />
       )}
       {showRegister && (
@@ -2726,11 +2679,32 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     const inv = { ...form, id: uid(), number };
     setInvoices(prev => [...prev, inv]);
     setForm(blankInvoice());
+    setCopiedFromId(null);
     setShowForm(false);
   }
   function startEditInvoice(inv) {
     setForm({ ...inv, lines: inv.lines.map(l => ({ ...l })) });
     setEditingId(inv.id);
+    setCopiedFromId(null);
+    setShowForm(true);
+    setError('');
+  }
+
+  function copyInvoice(inv) {
+    setForm({
+      client: inv.client || '',
+      date: todayStr(),
+      lines: (inv.lines || []).map(l => ({ ...l })),
+      retention: !!inv.retention,
+      retentionPct: inv.retentionPct ?? 10,
+      status: 'Pending',
+      paid: 0,
+      ivuPct: inv.ivuPct ?? 0,
+      paymentMethod: inv.paymentMethod || '',
+      notes: inv.notes || '',
+    });
+    setEditingId(null);
+    setCopiedFromId(inv.id);
     setShowForm(true);
     setError('');
   }
@@ -2741,11 +2715,13 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     setInvoices(prev => prev.map(i => i.id === editingId ? { ...form, id: editingId, number: i.number } : i));
     setForm(blankInvoice());
     setEditingId(null);
+    setCopiedFromId(null);
     setShowForm(false);
   }
   function cancelInvoiceForm() {
     setForm(blankInvoice());
     setEditingId(null);
+    setCopiedFromId(null);
     setShowForm(false);
     setError('');
   }
@@ -2756,6 +2732,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
   const [showSettings, setShowSettings] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [copiedFromId, setCopiedFromId] = useState(null);
 
   return (
     <div>
@@ -2763,7 +2740,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         <h2 style={{ margin: 0 }}>Invoices</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowSettings(s => !s)} style={iconBtn}>Invoice Settings</button>
-          <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+          <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setCopiedFromId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> New invoice
           </button>
         </div>
@@ -2778,6 +2755,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
           {editingId && <div style={{ fontWeight: 600, marginBottom: 10 }}>Editing invoice {form.number}</div>}
+          {copiedFromId && !editingId && <div style={{ fontWeight: 600, marginBottom: 10 }}>Copied invoice — review before saving</div>}
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
               <label style={{ fontSize: 14, color: '#6B7280', display: 'block' }}>Customer</label>
@@ -2832,9 +2810,9 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={editingId ? saveEditedInvoice : saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
-              {editingId ? 'Update invoice' : 'Save invoice'}
+              {editingId ? 'Update invoice' : copiedFromId ? 'Save copy' : 'Save invoice'}
             </button>
-            {editingId && <button onClick={cancelInvoiceForm} style={iconBtn}>Cancel</button>}
+            {(editingId || copiedFromId) && <button onClick={cancelInvoiceForm} style={iconBtn}>Cancel</button>}
           </div>
         </Card>
       )}
@@ -2900,6 +2878,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                   <button onClick={() => onPrint(inv)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> PDF</button>
                   <button onClick={() => sendInvoiceEmail(inv)} style={iconBtn}>Email</button>
                   <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
+                  <button onClick={() => copyInvoice(inv)} style={iconBtn}>Copy</button>
                   {inv.status !== 'Paid' && (
                     <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
@@ -4743,7 +4722,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
-          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
@@ -5133,7 +5112,7 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       </Card>
       {payStubLineId && (
         <PayStubModal line={linesForRun.find(l => l.id === payStubLineId)} run={run} employees={employees}
-          businessName={selectedClientName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
+          businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
       )}
     </div>
   );
