@@ -626,7 +626,15 @@ async function fetchAllRows(table, clientId, orderCol) {
         setLoadError(firstErr.error.message);
       } else {
         setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount), sourceGL: row.source_gl })));
-        setInvoicesRaw((i.data || []).map(row => ({ ...row, retentionPct: row.retention_pct, paid: Number(row.paid) || 0, ivuPct: Number(row.ivu_pct) || 0, paymentMethod: row.payment_method || '', notes: row.notes || '' })));
+        setInvoicesRaw((i.data || []).map(row => ({
+          ...row,
+          retentionPct: row.retention_pct,
+          paid: Number(row.paid) || 0,
+          ivuPct: Number(row.ivu_pct) || 0,
+          paymentMethod: row.payment_method || '',
+          notes: row.notes || '',
+          payments: Array.isArray(row.payments) ? row.payments : [],
+        })));
         setCustomersRaw(c.data || []);
         setAccountsRaw((a.data || []).map(row => ({ ...row, isCogs: !!row.is_cogs })));
         setRulesRaw(r.data || []);
@@ -684,11 +692,13 @@ async function fetchAllRows(table, clientId, orderCol) {
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
         retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
+        payments: Array.isArray(inv.payments) ? inv.payments : [],
       }));
       const prevForDb = prev.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
         retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
+        payments: Array.isArray(inv.payments) ? inv.payments : [],
       }));
       diffSync('invoices', prevForDb, forDb, clientId);
       return next;
@@ -2571,6 +2581,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const [error, setError] = useState('');
   const [payingId, setPayingId] = useState(null);
   const [payAmount, setPayAmount] = useState('');
+  const [payDate, setPayDate] = useState(todayStr());
   const [payError, setPayError] = useState('');
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
@@ -2628,6 +2639,51 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const filteredSubtotal = filteredInvoices.reduce((s, inv) => s + invoiceSubtotal(inv), 0);
   const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
+  function invoiceAgeDays(inv) {
+    if (!inv?.date) return 0;
+    const invoiceDate = new Date(`${inv.date}T00:00:00`);
+    const today = new Date(`${todayStr()}T00:00:00`);
+    const diff = Math.floor((today - invoiceDate) / 86400000);
+    return Math.max(0, diff);
+  }
+
+  function agingBucket(inv) {
+    const days = invoiceAgeDays(inv);
+    if (days <= 30) return '30 days or less';
+    if (days <= 60) return '31–60 days';
+    if (days <= 90) return '61–90 days';
+    return '91+ days';
+  }
+
+  const agingSummary = useMemo(() => {
+    const buckets = {
+      '30 days or less': { count: 0, balance: 0 },
+      '31–60 days': { count: 0, balance: 0 },
+      '61–90 days': { count: 0, balance: 0 },
+      '91+ days': { count: 0, balance: 0 },
+    };
+
+    invoices.forEach(inv => {
+      const balance = Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0));
+      if (balance <= 0) return;
+      const bucket = agingBucket(inv);
+      buckets[bucket].count += 1;
+      buckets[bucket].balance += balance;
+    });
+
+    return buckets;
+  }, [invoices]);
+
+  function lastPaymentDate(inv) {
+    const payments = Array.isArray(inv.payments) ? inv.payments : [];
+    if (!payments.length) return '';
+    return payments
+      .map(p => p.date || '')
+      .filter(Boolean)
+      .sort()
+      .reverse()[0] || '';
+  }
+
   const visibleUnpaidInvoices = useMemo(
     () => sortedInvoices.filter(inv => inv.status !== 'Paid'),
     [sortedInvoices]
@@ -2661,21 +2717,47 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
   function applyPayment(inv) {
     const amt = Number(payAmount);
+    const total = invoiceTotal(inv);
+    const currentPaid = Number(inv.paid) || 0;
+    const outstanding = Math.max(0, total - currentPaid);
+
+    if (!payDate) { setPayError('Select the payment date.'); return; }
     if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return; }
+    if (amt > outstanding + 0.005) {
+      setPayError(`Payment cannot exceed the outstanding balance of ${money(outstanding)}.`);
+      return;
+    }
+
     setPayError('');
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
-      const paid = (i.paid || 0) + amt;
-      const total = invoiceTotal(i);
-      return { ...i, paid, status: paid >= total ? 'Paid' : 'Partial' };
+
+      const previousPayments = Array.isArray(i.payments) ? i.payments : [];
+      const payment = {
+        id: uid(),
+        date: payDate,
+        amount: Number(amt.toFixed(2)),
+      };
+      const payments = [...previousPayments, payment];
+      const paid = Number((currentPaid + amt).toFixed(2));
+      const invTotal = invoiceTotal(i);
+
+      return {
+        ...i,
+        payments,
+        paid,
+        status: paid >= invTotal - 0.005 ? 'Paid' : 'Partial',
+      };
     }));
+
     setSelectedInvoiceIds(prev => prev.filter(id => id !== inv.id));
     setPayingId(null);
     setPayAmount('');
+    setPayDate(todayStr());
   }
 
   function blankInvoice() {
-    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0, ivuPct: 0, paymentMethod: '', notes: '' };
+    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0, payments: [], ivuPct: 0, paymentMethod: '', notes: '' };
   }
 
   function updateLine(i, field, val) {
@@ -2732,6 +2814,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
       retentionPct: inv.retentionPct ?? 10,
       status: 'Pending',
       paid: 0,
+      payments: [],
       ivuPct: inv.ivuPct ?? 0,
       paymentMethod: inv.paymentMethod || '',
       notes: inv.notes || '',
@@ -2886,6 +2969,19 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         )}
       </Card>
 
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Accounts Receivable Aging</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', gap: 10 }}>
+          {['30 days or less', '31–60 days', '61–90 days', '91+ days'].map(bucket => (
+            <div key={bucket} style={{ border: '1px solid #E2E5E9', borderRadius: 8, padding: 12, background: '#FAFBFC' }}>
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>{bucket}</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{money(agingSummary[bucket].balance)}</div>
+              <div style={{ fontSize: 12, color: '#6B7280' }}>{agingSummary[bucket].count} invoice{agingSummary[bucket].count === 1 ? '' : 's'}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       {selectedUnpaidInvoices.length > 0 && (
         <Card style={{ marginBottom: 12, borderColor: '#17365D', background: '#F7FAFC' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -2919,6 +3015,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('subtotal')}>Amount (before withholding) {invSort.column === 'subtotal' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('total')}>Total {invSort.column === 'total' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('status')}>Status {invSort.column === 'status' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+              <th style={{ padding: '6px 4px' }}>Aging</th>
+              <th style={{ padding: '6px 4px' }}>Last payment</th>
               <th style={{ padding: '6px 4px' }}></th>
             </tr>
           </thead>
@@ -2942,14 +3040,19 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 <td style={{ padding: '6px 4px' }}>{inv.date}</td>
                 <td style={{ padding: '6px 4px' }}>{money(invoiceSubtotal(inv))}</td>
                 <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(inv))}</td>
-                <td style={{ padding: '6px 4px' }}>{inv.status}{inv.paid ? ` (${money(inv.paid)} paid)` : ''}</td>
+                <td style={{ padding: '6px 4px' }}>
+                  {inv.status}{inv.paid ? ` (${money(inv.paid)} paid)` : ''}
+                  {inv.status !== 'Paid' && <div style={{ fontSize: 11, color: '#6B7280' }}>Balance: {money(Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0)))}</div>}
+                </td>
+                <td style={{ padding: '6px 4px', fontSize: 13 }}>{inv.status === 'Paid' ? '—' : agingBucket(inv)}</td>
+                <td style={{ padding: '6px 4px', fontSize: 13 }}>{lastPaymentDate(inv) || '—'}</td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   <button onClick={() => onPrint(inv)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> PDF</button>
                   <button onClick={() => sendInvoiceEmail(inv)} style={iconBtn}>Email</button>
                   <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
                   <button onClick={() => copyInvoice(inv)} style={iconBtn}>Copy</button>
                   {inv.status !== 'Paid' && (
-                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
+                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayDate(todayStr()); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
                   <button onClick={() => removeInvoice(inv)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -2963,7 +3066,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 <td colSpan={3} style={{ padding: '6px 4px' }}>Total ({filteredInvoices.length})</td>
                 <td style={{ padding: '6px 4px' }}>{money(filteredSubtotal)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(filteredTotal)}</td>
-                <td colSpan={2} style={{ padding: '6px 4px' }}>Outstanding: {money(filteredBalance)}</td>
+                <td colSpan={4} style={{ padding: '6px 4px' }}>Outstanding: {money(filteredBalance)}</td>
               </tr>
             </tfoot>
           )}
@@ -2979,13 +3082,38 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 320 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Apply payment — {inv.number}</div>
-              <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 10 }}>Outstanding balance: {money(balance)}</div>
-              <input type="number" step="0.01" style={{ width: '100%', marginBottom: 8 }} placeholder="Amount cobrado"
-                value={payAmount} onChange={e => setPayAmount(e.target.value)} />
+              <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 12 }}>Outstanding balance: <strong>{money(balance)}</strong></div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Payment date</label>
+                <input type="date" style={{ width: '100%' }} value={payDate} onChange={e => setPayDate(e.target.value)} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Payment amount</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="number" step="0.01" style={{ flex: 1 }} placeholder="Payment amount"
+                    value={payAmount} onChange={e => setPayAmount(e.target.value)} />
+                  <button onClick={() => setPayAmount(balance.toFixed(2))} style={iconBtn}>Pay full</button>
+                </div>
+              </div>
+
+              {(inv.payments || []).length > 0 && (
+                <div style={{ marginBottom: 12, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 5 }}>Payment history</div>
+                  {(inv.payments || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(p => (
+                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
+                      <span>{p.date}</span>
+                      <strong>{money(p.amount)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {payError && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 8 }}>{payError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setPayingId(null)} style={iconBtn}>Cancel</button>
-                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Confirm</button>
+                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply payment</button>
               </div>
             </Card>
           </div>
