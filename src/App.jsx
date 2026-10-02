@@ -1139,20 +1139,6 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
         </Card>
       )}
 
-      {selectedUnpaidInvoices.length > 0 && (
-        <Card style={{ marginBottom: 12, borderColor: '#17365D', background: '#F7FAFC' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700 }}>
-              {selectedUnpaidInvoices.length} unpaid invoice{selectedUnpaidInvoices.length === 1 ? '' : 's'} selected
-            </span>
-            <span style={{ fontSize: 14 }}>
-              Selected outstanding: <strong>{money(selectedOutstanding)}</strong>
-            </span>
-            <button onClick={() => setSelectedInvoiceIds([])} style={iconBtn}>Clear selection</button>
-          </div>
-        </Card>
-      )}
-
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
@@ -2899,6 +2885,20 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           </div>
         )}
       </Card>
+
+      {selectedUnpaidInvoices.length > 0 && (
+        <Card style={{ marginBottom: 12, borderColor: '#17365D', background: '#F7FAFC' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>
+              {selectedUnpaidInvoices.length} unpaid invoice{selectedUnpaidInvoices.length === 1 ? '' : 's'} selected
+            </span>
+            <span style={{ fontSize: 14 }}>
+              Selected outstanding: <strong>{money(selectedOutstanding)}</strong>
+            </span>
+            <button onClick={() => setSelectedInvoiceIds([])} style={iconBtn}>Clear selection</button>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
