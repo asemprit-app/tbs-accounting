@@ -1139,6 +1139,20 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
         </Card>
       )}
 
+      {selectedUnpaidInvoices.length > 0 && (
+        <Card style={{ marginBottom: 12, borderColor: '#17365D', background: '#F7FAFC' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>
+              {selectedUnpaidInvoices.length} unpaid invoice{selectedUnpaidInvoices.length === 1 ? '' : 's'} selected
+            </span>
+            <span style={{ fontSize: 14 }}>
+              Selected outstanding: <strong>{money(selectedOutstanding)}</strong>
+            </span>
+            <button onClick={() => setSelectedInvoiceIds([])} style={iconBtn}>Clear selection</button>
+          </div>
+        </Card>
+      )}
+
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
@@ -2573,6 +2587,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const [payAmount, setPayAmount] = useState('');
   const [payError, setPayError] = useState('');
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
@@ -2627,6 +2642,37 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const filteredSubtotal = filteredInvoices.reduce((s, inv) => s + invoiceSubtotal(inv), 0);
   const filteredBalance = filteredInvoices.reduce((s, inv) => s + invoiceTotal(inv) - (inv.paid || 0), 0);
 
+  const visibleUnpaidInvoices = useMemo(
+    () => sortedInvoices.filter(inv => inv.status !== 'Paid'),
+    [sortedInvoices]
+  );
+
+  const selectedUnpaidInvoices = useMemo(
+    () => invoices.filter(inv => inv.status !== 'Paid' && selectedInvoiceIds.includes(inv.id)),
+    [invoices, selectedInvoiceIds]
+  );
+
+  const selectedOutstanding = selectedUnpaidInvoices.reduce(
+    (sum, inv) => sum + Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0)),
+    0
+  );
+
+  function toggleInvoiceSelection(id) {
+    setSelectedInvoiceIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleAllVisibleUnpaid() {
+    const visibleIds = visibleUnpaidInvoices.map(inv => inv.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedInvoiceIds.includes(id));
+
+    setSelectedInvoiceIds(prev => {
+      if (allSelected) return prev.filter(id => !visibleIds.includes(id));
+      return Array.from(new Set([...prev, ...visibleIds]));
+    });
+  }
+
   function applyPayment(inv) {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return; }
@@ -2637,6 +2683,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
       const total = invoiceTotal(i);
       return { ...i, paid, status: paid >= total ? 'Paid' : 'Partial' };
     }));
+    setSelectedInvoiceIds(prev => prev.filter(id => id !== inv.id));
     setPayingId(null);
     setPayAmount('');
   }
@@ -2728,6 +2775,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   function removeInvoice(inv) {
     if (!window.confirm(`Delete invoice ${inv.number} for ${inv.client}? This cannot be undone.${inv.paid ? ' It has a payment recorded against it.' : ''}`)) return;
     setInvoices(prev => prev.filter(i => i.id !== inv.id));
+    setSelectedInvoiceIds(prev => prev.filter(id => id !== inv.id));
   }
 
   const [showSettings, setShowSettings] = useState(false);
@@ -2856,6 +2904,15 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+              <th style={{ padding: '6px 4px', width: 34 }}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible unpaid invoices"
+                  checked={visibleUnpaidInvoices.length > 0 && visibleUnpaidInvoices.every(inv => selectedInvoiceIds.includes(inv.id))}
+                  onChange={toggleAllVisibleUnpaid}
+                  title="Select all visible unpaid invoices"
+                />
+              </th>
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('number')}>No. {invSort.column === 'number' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('client')}>Customer {invSort.column === 'client' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
               <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleInvSort('date')}>Date {invSort.column === 'date' ? (invSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
@@ -2867,7 +2924,19 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           </thead>
           <tbody>
             {sortedInvoices.map(inv => (
-              <tr key={inv.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+              <tr key={inv.id} style={{ borderBottom: '1px solid #F0F1F3', background: selectedInvoiceIds.includes(inv.id) ? '#EEF4FA' : 'transparent' }}>
+                <td style={{ padding: '6px 4px' }}>
+                  {inv.status !== 'Paid' ? (
+                    <input
+                      type="checkbox"
+                      checked={selectedInvoiceIds.includes(inv.id)}
+                      onChange={() => toggleInvoiceSelection(inv.id)}
+                      aria-label={`Select invoice ${inv.number}`}
+                    />
+                  ) : (
+                    <span style={{ color: '#CBD2D9' }}>—</span>
+                  )}
+                </td>
                 <td style={{ padding: '6px 4px' }}>{inv.number}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.client}</td>
                 <td style={{ padding: '6px 4px' }}>{inv.date}</td>
@@ -2890,6 +2959,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
           {filteredInvoices.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
+                <td></td>
                 <td colSpan={3} style={{ padding: '6px 4px' }}>Total ({filteredInvoices.length})</td>
                 <td style={{ padding: '6px 4px' }}>{money(filteredSubtotal)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(filteredTotal)}</td>
