@@ -629,6 +629,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         setInvoicesRaw((i.data || []).map(row => ({
           ...row,
           retentionPct: row.retention_pct,
+          retentionMode: row.retention_mode || 'percent',
+          retentionAmount: Number(row.retention_amount) || 0,
           paid: Number(row.paid) || 0,
           ivuPct: Number(row.ivu_pct) || 0,
           paymentMethod: row.payment_method || '',
@@ -690,13 +692,19 @@ async function fetchAllRows(table, clientId, orderCol) {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       const forDb = next.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
-        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+        retention: inv.retention, retention_pct: inv.retentionPct,
+        retention_mode: inv.retentionMode || 'percent',
+        retention_amount: Number(inv.retentionAmount) || 0,
+        status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
         payments: Array.isArray(inv.payments) ? inv.payments : [],
       }));
       const prevForDb = prev.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
-        retention: inv.retention, retention_pct: inv.retentionPct, status: inv.status, paid: inv.paid || 0,
+        retention: inv.retention, retention_pct: inv.retentionPct,
+        retention_mode: inv.retentionMode || 'percent',
+        retention_amount: Number(inv.retentionAmount) || 0,
+        status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
         payments: Array.isArray(inv.payments) ? inv.payments : [],
       }));
@@ -858,7 +866,12 @@ async function fetchAllRows(table, clientId, orderCol) {
   }
   function invoiceTotal(inv) {
     const sub = invoiceSubtotal(inv);
-    const ret = inv.retention ? sub * (Number(inv.retentionPct) || 0) / 100 : 0;
+    let ret = 0;
+    if (inv.retention) {
+      ret = (inv.retentionMode || 'percent') === 'amount'
+        ? (Number(inv.retentionAmount) || 0)
+        : sub * (Number(inv.retentionPct) || 0) / 100;
+    }
     const ivu = sub * (Number(inv.ivuPct) || 0) / 100;
     return sub - ret + ivu;
   }
@@ -2757,7 +2770,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   }
 
   function blankInvoice() {
-    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, status: 'Pending', paid: 0, payments: [], ivuPct: 0, paymentMethod: '', notes: '' };
+    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, retentionMode: 'percent', retentionAmount: 0, status: 'Pending', paid: 0, payments: [], ivuPct: 0, paymentMethod: '', notes: '' };
   }
 
   function updateLine(i, field, val) {
@@ -2786,6 +2799,10 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   function saveInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
+    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceSubtotal(form)) {
+      setError('Withholding amount cannot exceed the invoice subtotal.');
+      return;
+    }
     setError('');
     const prefix = invoicePrefix || 'TBS';
     const padding = invoiceNumberPadding || 4;
@@ -2812,6 +2829,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
       lines: (inv.lines || []).map(l => ({ ...l })),
       retention: !!inv.retention,
       retentionPct: inv.retentionPct ?? 10,
+      retentionMode: inv.retentionMode || 'percent',
+      retentionAmount: Number(inv.retentionAmount) || 0,
       status: 'Pending',
       paid: 0,
       payments: [],
@@ -2827,6 +2846,10 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   function saveEditedInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
+    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceSubtotal(form)) {
+      setError('Withholding amount cannot exceed the invoice subtotal.');
+      return;
+    }
     setError('');
     setInvoices(prev => prev.map(i => i.id === editingId ? { ...form, id: editingId, number: i.number } : i));
     setForm(blankInvoice());
@@ -2903,9 +2926,44 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
               Apply withholding
             </label>
             {form.retention && (
-              <input type="number" style={{ width: 60 }} value={form.retentionPct} onChange={e => setForm(f => ({ ...f, retentionPct: e.target.value }))} />
+              <>
+                <select
+                  value={form.retentionMode || 'percent'}
+                  onChange={e => setForm(f => ({ ...f, retentionMode: e.target.value }))}
+                  style={{ minWidth: 120 }}
+                >
+                  <option value="percent">Percentage (%)</option>
+                  <option value="amount">Fixed amount ($)</option>
+                </select>
+
+                {(form.retentionMode || 'percent') === 'percent' ? (
+                  <>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      style={{ width: 80 }}
+                      value={form.retentionPct}
+                      onChange={e => setForm(f => ({ ...f, retentionPct: e.target.value }))}
+                    />
+                    <span style={{ fontSize: 14 }}>%</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 14 }}>$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      style={{ width: 110 }}
+                      value={form.retentionAmount}
+                      onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </>
+                )}
+              </>
             )}
-            {form.retention && <span style={{ fontSize: 14 }}>%</span>}
             <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
               IVU/Sales tax
               <input type="number" step="0.01" style={{ width: 60 }} value={form.ivuPct} onChange={e => setForm(f => ({ ...f, ivuPct: e.target.value }))} />
@@ -3125,7 +3183,11 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
 function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone }) {
   const subtotal = inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
-  const withholding = inv.retention ? subtotal * (Number(inv.retentionPct) || 0) / 100 : 0;
+  const withholding = inv.retention
+    ? ((inv.retentionMode || 'percent') === 'amount'
+        ? (Number(inv.retentionAmount) || 0)
+        : subtotal * (Number(inv.retentionPct) || 0) / 100)
+    : 0;
   const ivu = subtotal * (Number(inv.ivuPct) || 0) / 100;
   const showLogo = !!logoDataUri;
   const isEs = invoiceLanguage === 'es';
