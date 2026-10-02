@@ -2595,6 +2595,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const [payingId, setPayingId] = useState(null);
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(todayStr());
+  const [payMethod, setPayMethod] = useState('');
   const [payError, setPayError] = useState('');
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
@@ -2736,6 +2737,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
     if (!payDate) { setPayError('Select the payment date.'); return; }
     if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return; }
+    if (!payMethod.trim()) { setPayError('Enter the payment method.'); return; }
     if (amt > outstanding + 0.005) {
       setPayError(`Payment cannot exceed the outstanding balance of ${money(outstanding)}.`);
       return;
@@ -2750,6 +2752,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         id: uid(),
         date: payDate,
         amount: Number(amt.toFixed(2)),
+        method: payMethod.trim(),
       };
       const payments = [...previousPayments, payment];
       const paid = Number((currentPaid + amt).toFixed(2));
@@ -2767,6 +2770,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     setPayingId(null);
     setPayAmount('');
     setPayDate(todayStr());
+    setPayMethod('');
   }
 
   function blankInvoice() {
@@ -3110,7 +3114,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                   <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
                   <button onClick={() => copyInvoice(inv)} style={iconBtn}>Copy</button>
                   {inv.status !== 'Paid' && (
-                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayDate(todayStr()); setPayError(''); }} style={iconBtn}>Apply payment</button>
+                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayDate(todayStr()); setPayMethod(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
                   <button onClick={() => removeInvoice(inv)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -3156,13 +3160,27 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 </div>
               </div>
 
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Payment method</label>
+                <input
+                  style={{ width: '100%' }}
+                  placeholder="e.g. ATH Móvil, bank transfer, check, cash, card"
+                  value={payMethod}
+                  onChange={e => setPayMethod(e.target.value)}
+                />
+              </div>
+
               {(inv.payments || []).length > 0 && (
                 <div style={{ marginBottom: 12, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
                   <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 5 }}>Payment history</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px', gap: 8, fontSize: 11, color: '#6B7280', paddingBottom: 4, borderBottom: '1px solid #E2E5E9' }}>
+                    <span>Date</span><span>Method</span><span style={{ textAlign: 'right' }}>Amount</span>
+                  </div>
                   {(inv.payments || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(p => (
-                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-                      <span>{p.date}</span>
-                      <strong>{money(p.amount)}</strong>
+                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px', gap: 8, fontSize: 12, padding: '4px 0', borderBottom: '1px solid #EEF0F2' }}>
+                      <span>{p.date || '—'}</span>
+                      <span>{p.method || '—'}</span>
+                      <strong style={{ textAlign: 'right' }}>{money(p.amount)}</strong>
                     </div>
                   ))}
                 </div>
@@ -3189,6 +3207,9 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
         : subtotal * (Number(inv.retentionPct) || 0) / 100)
     : 0;
   const ivu = subtotal * (Number(inv.ivuPct) || 0) / 100;
+  const payments = Array.isArray(inv.payments) ? inv.payments : [];
+  const totalPaid = Number(inv.paid) || 0;
+  const balanceDue = Math.max(0, total - totalPaid);
   const showLogo = !!logoDataUri;
   const isEs = invoiceLanguage === 'es';
   const [sending, setSending] = useState(false);
@@ -3199,11 +3220,15 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
     items: 'SERVICIO O DESCRIPCIÓN', qty: 'CANT.', price: 'PRECIO', amount: 'IMPORTE',
     subtotal: 'Subtotal', withholding: 'Retención', ivu: 'IVU', total: 'TOTAL',
     paymentMethod: 'Método de pago', notes: 'Notas',
+    payments: 'PAGOS RECIBIDOS', paymentDate: 'Fecha', paymentAmount: 'Cantidad', paymentMethodCol: 'Método',
+    amountPaid: 'Total pagado', balanceDue: 'Balance pendiente',
   } : {
     title: 'INVOICE', billTo: 'Bill to', invNumber: 'Invoice Number:', invDate: 'Invoice Date:',
     items: 'Items', qty: 'Quantity', price: 'Price', amount: 'Amount',
-    subtotal: 'Total:', withholding: 'Withholding', ivu: 'Sales tax', total: 'Amount Due (USD):',
+    subtotal: 'Total:', withholding: 'Withholding', ivu: 'Sales tax', total: 'Invoice total:',
     paymentMethod: 'Payment method', notes: 'Notes',
+    payments: 'PAYMENTS RECEIVED', paymentDate: 'Date', paymentAmount: 'Amount', paymentMethodCol: 'Method',
+    amountPaid: 'Total paid', balanceDue: 'Balance due',
   };
 
   async function handleSendInvoice() {
@@ -3280,7 +3305,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, background: '#F3F4F6', padding: '6px 10px', borderRadius: 4, marginTop: isEs ? 8 : 0 }}>
-              <span style={{ color: '#6B7280' }}>{isEs ? 'TOTAL:' : 'Amount Due (USD):'}</span><span style={{ fontWeight: 700 }}>{money(total)}</span>
+              <span style={{ color: '#6B7280' }}>{isEs ? 'BALANCE PENDIENTE:' : 'Amount Due (USD):'}</span><span style={{ fontWeight: 700 }}>{money(balanceDue)}</span>
             </div>
           </div>
         </div>
@@ -3329,7 +3354,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
             </div>
             {inv.retention && (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                <span style={{ color: '#6B7280' }}>{t.withholding} ({inv.retentionPct}%):</span><span>-{money(withholding)}</span>
+                <span style={{ color: '#6B7280' }}>{t.withholding}{(inv.retentionMode || 'percent') === 'percent' ? ` (${inv.retentionPct}%)` : ''}:</span><span>-{money(withholding)}</span>
               </div>
             )}
             {Number(inv.ivuPct) > 0 && (
@@ -3340,8 +3365,41 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid #D8DCE1', fontWeight: 700 }}>
               <span>{t.total}</span><span>{money(total)}</span>
             </div>
+            {totalPaid > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                <span style={{ color: '#6B7280' }}>{t.amountPaid}</span><span>-{money(totalPaid)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #1F2933', fontWeight: 700 }}>
+              <span>{t.balanceDue}</span><span>{money(balanceDue)}</span>
+            </div>
           </div>
         </div>
+
+        {payments.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1F2933', marginBottom: 6 }}>{t.payments}</div>
+            <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6', color: '#4B5563', textAlign: 'left' }}>
+                  <th style={{ padding: '6px 8px' }}>{t.paymentDate}</th>
+                  <th style={{ padding: '6px 8px' }}>{t.paymentMethodCol}</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>{t.paymentAmount}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(p => (
+                  <tr key={p.id || `${p.date}-${p.amount}`} style={{ borderBottom: '1px solid #E5E7EB' }}>
+                    <td style={{ padding: '6px 8px' }}>{p.date || '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{p.method || '—'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{money(p.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {(inv.paymentMethod || inv.notes) && (
           <div style={{ marginTop: 20, fontSize: 12, color: '#4B5563' }}>
             {inv.paymentMethod && <div style={{ marginBottom: 4 }}><strong>{t.paymentMethod}:</strong> {inv.paymentMethod}</div>}
