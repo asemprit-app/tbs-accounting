@@ -904,6 +904,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <InvoicesView
             invoiceSubtotal={invoiceSubtotal}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
+            transactions={transactions} setTransactions={setTransactions} accounts={accounts}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
             products={products}
             sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
@@ -2588,7 +2589,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
+function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -2596,6 +2597,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(todayStr());
   const [payMethod, setPayMethod] = useState('');
+  const [paySourceGL, setPaySourceGL] = useState('');
+  const [editingPaymentId, setEditingPaymentId] = useState(null);
   const [payError, setPayError] = useState('');
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
@@ -2729,48 +2732,99 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
     });
   }
 
+  function startEditPayment(inv, payment) {
+    setPayingId(inv.id);
+    setEditingPaymentId(payment.id);
+    setPayAmount(String(payment.amount ?? ''));
+    setPayDate(payment.date || todayStr());
+    setPayMethod(payment.method || '');
+    setPaySourceGL(payment.sourceGL || '');
+    setPayError('');
+  }
+
+  function closePaymentModal() {
+    setPayingId(null);
+    setEditingPaymentId(null);
+    setPayAmount('');
+    setPayDate(todayStr());
+    setPayMethod('');
+    setPaySourceGL('');
+    setPayError('');
+  }
+
   function applyPayment(inv) {
     const amt = Number(payAmount);
     const total = invoiceTotal(inv);
-    const currentPaid = Number(inv.paid) || 0;
-    const outstanding = Math.max(0, total - currentPaid);
+    const previousPayments = Array.isArray(inv.payments) ? inv.payments : [];
+    const editingPayment = editingPaymentId
+      ? previousPayments.find(p => p.id === editingPaymentId)
+      : null;
+
+    const previousPaymentsTotal = previousPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const legacyPaid = Math.max(0, (Number(inv.paid) || 0) - previousPaymentsTotal);
+    const otherPaymentsTotal = previousPayments
+      .filter(p => p.id !== editingPaymentId)
+      .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const maxAllowed = Math.max(0, total - legacyPaid - otherPaymentsTotal);
 
     if (!payDate) { setPayError('Select the payment date.'); return; }
     if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return; }
     if (!payMethod.trim()) { setPayError('Enter the payment method.'); return; }
-    if (amt > outstanding + 0.005) {
-      setPayError(`Payment cannot exceed the outstanding balance of ${money(outstanding)}.`);
+    if (!paySourceGL) { setPayError('Select the account where the payment was deposited.'); return; }
+    if (amt > maxAllowed + 0.005) {
+      setPayError(`Payment cannot exceed the available balance of ${money(maxAllowed)}.`);
       return;
     }
 
-    setPayError('');
+    const arGL = matchAccountByName('Accounts Receivable', accounts) || '';
+    const transactionId = editingPayment?.transactionId || uid();
+
+    const payment = {
+      id: editingPayment?.id || uid(),
+      date: payDate,
+      amount: Number(amt.toFixed(2)),
+      method: payMethod.trim(),
+      sourceGL: paySourceGL,
+      transactionId,
+    };
+
+    const updatedPayments = editingPayment
+      ? previousPayments.map(p => p.id === editingPayment.id ? payment : p)
+      : [...previousPayments, payment];
+
+    const paid = Number((
+      legacyPaid + updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+    ).toFixed(2));
+
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
-
-      const previousPayments = Array.isArray(i.payments) ? i.payments : [];
-      const payment = {
-        id: uid(),
-        date: payDate,
-        amount: Number(amt.toFixed(2)),
-        method: payMethod.trim(),
-      };
-      const payments = [...previousPayments, payment];
-      const paid = Number((currentPaid + amt).toFixed(2));
-      const invTotal = invoiceTotal(i);
-
       return {
         ...i,
-        payments,
+        payments: updatedPayments,
         paid,
-        status: paid >= invTotal - 0.005 ? 'Paid' : 'Partial',
+        status: paid >= invoiceTotal(i) - 0.005 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
       };
     }));
 
+    const txRow = {
+      id: transactionId,
+      date: payDate,
+      description: `Invoice payment — ${inv.number} — ${inv.client} — ${payMethod.trim()}`,
+      amount: Number(amt.toFixed(2)),
+      gl: arGL,
+      sourceGL: paySourceGL,
+      status: arGL ? 'AUTO' : 'REVIEW',
+    };
+
+    setTransactions(prev => {
+      const exists = prev.some(t => t.id === transactionId);
+      return exists
+        ? prev.map(t => t.id === transactionId ? { ...t, ...txRow } : t)
+        : [...prev, txRow];
+    });
+
     setSelectedInvoiceIds(prev => prev.filter(id => id !== inv.id));
-    setPayingId(null);
-    setPayAmount('');
-    setPayDate(todayStr());
-    setPayMethod('');
+    closePaymentModal();
   }
 
   function blankInvoice() {
@@ -3114,7 +3168,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                   <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
                   <button onClick={() => copyInvoice(inv)} style={iconBtn}>Copy</button>
                   {inv.status !== 'Paid' && (
-                    <button onClick={() => { setPayingId(inv.id); setPayAmount(''); setPayDate(todayStr()); setPayMethod(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
+                    <button onClick={() => { setPayingId(inv.id); setEditingPaymentId(null); setPayAmount(''); setPayDate(todayStr()); setPayMethod(''); setPaySourceGL(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
                   <button onClick={() => removeInvoice(inv)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -3143,7 +3197,7 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 320 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Apply payment — {inv.number}</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>{editingPaymentId ? 'Edit payment' : 'Apply payment'} — {inv.number}</div>
               <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 12 }}>Outstanding balance: <strong>{money(balance)}</strong></div>
 
               <div style={{ marginBottom: 10 }}>
@@ -3170,17 +3224,32 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
                 />
               </div>
 
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 13, color: '#6B7280', display: 'block', marginBottom: 4 }}>Deposit account</label>
+                <select style={{ width: '100%' }} value={paySourceGL} onChange={e => setPaySourceGL(e.target.value)}>
+                  <option value="">Select bank / cash account</option>
+                  {accounts.filter(a => a.type === 'Asset').map(a => (
+                    <option key={a.code} value={a.code}>{a.code} — {a.name}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>
+                  This creates the matching receipt in Transactions and keeps Accounts Receivable from being counted as new revenue.
+                </div>
+              </div>
+
               {(inv.payments || []).length > 0 && (
                 <div style={{ marginBottom: 12, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
                   <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 5 }}>Payment history</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px', gap: 8, fontSize: 11, color: '#6B7280', paddingBottom: 4, borderBottom: '1px solid #E2E5E9' }}>
-                    <span>Date</span><span>Method</span><span style={{ textAlign: 'right' }}>Amount</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '82px 1fr 1fr 80px 44px', gap: 6, fontSize: 11, color: '#6B7280', paddingBottom: 4, borderBottom: '1px solid #E2E5E9' }}>
+                    <span>Date</span><span>Method</span><span>Account</span><span style={{ textAlign: 'right' }}>Amount</span><span></span>
                   </div>
                   {(inv.payments || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(p => (
-                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px', gap: 8, fontSize: 12, padding: '4px 0', borderBottom: '1px solid #EEF0F2' }}>
+                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'grid', gridTemplateColumns: '82px 1fr 1fr 80px 44px', gap: 6, alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid #EEF0F2' }}>
                       <span>{p.date || '—'}</span>
                       <span>{p.method || '—'}</span>
+                      <span>{accounts.find(a => a.code === p.sourceGL)?.name || (p.sourceGL ? p.sourceGL : 'Not linked')}</span>
                       <strong style={{ textAlign: 'right' }}>{money(p.amount)}</strong>
+                      <button onClick={() => startEditPayment(inv, p)} style={{ ...iconBtn, padding: '3px 5px' }}>Edit</button>
                     </div>
                   ))}
                 </div>
@@ -3188,8 +3257,8 @@ function InvoicesView({ invoices, setInvoices, customers, invoiceTotal, invoiceS
 
               {payError && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 8 }}>{payError}</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setPayingId(null)} style={iconBtn}>Cancel</button>
-                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply payment</button>
+                <button onClick={closePaymentModal} style={iconBtn}>Cancel</button>
+                <button onClick={() => applyPayment(inv)} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>{editingPaymentId ? 'Save changes' : 'Apply payment'}</button>
               </div>
             </Card>
           </div>
@@ -3220,14 +3289,14 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
     items: 'SERVICIO O DESCRIPCIÓN', qty: 'CANT.', price: 'PRECIO', amount: 'IMPORTE',
     subtotal: 'Subtotal', withholding: 'Retención', ivu: 'IVU', total: 'TOTAL',
     paymentMethod: 'Método de pago', notes: 'Notas',
-    payments: 'PAGOS RECIBIDOS', paymentDate: 'Fecha', paymentAmount: 'Cantidad', paymentMethodCol: 'Método',
+    payments: 'PAGOS RECIBIDOS', paymentDate: 'Fecha', paymentAmount: 'Cantidad', paymentMethodCol: 'Método', paymentAccount: 'Cuenta',
     amountPaid: 'Total pagado', balanceDue: 'Balance pendiente',
   } : {
     title: 'INVOICE', billTo: 'Bill to', invNumber: 'Invoice Number:', invDate: 'Invoice Date:',
     items: 'Items', qty: 'Quantity', price: 'Price', amount: 'Amount',
     subtotal: 'Total:', withholding: 'Withholding', ivu: 'Sales tax', total: 'Invoice total:',
     paymentMethod: 'Payment method', notes: 'Notes',
-    payments: 'PAYMENTS RECEIVED', paymentDate: 'Date', paymentAmount: 'Amount', paymentMethodCol: 'Method',
+    payments: 'PAYMENTS RECEIVED', paymentDate: 'Date', paymentAmount: 'Amount', paymentMethodCol: 'Method', paymentAccount: 'Account',
     amountPaid: 'Total paid', balanceDue: 'Balance due',
   };
 
@@ -3384,6 +3453,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
                 <tr style={{ background: '#F3F4F6', color: '#4B5563', textAlign: 'left' }}>
                   <th style={{ padding: '6px 8px' }}>{t.paymentDate}</th>
                   <th style={{ padding: '6px 8px' }}>{t.paymentMethodCol}</th>
+                  <th style={{ padding: '6px 8px' }}>{t.paymentAccount}</th>
                   <th style={{ padding: '6px 8px', textAlign: 'right' }}>{t.paymentAmount}</th>
                 </tr>
               </thead>
@@ -3392,6 +3462,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
                   <tr key={p.id || `${p.date}-${p.amount}`} style={{ borderBottom: '1px solid #E5E7EB' }}>
                     <td style={{ padding: '6px 8px' }}>{p.date || '—'}</td>
                     <td style={{ padding: '6px 8px' }}>{p.method || '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{p.sourceGL || '—'}</td>
                     <td style={{ padding: '6px 8px', textAlign: 'right' }}>{money(p.amount)}</td>
                   </tr>
                 ))}
