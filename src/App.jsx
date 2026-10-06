@@ -2132,7 +2132,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                     <>
                       <td style={{ padding: '4px' }}>{s.employeeName}</td>
                       <td style={{ padding: '4px' }}>{s.date}</td>
-                      <td style={{ padding: '4px' }}>{s.hours}</td>
+                      <td style={{ padding: '4px' }}>{Number(s.hours || 0).toFixed(2)}</td>
                       <td style={{ padding: '4px' }}>{money(s.payRate)}</td>
                       <td style={{ padding: '4px' }}>{s.tipsRetentionPct}%</td>
                       <td style={{ padding: '4px' }}>{money(c.tipsNet)}</td>
@@ -2165,7 +2165,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                 <td style={{ padding: '4px' }} colSpan={2}>Total ({sortedServices.length})</td>
-                <td style={{ padding: '4px' }}>{totals.hours}</td>
+                <td style={{ padding: '4px' }}>{totals.hours.toFixed(2)}</td>
                 <td></td><td></td>
                 <td style={{ padding: '4px' }}>{money(totals.tipsNet)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.gross)}</td>
@@ -2200,6 +2200,41 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
   const [sendTo, setSendTo] = useState('');
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
+
+  const receiptPeriodOptions = useMemo(() => {
+    const uniqueDates = Array.from(new Set(services.map(s => s.date).filter(Boolean))).sort().reverse();
+    const months = Array.from(new Set(uniqueDates.map(d => d.slice(0, 7)))).sort().reverse();
+
+    const monthOptions = months.map(m => {
+      const [y, mo] = m.split('-');
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      return {
+        value: `month:${m}`,
+        label: new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+        from: `${m}-01`,
+        to: `${m}-${String(lastDay).padStart(2, '0')}`,
+      };
+    });
+
+    const dateOptions = uniqueDates.map(d => ({
+      value: `date:${d}`,
+      label: d,
+      from: d,
+      to: d,
+    }));
+
+    return { monthOptions, dateOptions };
+  }, [services]);
+
+  function applyReceiptPeriod(value) {
+    if (!value) return;
+    const allOptions = [...receiptPeriodOptions.monthOptions, ...receiptPeriodOptions.dateOptions];
+    const opt = allOptions.find(o => o.value === value);
+    if (!opt) return;
+    setDateFrom(opt.from);
+    setDateTo(opt.to);
+    setSendMsg('');
+  }
 
   const rows = useMemo(() => {
     return services
@@ -2261,10 +2296,10 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     rows.forEach(s => {
       const c = serviceCalc(s);
-      csv += [esc(s.employeeName), s.date, s.hours, Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
+      csv += [esc(s.employeeName), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
         Number(s.retentionAmount || 0).toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
     });
-    csv += `TOTAL,,${totals.hours},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
+    csv += `TOTAL,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2287,6 +2322,22 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
         </div>
 
         <div className="print-hide" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Available period</label>
+            <select defaultValue="" onChange={e => applyReceiptPeriod(e.target.value)}>
+              <option value="">Custom range...</option>
+              {receiptPeriodOptions.monthOptions.length > 0 && (
+                <optgroup label="Months">
+                  {receiptPeriodOptions.monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+              {receiptPeriodOptions.dateOptions.length > 0 && (
+                <optgroup label="Available dates">
+                  {receiptPeriodOptions.dateOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>From</label>
             <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setSendMsg(''); }} />
@@ -2330,7 +2381,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
                 <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
                   <td style={{ padding: '4px 4px' }}>{s.employeeName}</td>
                   <td style={{ padding: '4px' }}>{s.date}</td>
-                  <td style={{ padding: '4px', textAlign: 'right' }}>{s.hours}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{Number(s.hours || 0).toFixed(2)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.payRate)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.tipsNet)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.gross)}</td>
@@ -2348,7 +2399,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
               <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
                 <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
                 <td></td>
-                <td style={{ padding: '4px', textAlign: 'right' }}>{Number(totals.hours.toFixed(2))}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours.toFixed(2)}</td>
                 <td></td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.tipsNet)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
@@ -5721,6 +5772,46 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
 
+  const payrollPeriodOptions = useMemo(() => {
+    const runOptions = payrollRuns
+      .slice()
+      .sort((a, b) => b.periodStart.localeCompare(a.periodStart))
+      .map(r => ({
+        value: `run:${r.id}`,
+        label: `${r.periodStart} → ${r.periodEnd} (pay ${r.payDate})`,
+        from: r.periodStart,
+        to: r.periodEnd,
+      }));
+
+    const months = Array.from(new Set(payrollRuns.flatMap(r => [
+      r.periodStart?.slice(0, 7),
+      r.periodEnd?.slice(0, 7),
+    ]).filter(Boolean))).sort().reverse();
+
+    const monthOptions = months.map(m => {
+      const [y, mo] = m.split('-');
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      return {
+        value: `month:${m}`,
+        label: new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+        from: `${m}-01`,
+        to: `${m}-${String(lastDay).padStart(2, '0')}`,
+      };
+    });
+
+    return { runOptions, monthOptions };
+  }, [payrollRuns]);
+
+  function applyPayrollPeriod(value) {
+    if (!value) return;
+    const allOptions = [...payrollPeriodOptions.runOptions, ...payrollPeriodOptions.monthOptions];
+    const opt = allOptions.find(o => o.value === value);
+    if (!opt) return;
+    setDateFrom(opt.from);
+    setDateTo(opt.to);
+    setSendMsg('');
+  }
+
   const selectedRuns = useMemo(() => {
     return payrollRuns
       .filter(r => {
@@ -5848,6 +5939,22 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         </div>
 
         <div className="print-hide" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Available period</label>
+            <select defaultValue="" onChange={e => applyPayrollPeriod(e.target.value)}>
+              <option value="">Custom range...</option>
+              {payrollPeriodOptions.runOptions.length > 0 && (
+                <optgroup label="Payroll runs">
+                  {payrollPeriodOptions.runOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+              {payrollPeriodOptions.monthOptions.length > 0 && (
+                <optgroup label="Months">
+                  {payrollPeriodOptions.monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Period from</label>
             <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setSendMsg(''); }} />
