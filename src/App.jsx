@@ -2194,10 +2194,20 @@ function ServicesView({ services, setServices, employees, businessName, logoData
 }
 
 function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEmail, onClose }) {
-  const rows = services.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const serviceDates = services.map(s => s.date).filter(Boolean).sort();
+  const [dateFrom, setDateFrom] = useState(serviceDates[0] || '');
+  const [dateTo, setDateTo] = useState(serviceDates[serviceDates.length - 1] || '');
   const [sendTo, setSendTo] = useState('');
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
+
+  const rows = useMemo(() => {
+    return services
+      .filter(s => (!dateFrom || s.date >= dateFrom) && (!dateTo || s.date <= dateTo))
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [services, dateFrom, dateTo]);
+
   const totals = rows.reduce((t, s) => {
     const c = serviceCalc(s);
     return {
@@ -2207,16 +2217,36 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
     };
   }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
 
+  const periodLabel = dateFrom || dateTo
+    ? `${dateFrom || 'Beginning'} to ${dateTo || 'Present'}`
+    : 'All dates';
+
+  function clearPeriod() {
+    setDateFrom('');
+    setDateTo('');
+    setSendMsg('');
+  }
+
   async function handleSend() {
     if (!sendTo.trim()) { setSendMsg('Enter a recipient email.'); return; }
+    if (rows.length === 0) { setSendMsg('No service entries match the selected period.'); return; }
     setSending(true);
     setSendMsg('');
     try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_Register.pdf`);
-      const text = `Hi,\n\nAttached is the Receipt Register.\n\nTotal Net Pay: ${money(totals.netPay)}\n\nThank you,\n\n${businessName}`;
+      const filePeriod = `${dateFrom || 'all'}_${dateTo || 'all'}`;
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_Register_${filePeriod}.pdf`);
+      const text = `Hi,\n\nAttached is the Receipt Register for ${periodLabel}.\n\nEntries: ${rows.length}\nTotal Net Pay: ${money(totals.netPay)}\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: sendTo.trim(), subject: `Receipt Register`, text, pdfBase64, filename: `Receipt_Register.pdf`, from, replyTo });
+      await sendInvoiceViaResend({
+        to: sendTo.trim(),
+        subject: `Receipt Register — ${periodLabel}`,
+        text,
+        pdfBase64,
+        filename: `Receipt_Register_${filePeriod}.pdf`,
+        from,
+        replyTo
+      });
       setSendMsg(`Sent to ${sendTo.trim()}.`);
     } catch (err) {
       setSendMsg('Could not send: ' + err.message);
@@ -2226,18 +2256,21 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
   }
 
   function exportCSV() {
+    if (rows.length === 0) { setSendMsg('No service entries match the selected period.'); return; }
     let csv = 'Employee,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     rows.forEach(s => {
       const c = serviceCalc(s);
-      csv += [esc(s.employeeName), s.date, s.hours, s.payRate.toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
-        s.retentionAmount.toFixed(2), c.subtotal.toFixed(2), s.reimbursement.toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
+      csv += [esc(s.employeeName), s.date, s.hours, Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
+        Number(s.retentionAmount || 0).toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
     });
     csv += `TOTAL,,${totals.hours},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `Receipt_Register.csv`; a.click();
+    a.href = url;
+    a.download = `Receipt_Register_${dateFrom || 'all'}_${dateTo || 'all'}.csv`;
+    a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -2248,19 +2281,34 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt Register</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => rows.length ? window.print() : setSendMsg('No service entries match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
+
+        <div className="print-hide" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>From</label>
+            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setSendMsg(''); }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>To</label>
+            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setSendMsg(''); }} />
+          </div>
+          <button onClick={clearPeriod} style={iconBtn}>All dates</button>
+          <span style={{ fontSize: 12, color: '#6B7280', paddingBottom: 6 }}>{rows.length} entr{rows.length === 1 ? 'y' : 'ies'} selected</span>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }} className="print-hide">
           <input placeholder="Send to email…" style={{ width: 220 }} value={sendTo} onChange={e => setSendTo(e.target.value)} />
-          <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+          <button onClick={handleSend} disabled={sending || rows.length === 0} style={{ background: rows.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !rows.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
           {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
+
         <div id="invoice-content-only">
-        <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={rows[0]?.date} periodEnd={rows[rows.length - 1]?.date} logoUrl={null} />
+        <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={dateFrom || rows[0]?.date} periodEnd={dateTo || rows[rows.length - 1]?.date} logoUrl={null} />
         <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Employee</th>
@@ -2295,22 +2343,25 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
               );
             })}
           </tbody>
-          <tfoot>
-            <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
-              <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
-              <td></td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours}</td>
-              <td></td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.tipsNet)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.retention)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.subtotal)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.netPay)}</td>
-              <td></td>
-            </tr>
-          </tfoot>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
+                <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
+                <td></td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{Number(totals.hours.toFixed(2))}</td>
+                <td></td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.tipsNet)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.retention)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.subtotal)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.netPay)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
+        {rows.length === 0 && <div style={{ padding: 14, color: '#6B7280', fontSize: 13 }}>No service entries match the selected period.</div>}
         </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
@@ -5663,11 +5714,41 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
 }
 
 function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, businessName, sendingEmail, replyToEmail, onClose }) {
-  const run = payrollRuns.find(r => r.id === runId);
-  const lines = payrollLines.filter(l => l.payrollRunId === runId).map(l => ({ ...l, employee: employees.find(e => e.id === l.employeeId) }));
+  const initialRun = payrollRuns.find(r => r.id === runId);
+  const [dateFrom, setDateFrom] = useState(initialRun?.periodStart || '');
+  const [dateTo, setDateTo] = useState(initialRun?.periodEnd || '');
   const [sendTo, setSendTo] = useState('');
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
+
+  const selectedRuns = useMemo(() => {
+    return payrollRuns
+      .filter(r => {
+        if (dateFrom && r.periodEnd < dateFrom) return false;
+        if (dateTo && r.periodStart > dateTo) return false;
+        return true;
+      })
+      .slice()
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+  }, [payrollRuns, dateFrom, dateTo]);
+
+  const selectedRunIds = useMemo(() => new Set(selectedRuns.map(r => r.id)), [selectedRuns]);
+
+  const lines = useMemo(() => {
+    return payrollLines
+      .filter(l => selectedRunIds.has(l.payrollRunId))
+      .map(l => {
+        const run = payrollRuns.find(r => r.id === l.payrollRunId);
+        return { ...l, employee: employees.find(e => e.id === l.employeeId), run };
+      })
+      .sort((a, b) => {
+        const ad = a.run?.payDate || '';
+        const bd = b.run?.payDate || '';
+        if (ad !== bd) return ad.localeCompare(bd);
+        return (a.employee?.name || '').localeCompare(b.employee?.name || '');
+      });
+  }, [payrollLines, selectedRunIds, payrollRuns, employees]);
+
   const totals = lines.reduce((acc, l) => ({
     gross: acc.gross + (Number(l.gross) || 0),
     federal: acc.federal + (Number(l.federalIncomeTax) || 0),
@@ -5680,16 +5761,36 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     net: acc.net + lineNet(l),
   }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
 
+  const periodLabel = dateFrom || dateTo
+    ? `${dateFrom || 'Beginning'} to ${dateTo || 'Present'}`
+    : 'All payroll periods';
+
+  function clearPeriod() {
+    setDateFrom('');
+    setDateTo('');
+    setSendMsg('');
+  }
+
   async function handleSend() {
     if (!sendTo.trim()) { setSendMsg('Enter a recipient email.'); return; }
+    if (lines.length === 0) { setSendMsg('No payroll lines match the selected period.'); return; }
     setSending(true);
     setSendMsg('');
     try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Payroll_Register_${run.payDate}.pdf`);
-      const text = `Hi,\n\nAttached is the Payroll Register for the period ${run.periodStart} to ${run.periodEnd} (pay date ${run.payDate}).\n\nTotal Net Pay: ${money(totals.net)}\n\nThank you,\n\n${businessName}`;
+      const filePeriod = `${dateFrom || 'all'}_${dateTo || 'all'}`;
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Payroll_Register_${filePeriod}.pdf`);
+      const text = `Hi,\n\nAttached is the Payroll Register for ${periodLabel}.\n\nPayroll runs included: ${selectedRuns.length}\nEmployees/lines: ${lines.length}\nTotal Net Pay: ${money(totals.net)}\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: sendTo.trim(), subject: `Payroll Register — ${run.payDate}`, text, pdfBase64, filename: `Payroll_Register_${run.payDate}.pdf`, from, replyTo });
+      await sendInvoiceViaResend({
+        to: sendTo.trim(),
+        subject: `Payroll Register — ${periodLabel}`,
+        text,
+        pdfBase64,
+        filename: `Payroll_Register_${filePeriod}.pdf`,
+        from,
+        replyTo
+      });
       setSendMsg(`Sent to ${sendTo.trim()}.`);
     } catch (err) {
       setSendMsg('Could not send: ' + err.message);
@@ -5699,48 +5800,85 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   }
 
   function exportCSV() {
-    let csv = 'Employee,Hours,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
+    if (lines.length === 0) { setSendMsg('No payroll lines match the selected period.'); return; }
+    let csv = 'Period Start,Period End,Pay Date,Employee,Hours,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
       const fica = (Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0);
-      csv += [esc(l.employee?.name || ''), lineTotalHours(l) || '', (Number(l.gross) || 0).toFixed(2),
-        (Number(l.prIncomeTax) || 0).toFixed(2), (Number(l.socialSecurity) || 0).toFixed(2), (Number(l.medicare) || 0).toFixed(2), fica.toFixed(2),
-        (Number(l.sinot) || 0).toFixed(2), (Number(l.otherDeductions) || 0).toFixed(2), (Number(l.reimbursement) || 0).toFixed(2), lineNet(l).toFixed(2)].join(',') + '\n';
+      csv += [
+        l.run?.periodStart || '',
+        l.run?.periodEnd || '',
+        l.run?.payDate || '',
+        esc(l.employee?.name || ''),
+        lineTotalHours(l) || '',
+        (Number(l.gross) || 0).toFixed(2),
+        (Number(l.prIncomeTax) || 0).toFixed(2),
+        (Number(l.socialSecurity) || 0).toFixed(2),
+        (Number(l.medicare) || 0).toFixed(2),
+        fica.toFixed(2),
+        (Number(l.sinot) || 0).toFixed(2),
+        (Number(l.otherDeductions) || 0).toFixed(2),
+        (Number(l.reimbursement) || 0).toFixed(2),
+        lineNet(l).toFixed(2)
+      ].join(',') + '\n';
     });
     const totalFica = totals.ss + totals.medicare;
-    csv += `TOTAL,,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
+    csv += `TOTAL,,,,,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `payroll_register_${run.payDate}.csv`; a.click();
+    a.href = url;
+    a.download = `Payroll_Register_${dateFrom || 'all'}_${dateTo || 'all'}.csv`;
+    a.click();
     URL.revokeObjectURL(url);
   }
 
-  if (!run) return null;
+  if (!initialRun) return null;
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 980, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
+      <div style={{ background: '#fff', width: 1080, maxHeight: '88vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Payroll Register</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => lines.length ? window.print() : setSendMsg('No payroll lines match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
+
+        <div className="print-hide" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', padding: 10, background: '#F7F8FA', borderRadius: 6, marginBottom: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Period from</label>
+            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setSendMsg(''); }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Period to</label>
+            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setSendMsg(''); }} />
+          </div>
+          <button onClick={clearPeriod} style={iconBtn}>All payroll periods</button>
+          <span style={{ fontSize: 12, color: '#6B7280', paddingBottom: 6 }}>
+            {selectedRuns.length} run{selectedRuns.length === 1 ? '' : 's'} / {lines.length} line{lines.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }} className="print-hide">
           <input placeholder="Send to email…" style={{ width: 220 }} value={sendTo} onChange={e => setSendTo(e.target.value)} />
-          <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+          <button onClick={handleSend} disabled={sending || lines.length === 0} style={{ background: lines.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !lines.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
           {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
+
         <div id="invoice-content-only">
-        <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={run.periodStart} periodEnd={run.periodEnd} logoUrl={null} />
-        <div style={{ fontSize: 13, marginBottom: 14 }}>Pay date: <strong>{run.payDate}</strong></div>
-        <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
+        <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={dateFrom || selectedRuns[0]?.periodStart} periodEnd={dateTo || selectedRuns[selectedRuns.length - 1]?.periodEnd} logoUrl={null} />
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+          Payroll runs included: <strong>{selectedRuns.length}</strong>
+        </div>
+        <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Employee</th>
+            <th style={{ padding: '4px' }}>Pay Date</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>PR Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Soc. Sec.</th>
@@ -5755,6 +5893,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             {lines.map(l => (
               <tr key={l.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td style={{ padding: '4px 4px' }}>{l.employee?.name || '(deleted)'}</td>
+                <td style={{ padding: '4px' }}>{l.run?.payDate || ''}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.gross)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.prIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.socialSecurity)}</td>
@@ -5767,28 +5906,31 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
-              <td style={{ padding: '4px 4px' }}>Total ({lines.length})</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.medicare)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss + totals.medicare)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.sinot)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.other)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
-              <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.net)}</td>
-            </tr>
-          </tfoot>
+          {lines.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
+                <td style={{ padding: '4px 4px' }}>Total ({lines.length})</td>
+                <td></td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.medicare)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss + totals.medicare)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.sinot)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.other)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.net)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
+        {lines.length === 0 && <div style={{ padding: 14, color: '#6B7280', fontSize: 13 }}>No payroll lines match the selected period.</div>}
         </div>
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
-
 
 function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified, businessName }) {
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
