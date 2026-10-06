@@ -671,6 +671,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           ...row, employeeName: row.employee_name, date: row.service_date,
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
+          grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
           retentionAmount: Number(row.retention_amount) || 0, reimbursement: Number(row.reimbursement) || 0,
           status: row.status || 'DRAFT', postedJeId: row.posted_je_id || null,
         })));
@@ -804,6 +805,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         id: s.id, employee_name: s.employeeName, service_date: s.date,
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
+        gross_override: s.grossOverride === '' || s.grossOverride === null || s.grossOverride === undefined ? null : Number(s.grossOverride),
         retention_amount: Number(s.retentionAmount) || 0, reimbursement: Number(s.reimbursement) || 0,
         status: s.status || 'DRAFT', posted_je_id: s.postedJeId || null,
       }));
@@ -1896,10 +1898,12 @@ function StatusBadge({ status }) {
 
 function serviceCalc(s) {
   const tipsNet = (Number(s.tipsRaw) || 0) * (1 - (Number(s.tipsRetentionPct) || 0) / 100);
-  const gross = (Number(s.hours) || 0) * (Number(s.payRate) || 0) + tipsNet;
+  const hasManualGross = s.grossOverride !== '' && s.grossOverride !== null && s.grossOverride !== undefined;
+  const calculatedGross = (Number(s.hours) || 0) * (Number(s.payRate) || 0) + tipsNet;
+  const gross = hasManualGross ? (Number(s.grossOverride) || 0) : calculatedGross;
   const subtotal = gross - (Number(s.retentionAmount) || 0);
   const netPay = subtotal + (Number(s.reimbursement) || 0);
-  return { tipsNet, gross, subtotal, netPay };
+  return { tipsNet, gross, subtotal, netPay, hasManualGross, calculatedGross };
 }
 // Si el nombre escrito coincide con un empleado ya configurado en Payroll, usa su
 // PR Tax % + SINOT % para calcular la Retención automáticamente (Gross × ese %).
@@ -1913,7 +1917,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
   function blankService() {
-    return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', retentionAmount: '', reimbursement: '' };
+    return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', reimbursement: '' };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -1925,12 +1929,15 @@ function ServicesView({ services, setServices, employees, businessName, logoData
 
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
-    if (!form.hours || Number(form.hours) < 0) { setError('Enter hours.'); return; }
+    const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
+    if (!hasManualGross && (!form.hours || Number(form.hours) < 0)) { setError('Enter hours or a Gross amount.'); return; }
+    if (hasManualGross && Number(form.grossOverride) < 0) { setError('Gross cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
       id: uid(), employeeName: form.employeeName.trim(), date: form.date,
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
+      grossOverride: hasManualGross ? Number(form.grossOverride) : '',
       retentionAmount: Number(form.retentionAmount) || 0, reimbursement: Number(form.reimbursement) || 0,
     }]);
     setForm(blankService());
@@ -1941,6 +1948,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       ...s, ...editDraft,
       hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
       tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
+      grossOverride: editDraft.grossOverride === '' || editDraft.grossOverride === null || editDraft.grossOverride === undefined ? '' : Number(editDraft.grossOverride),
       retentionAmount: Number(editDraft.retentionAmount) || 0, reimbursement: Number(editDraft.reimbursement) || 0,
     } : s));
     setEditingId(null);
@@ -2062,6 +2070,11 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Tips retention %</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.tipsRetentionPct}
               onChange={e => setForm(f => { const next = { ...f, tipsRetentionPct: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Gross (manual)</label>
+            <input type="number" step="0.01" min="0" style={{ width: 90 }} placeholder="Auto" value={form.grossOverride}
+              onChange={e => setForm(f => { const next = { ...f, grossOverride: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} />
+            <div style={{ fontSize: 10.5, color: '#6B7280' }}>{form.grossOverride === '' ? `Auto: ${money(serviceCalc(form).gross)}` : 'Manual gross'}</div>
+          </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Retención ($)</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} />
             {employees.some(e => e.name === form.employeeName) && <div style={{ fontSize: 11, color: '#6B7280' }}>auto ({((employees.find(e => e.name === form.employeeName)?.prTaxPct || 0) + (employees.find(e => e.name === form.employeeName)?.sinotPct || 0))}%)</div>}
@@ -2117,7 +2130,11 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                           onChange={e => setEditDraft(d => { const next = { ...d, tipsRetentionPct: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} placeholder="%" />
                       </td>
                       <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).tipsNet)}</td>
-                      <td style={{ padding: '4px', fontWeight: 600 }}>{money(serviceCalc(editDraft).gross)}</td>
+                      <td style={{ padding: '4px' }}>
+                        <input type="number" step="0.01" min="0" style={{ width: 80 }} placeholder="Auto" value={editDraft.grossOverride ?? ''}
+                          onChange={e => setEditDraft(d => { const next = { ...d, grossOverride: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} />
+                        <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>{editDraft.grossOverride === '' || editDraft.grossOverride == null ? `Auto ${money(serviceCalc(editDraft).gross)}` : 'Manual'}</div>
+                      </td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.retentionAmount} onChange={e => setEditDraft(d => ({ ...d, retentionAmount: e.target.value }))} /></td>
                       <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).subtotal)}</td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.reimbursement} onChange={e => setEditDraft(d => ({ ...d, reimbursement: e.target.value }))} /></td>
@@ -2136,7 +2153,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       <td style={{ padding: '4px' }}>{money(s.payRate)}</td>
                       <td style={{ padding: '4px' }}>{s.tipsRetentionPct}%</td>
                       <td style={{ padding: '4px' }}>{money(c.tipsNet)}</td>
-                      <td style={{ padding: '4px', fontWeight: 600 }}>{money(c.gross)}</td>
+                      <td style={{ padding: '4px', fontWeight: 600 }}>{money(c.gross)}{c.hasManualGross && <div style={{ fontSize: 10.5, color: '#6B7280', fontWeight: 400 }}>manual</div>}</td>
                       <td style={{ padding: '4px' }}>{money(s.retentionAmount)}</td>
                       <td style={{ padding: '4px' }}>{money(c.subtotal)}</td>
                       <td style={{ padding: '4px' }}>{money(s.reimbursement)}</td>
@@ -5447,12 +5464,22 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       if (l.id !== id) return l;
       const updated = { ...l, ...patch };
       const emp = employees.find(e => e.id === updated.employeeId);
-      const gross = computeGrossFromHours(emp, updated, updated.extraGross) + (Number(updated.tips) || 0);
-      const ytdBefore = ytdGrossBeforeRun(updated.employeeId, run, payrollRuns, payrollLines.filter(x => x.id !== id));
-      updated.gross = gross;
-      // Solo re-calcula automático SS/Medicare/PR Tax/SINOT si cambiaron las horas, tips, o el extra (el usuario puede sobreescribir después).
       const hoursChanged = HOUR_FIELDS.some(f => patch[f] !== undefined);
-      if (hoursChanged || patch.extraGross !== undefined || patch.tips !== undefined) {
+      const formulaChanged = hoursChanged || patch.extraGross !== undefined || patch.tips !== undefined;
+      const grossEntered = patch.gross !== undefined;
+
+      let gross = Number(updated.gross) || 0;
+      if (grossEntered) {
+        gross = Math.max(0, Number(patch.gross) || 0);
+      } else if (formulaChanged) {
+        gross = computeGrossFromHours(emp, updated, updated.extraGross) + (Number(updated.tips) || 0);
+      }
+      updated.gross = gross;
+
+      // Recalculate payroll taxes when Gross itself or a Gross-driving field changes.
+      // Editing a deduction afterwards will not overwrite a manually entered Gross.
+      if (grossEntered || formulaChanged) {
+        const ytdBefore = ytdGrossBeforeRun(updated.employeeId, run, payrollRuns, prev.filter(x => x.id !== id));
         updated.socialSecurity = Number(autoSocialSecurity(gross, ytdBefore, ssWageBase).toFixed(2));
         updated.medicare = Number(autoMedicare(gross).toFixed(2));
         updated.prIncomeTax = Number((gross * (Number(emp?.prTaxPct) || 0) / 100).toFixed(2));
@@ -5567,7 +5594,10 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
                   </td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={l.tips} onChange={e => updateLine(l.id, { tips: e.target.value })} /></td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.extraGross} onChange={e => updateLine(l.id, { extraGross: e.target.value })} /></td>
-                  <td style={{ padding: '4px', fontWeight: 600 }}>{money(l.gross)}</td>
+                  <td style={{ padding: '4px' }}>
+                    <input type="number" step="0.01" min="0" style={{ width: 90, fontWeight: 600 }} value={l.gross}
+                      onChange={e => updateLine(l.id, { gross: e.target.value })} />
+                  </td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.federalIncomeTax} onChange={e => updateLine(l.id, { federalIncomeTax: e.target.value })} /></td>
                   <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 80 }} value={l.prIncomeTax} onChange={e => updateLine(l.id, { prIncomeTax: e.target.value })} /></td>
                   <td style={{ padding: '4px' }}>
