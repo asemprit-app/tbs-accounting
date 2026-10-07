@@ -5228,7 +5228,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
           employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={postPayrollToJournal} />
       )}
       {subTab === 'runs' && openRunId && (
-        <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
+        <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
@@ -5436,16 +5436,48 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
   );
 }
 
-function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
   const [payStubLineId, setPayStubLineId] = useState(null);
+  const [editingRunDates, setEditingRunDates] = useState(false);
+  const [runDateDraft, setRunDateDraft] = useState({ periodStart: '', periodEnd: '', payDate: '' });
+  const [runDateError, setRunDateError] = useState('');
   const linesForRun = payrollLines.filter(l => l.payrollRunId === runId);
   const employeeIdsInRun = new Set(linesForRun.map(l => l.employeeId));
   const availableToAdd = employees.filter(e => e.active && !employeeIdsInRun.has(e.id));
 
   if (!run) return <div>Run not found.</div>;
+
+  function beginEditRunDates() {
+    setRunDateDraft({
+      periodStart: run.periodStart || '',
+      periodEnd: run.periodEnd || '',
+      payDate: run.payDate || '',
+    });
+    setRunDateError('');
+    setEditingRunDates(true);
+  }
+
+  function saveRunDates() {
+    const { periodStart, periodEnd, payDate } = runDateDraft;
+    if (!periodStart || !periodEnd || !payDate) {
+      setRunDateError('Fill in Period Start, Period End, and Pay Date.');
+      return;
+    }
+    if (periodEnd < periodStart) {
+      setRunDateError('Period End cannot be before Period Start.');
+      return;
+    }
+
+    setPayrollRuns(prev => prev.map(r => r.id === runId
+      ? { ...r, periodStart, periodEnd, payDate }
+      : r
+    ));
+    setRunDateError('');
+    setEditingRunDates(false);
+  }
 
   function addEmployeeLine(employeeId) {
     const emp = employees.find(e => e.id === employeeId);
@@ -5512,7 +5544,35 @@ function PayrollRunDetail({ runId, payrollRuns, payrollLines, setPayrollLines, e
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <button onClick={onBack} style={{ ...iconBtn, marginBottom: 8 }}>← Back to Payroll Runs</button>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>{run.periodStart} → {run.periodEnd} <span style={{ color: '#6B7280', fontWeight: 400, fontSize: 14 }}>(pay date {run.payDate})</span></div>
+          {!editingRunDates ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>
+                {run.periodStart} → {run.periodEnd}
+                <span style={{ color: '#6B7280', fontWeight: 400, fontSize: 14 }}> (pay date {run.payDate})</span>
+              </div>
+              <button onClick={beginEditRunDates} style={iconBtn}>Edit dates</button>
+            </div>
+          ) : (
+            <Card style={{ padding: 10, marginBottom: 4 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block', marginBottom: 2 }}>Period Start</label>
+                  <input type="date" value={runDateDraft.periodStart} onChange={e => setRunDateDraft(d => ({ ...d, periodStart: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block', marginBottom: 2 }}>Period End</label>
+                  <input type="date" value={runDateDraft.periodEnd} onChange={e => setRunDateDraft(d => ({ ...d, periodEnd: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block', marginBottom: 2 }}>Pay Date</label>
+                  <input type="date" value={runDateDraft.payDate} onChange={e => setRunDateDraft(d => ({ ...d, payDate: e.target.value }))} />
+                </div>
+                <button onClick={saveRunDates} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 12px', cursor: 'pointer' }}>Save dates</button>
+                <button onClick={() => { setEditingRunDates(false); setRunDateError(''); }} style={iconBtn}>Cancel</button>
+              </div>
+              {runDateError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 6 }}>{runDateError}</div>}
+            </Card>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
