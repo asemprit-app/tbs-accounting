@@ -4948,6 +4948,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [copiedFromId, setCopiedFromId] = useState(null);
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', account: '' });
 
   function blankJE() {
     return { date: todayStr(), memo: '', lines: [{ gl: '', debit: '', credit: '', desc: '' }, { gl: '', debit: '', credit: '', desc: '' }] };
@@ -5005,6 +5006,52 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     setJournalEntries(prev => prev.filter(j => j.id !== id));
   }
 
+  const journalPeriodOptions = useMemo(() => {
+    const dates = journalEntries.map(j => j.date).filter(Boolean);
+    const months = Array.from(new Set(dates.map(d => d.slice(0, 7)))).sort().reverse();
+    const years = Array.from(new Set(dates.map(d => d.slice(0, 4)))).sort().reverse();
+
+    const monthOpts = months.map(m => {
+      const [y, mo] = m.split('-');
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      return {
+        value: `m:${m}`,
+        label: new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+        from: `${m}-01`,
+        to: `${m}-${String(lastDay).padStart(2, '0')}`,
+      };
+    });
+
+    const yearOpts = years.map(y => ({
+      value: `y:${y}`,
+      label: y,
+      from: `${y}-01-01`,
+      to: `${y}-12-31`,
+    }));
+
+    return { monthOpts, yearOpts };
+  }, [journalEntries]);
+
+  function applyJournalPeriod(value) {
+    if (!value) return;
+    const opt = [...journalPeriodOptions.yearOpts, ...journalPeriodOptions.monthOpts].find(o => o.value === value);
+    if (!opt) return;
+    setFilters(f => ({ ...f, dateFrom: opt.from, dateTo: opt.to }));
+  }
+
+  const filteredJournalEntries = useMemo(() => {
+    return journalEntries.filter(je => {
+      if (filters.dateFrom && je.date < filters.dateFrom) return false;
+      if (filters.dateTo && je.date > filters.dateTo) return false;
+      if (filters.account && !je.lines.some(l => l.gl === filters.account)) return false;
+      return true;
+    });
+  }, [journalEntries, filters]);
+
+  function clearJournalFilters() {
+    setFilters({ dateFrom: '', dateTo: '', account: '' });
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -5059,8 +5106,52 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
         </Card>
       )}
 
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Period</label>
+            <select defaultValue="" onChange={e => applyJournalPeriod(e.target.value)}>
+              <option value="">Custom range...</option>
+              {journalPeriodOptions.yearOpts.length > 0 && (
+                <optgroup label="Years">
+                  {journalPeriodOptions.yearOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+              {journalPeriodOptions.monthOpts.length > 0 && (
+                <optgroup label="Months">
+                  {journalPeriodOptions.monthOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>From</label>
+            <input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>To</label>
+            <input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} />
+          </div>
+
+          <div style={{ minWidth: 230 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Category / Account</label>
+            <select style={{ width: '100%' }} value={filters.account} onChange={e => setFilters(f => ({ ...f, account: e.target.value }))}>
+              <option value="">All accounts</option>
+              <AccountOptions accounts={accounts} />
+            </select>
+          </div>
+
+          <button onClick={clearJournalFilters} style={iconBtn}>Clear filters</button>
+          <span style={{ fontSize: 12, color: '#6B7280', paddingBottom: 6 }}>
+            {filteredJournalEntries.length} entr{filteredJournalEntries.length === 1 ? 'y' : 'ies'}
+          </span>
+        </div>
+      </Card>
+
       <Card>
-        {journalEntries.slice().reverse().map(je => (
+        {filteredJournalEntries.slice().reverse().map(je => (
           <div key={je.id} style={{ borderBottom: '1px solid #F0F1F3', padding: '8px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 600 }}>
               <span>{je.date} — {je.memo || 'No memo'}</span>
@@ -5078,7 +5169,7 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
             ))}
           </div>
         ))}
-        {journalEntries.length === 0 && <div style={{ fontSize: 14, color: '#6B7280' }}>No manual entries yet.</div>}
+        {filteredJournalEntries.length === 0 && <div style={{ fontSize: 14, color: '#6B7280' }}>{journalEntries.length === 0 ? 'No manual entries yet.' : 'No journal entries match the selected filters.'}</div>}
       </Card>
     </div>
   );
