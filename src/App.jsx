@@ -1930,14 +1930,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
     const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
-    const hasHours = form.hours !== '' && form.hours !== null && form.hours !== undefined && Number(form.hours) > 0;
-    const hasTips = Number(form.tipsRaw) > 0;
-
-    if (!hasManualGross && !hasHours && !hasTips) {
-      setError('Enter Hours, a Gross amount, or Tips.');
-      return;
-    }
     if (hasManualGross && Number(form.grossOverride) < 0) { setError('Gross cannot be negative.'); return; }
+    if (form.hours !== '' && Number(form.hours) < 0) { setError('Hours cannot be negative.'); return; }
+    if (form.payRate !== '' && Number(form.payRate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
       id: uid(), employeeName: form.employeeName.trim(), date: form.date,
@@ -2098,7 +2093,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           </button>
         </div>
         <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 8 }}>
-          You may create the receipt using Hours × Pay Rate, a manual Gross, or Tips only.
+          Hours and Pay Rate are optional. You may save the service first and enter Hours, Gross or Tips later.
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
@@ -5354,9 +5349,9 @@ function EmployeesTab({ employees, setEmployees }) {
 
   function addEmployee() {
     if (!form.name.trim()) { setError('Enter the employee name.'); return; }
-    if (!form.rate || Number(form.rate) <= 0) { setError(form.payType === 'hourly' ? 'Enter an hourly rate.' : 'Enter the salary amount per period.'); return; }
+    if (form.rate !== '' && Number(form.rate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
-    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate), active: true, prTaxPct: Number(form.prTaxPct) || 0, email: form.email.trim(), sinotPct: Number(form.sinotPct) || 0 }]);
+    setEmployees(prev => [...prev, { id: uid(), name: form.name.trim(), payType: form.payType, rate: Number(form.rate) || 0, active: true, prTaxPct: Number(form.prTaxPct) || 0, email: form.email.trim(), sinotPct: Number(form.sinotPct) || 0 }]);
     setForm(blankEmployee());
   }
   function startEdit(e) { setEditingId(e.id); setEditDraft({ name: e.name, payType: e.payType, rate: e.rate, active: e.active, prTaxPct: e.prTaxPct || 0, email: e.email || '', sinotPct: e.sinotPct || 0 }); }
@@ -5382,8 +5377,8 @@ function EmployeesTab({ employees, setEmployees }) {
               <option value="hourly">Hourly</option>
               <option value="salary">Salary (per period)</option>
             </select></div>
-          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>{form.payType === 'hourly' ? 'Hourly rate' : 'Salary per period'}</label>
-            <input type="number" step="0.01" style={{ width: 120 }} value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>{form.payType === 'hourly' ? 'Hourly rate (optional)' : 'Salary per period (optional)'}</label>
+            <input type="number" step="0.01" min="0" style={{ width: 120 }} value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>PR Tax %</label>
             <input type="number" step="0.01" style={{ width: 80 }} placeholder="0" value={form.prTaxPct} onChange={e => setForm(f => ({ ...f, prTaxPct: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>SINOT %</label>
@@ -6037,6 +6032,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   }, [payrollLines, selectedRunIds, payrollRuns, employees]);
 
   const totals = lines.reduce((acc, l) => ({
+    hours: acc.hours + lineTotalHours(l),
     gross: acc.gross + (Number(l.gross) || 0),
     federal: acc.federal + (Number(l.federalIncomeTax) || 0),
     pr: acc.pr + (Number(l.prIncomeTax) || 0),
@@ -6046,7 +6042,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     other: acc.other + (Number(l.otherDeductions) || 0),
     reimbursement: acc.reimbursement + (Number(l.reimbursement) || 0),
     net: acc.net + lineNet(l),
-  }), { gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
+  }), { hours: 0, gross: 0, federal: 0, pr: 0, ss: 0, medicare: 0, sinot: 0, other: 0, reimbursement: 0, net: 0 });
 
   const periodLabel = dateFrom || dateTo
     ? `${dateFrom || 'Beginning'} to ${dateTo || 'Present'}`
@@ -6088,7 +6084,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
 
   function exportCSV() {
     if (lines.length === 0) { setSendMsg('No payroll lines match the selected period.'); return; }
-    let csv = 'Period Start,Period End,Pay Date,Employee,Hours,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
+    let csv = 'Period Start,Period End,Pay Date,Employee,Hours,Pay Rate,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
       const fica = (Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0);
@@ -6097,7 +6093,8 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         l.run?.periodEnd || '',
         l.run?.payDate || '',
         esc(l.employee?.name || ''),
-        lineTotalHours(l) || '',
+        lineTotalHours(l).toFixed(2),
+        (Number(l.employee?.rate) || 0).toFixed(2),
         (Number(l.gross) || 0).toFixed(2),
         (Number(l.prIncomeTax) || 0).toFixed(2),
         (Number(l.socialSecurity) || 0).toFixed(2),
@@ -6110,7 +6107,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
       ].join(',') + '\n';
     });
     const totalFica = totals.ss + totals.medicare;
-    csv += `TOTAL,,,,,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
+    csv += `TOTAL,,,,${totals.hours.toFixed(2)},,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -6182,6 +6179,8 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Employee</th>
             <th style={{ padding: '4px' }}>Pay Date</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Hours</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Pay Rate</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>PR Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Soc. Sec.</th>
@@ -6197,6 +6196,8 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
               <tr key={l.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td style={{ padding: '4px 4px' }}>{l.employee?.name || '(deleted)'}</td>
                 <td style={{ padding: '4px' }}>{l.run?.payDate || ''}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{lineTotalHours(l).toFixed(2)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.employee?.rate || 0)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.gross)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.prIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.socialSecurity)}</td>
@@ -6213,6 +6214,8 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             <tfoot>
               <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
                 <td style={{ padding: '4px 4px' }}>Total ({lines.length})</td>
+                <td></td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours.toFixed(2)}</td>
                 <td></td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
