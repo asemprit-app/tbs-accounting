@@ -1930,7 +1930,13 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
     const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
-    if (!hasManualGross && (!form.hours || Number(form.hours) < 0)) { setError('Enter hours or a Gross amount.'); return; }
+    const hasHours = form.hours !== '' && form.hours !== null && form.hours !== undefined && Number(form.hours) > 0;
+    const hasTips = Number(form.tipsRaw) > 0;
+
+    if (!hasManualGross && !hasHours && !hasTips) {
+      setError('Enter Hours, a Gross amount, or Tips.');
+      return;
+    }
     if (hasManualGross && Number(form.grossOverride) < 0) { setError('Gross cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
@@ -2073,7 +2079,13 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Gross (manual)</label>
             <input type="number" step="0.01" min="0" style={{ width: 90 }} placeholder="Auto" value={form.grossOverride}
               onChange={e => setForm(f => { const next = { ...f, grossOverride: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} />
-            <div style={{ fontSize: 10.5, color: '#6B7280' }}>{form.grossOverride === '' ? `Auto: ${money(serviceCalc(form).gross)}` : 'Manual gross'}</div>
+            <div style={{ fontSize: 10.5, color: '#6B7280' }}>
+              {form.grossOverride === ''
+                ? (Number(form.tipsRaw) > 0 && !Number(form.hours)
+                    ? `Tips-only gross: ${money(serviceCalc(form).gross)}`
+                    : `Auto: ${money(serviceCalc(form).gross)}`)
+                : 'Manual gross'}
+            </div>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Retención ($)</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} />
@@ -2084,6 +2096,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           <button onClick={addService} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> Add
           </button>
+        </div>
+        <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 8 }}>
+          You may create the receipt using Hours × Pay Rate, a manual Gross, or Tips only.
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
