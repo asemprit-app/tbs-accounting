@@ -5371,10 +5371,30 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   const safeAmount = Number(amount) || 0;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 820, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="check-print-area">
-        <div className="print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 80, padding: 18, boxSizing: 'border-box'
+      }}
+      className="no-print-overlay"
+    >
+      <div
+        style={{
+          background: '#fff',
+          width: 'min(940px, 96vw)',
+          maxWidth: '96vw',
+          maxHeight: '92vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          borderRadius: 8,
+          padding: 22,
+          boxSizing: 'border-box'
+        }}
+        id="check-print-area"
+      >
+        <div className="print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div>
               <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
               <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
@@ -5390,44 +5410,160 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           </div>
         </div>
 
-        <div style={{ border: '1px solid #9CA3AF', width: '100%', minHeight: 330, padding: '34px 42px', background: '#fff', fontFamily: 'Georgia, serif' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 28 }}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>{businessName}</div>
-              <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
+        <div
+          id="check-document"
+          style={{
+            border: '1px solid #9CA3AF',
+            width: '100%',
+            maxWidth: '8in',
+            minHeight: '3.25in',
+            margin: '0 auto',
+            padding: '0.28in 0.34in',
+            background: '#fff',
+            fontFamily: 'Georgia, serif',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, marginBottom: 22, alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{businessName}</div>
+              <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
             </div>
-            <div style={{ textAlign: 'right', fontSize: 13 }}>
-              {checkNumber && <div style={{ marginBottom: 8 }}>Check No. <strong>{checkNumber}</strong></div>}
+            <div style={{ textAlign: 'right', fontSize: 12.5, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              {checkNumber && <div style={{ marginBottom: 6 }}>Check No. <strong>{checkNumber}</strong></div>}
               <div>Date: <strong>{checkDate}</strong></div>
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 150px', gap: 10, alignItems: 'end', marginBottom: 24 }}>
-            <div style={{ fontSize: 12 }}>PAY TO THE<br/>ORDER OF</div>
-            <div style={{ borderBottom: '1px solid #111', padding: '4px 6px', fontSize: 16, fontWeight: 700 }}>{payee}</div>
-            <div style={{ border: '1px solid #111', padding: '7px 10px', fontSize: 17, fontWeight: 700, textAlign: 'right' }}>{money(safeAmount)}</div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'end', gap: 8, marginBottom: 34 }}>
-            <div style={{ flex: 1, borderBottom: '1px solid #111', padding: '4px 6px', fontSize: 13 }}>{amountToWords(safeAmount)}</div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 30, marginTop: 42 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: '#6B7280' }}>MEMO</div>
-              <div style={{ borderBottom: '1px solid #111', padding: '5px 0', fontSize: 12 }}>{memo}</div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '100px minmax(0, 1fr) 128px',
+              gap: 10,
+              alignItems: 'end',
+              marginBottom: 20
+            }}
+          >
+            <div style={{ fontSize: 11.5, lineHeight: 1.05 }}>PAY TO THE<br/>ORDER OF</div>
+            <div
+              style={{
+                borderBottom: '1px solid #111',
+                padding: '4px 6px',
+                fontSize: 15.5,
+                fontWeight: 700,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {payee}
             </div>
-            <div style={{ width: 280, borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 11, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
+            <div
+              style={{
+                border: '1px solid #111',
+                padding: '6px 8px',
+                fontSize: 16,
+                fontWeight: 700,
+                textAlign: 'right',
+                whiteSpace: 'nowrap',
+                boxSizing: 'border-box'
+              }}
+            >
+              {money(safeAmount)}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'end', marginBottom: 28 }}>
+            <div
+              style={{
+                flex: 1,
+                borderBottom: '1px solid #111',
+                padding: '4px 6px',
+                fontSize: 12.5,
+                minWidth: 0,
+                whiteSpace: 'normal'
+              }}
+            >
+              {amountToWords(safeAmount)}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 250px', gap: 28, alignItems: 'end', marginTop: 32 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10.5, color: '#6B7280' }}>MEMO</div>
+              <div style={{ borderBottom: '1px solid #111', padding: '5px 0', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{memo}</div>
+            </div>
+            <div style={{ borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 10.5, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
           </div>
         </div>
       </div>
-      <style>{`@media print {
-        .no-print-overlay { position: static !important; background: none !important; }
-        .print-hide { display: none !important; }
-        body * { visibility: hidden; }
-        #check-print-area, #check-print-area * { visibility: visible; }
-        #check-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 0 !important; }
-      }`}</style>
+
+      <style>{`
+        @page {
+          size: Letter portrait;
+          margin: 0.25in;
+        }
+
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 8.5in !important;
+            background: #fff !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .no-print-overlay {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            background: none !important;
+            padding: 0 !important;
+          }
+
+          .print-hide {
+            display: none !important;
+          }
+
+          #check-print-area {
+            visibility: visible !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 8in !important;
+            max-width: 8in !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-sizing: border-box !important;
+          }
+
+          #check-print-area *,
+          #check-document,
+          #check-document * {
+            visibility: visible !important;
+          }
+
+          #check-document {
+            width: 8in !important;
+            max-width: 8in !important;
+            min-height: 3.25in !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
