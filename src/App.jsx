@@ -545,6 +545,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [services, setServicesRaw] = useState([]);
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
+  const [leaveEntries, setLeaveEntriesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
 
   useEffect(() => {
@@ -619,9 +620,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         fetchAllRows('payroll_lines', clientId),
         supabase.from('products').select('*').eq('client_id', clientId).order('name'),
         supabase.from('services').select('*').eq('client_id', clientId).order('service_date'),
+        fetchAllRows('leave_entries', clientId, 'entry_date'),
       ]);
-      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod, svc] = results;
-      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod, svc].find(x => x.error);
+      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod, svc, leave] = results;
+      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod, svc, leave].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
@@ -674,6 +676,15 @@ async function fetchAllRows(table, clientId, orderCol) {
           grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
           retentionAmount: Number(row.retention_amount) || 0, reimbursement: Number(row.reimbursement) || 0,
           status: row.status || 'DRAFT', postedJeId: row.posted_je_id || null,
+        })));
+        setLeaveEntriesRaw((leave.data || []).map(row => ({
+          ...row,
+          employeeId: row.employee_id,
+          date: row.entry_date,
+          leaveType: row.leave_type,
+          action: row.action,
+          hours: Number(row.hours) || 0,
+          note: row.note || '',
         })));
       }
       setLoaded(true);
@@ -842,6 +853,23 @@ async function fetchAllRows(table, clientId, orderCol) {
     });
   }, []);
 
+  const setLeaveEntries = useCallback((updater) => {
+    setLeaveEntriesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const toDb = arr => arr.map(e => ({
+        id: e.id,
+        employee_id: e.employeeId,
+        entry_date: e.date,
+        leave_type: e.leaveType,
+        action: e.action,
+        hours: Number(e.hours) || 0,
+        note: e.note || '',
+      }));
+      diffSync('leave_entries', toDb(prev), toDb(next), clientId);
+      return next;
+    });
+  }, []);
+
   const glName = (code) => accounts.find(g => g.code === code)?.name || 'Uncategorized';
 
   const summary = useMemo(() => {
@@ -933,7 +961,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} businessName={businessName} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
-          payrollLines={payrollLines} setPayrollLines={setPayrollLines} businessName={businessName} accounts={accounts}
+          payrollLines={payrollLines} setPayrollLines={setPayrollLines} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries}
+          businessName={businessName} accounts={accounts}
           journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
           sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
         </>
@@ -1925,6 +1954,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   const [editDraft, setEditDraft] = useState(blankService());
   const [sort, setSort] = useState({ column: null, dir: 'asc' });
   const [receiptId, setReceiptId] = useState(null);
+  const [checkServiceId, setCheckServiceId] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
 
   function addService() {
@@ -2173,6 +2203,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       </td>
                       <td style={{ padding: '4px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => setReceiptId(s.id)} style={iconBtn}>Receipt</button>
+                        <button onClick={() => setCheckServiceId(s.id)} style={iconBtn}>Print Check</button>
                         <button onClick={() => startEdit(s)} style={iconBtn}>Edit</button>
                         {s.status === 'DRAFT'
                           ? <button onClick={() => finalizeService(s.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
@@ -2213,6 +2244,20 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
           onClose={() => setReceiptId(null)} />
       )}
+      {checkServiceId && (() => {
+        const s = services.find(x => x.id === checkServiceId);
+        if (!s) return null;
+        return (
+          <CheckPrintModal
+            businessName={businessName}
+            payee={s.employeeName}
+            defaultDate={s.date}
+            amount={serviceCalc(s).netPay}
+            memo={`Services — ${s.date}`}
+            onClose={() => setCheckServiceId(null)}
+          />
+        );
+      })()}
       {showRegister && (
         <ReceiptRegisterModal services={services} businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setShowRegister(false)} />
       )}
@@ -5247,7 +5292,290 @@ function findAccountCode(accounts, name) {
   return acc ? acc.code : null;
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
+
+function amountToWords(value) {
+  const n = Math.floor(Math.abs(Number(value) || 0));
+  const cents = Math.round((Math.abs(Number(value) || 0) - n) * 100);
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function under1000(x) {
+    let out = '';
+    if (x >= 100) {
+      out += ones[Math.floor(x / 100)] + ' Hundred';
+      x %= 100;
+      if (x) out += ' ';
+    }
+    if (x >= 20) {
+      out += tens[Math.floor(x / 10)];
+      if (x % 10) out += '-' + ones[x % 10];
+    } else if (x > 0) {
+      out += ones[x];
+    }
+    return out;
+  }
+
+  function whole(x) {
+    if (x === 0) return 'Zero';
+    const groups = [
+      [1000000000, 'Billion'],
+      [1000000, 'Million'],
+      [1000, 'Thousand'],
+      [1, ''],
+    ];
+    let remaining = x;
+    const parts = [];
+    groups.forEach(([size, label]) => {
+      if (remaining >= size) {
+        const count = Math.floor(remaining / size);
+        remaining %= size;
+        const text = under1000(count);
+        if (text) parts.push(label ? `${text} ${label}` : text);
+      }
+    });
+    return parts.join(' ');
+  }
+
+  return `${whole(n)} and ${String(cents).padStart(2, '0')}/100 Dollars`;
+}
+
+function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
+  const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
+  const [checkNumber, setCheckNumber] = useState('');
+  const safeAmount = Number(amount) || 0;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 820, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="check-print-area">
+        <div className="print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
+              <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check #</label>
+              <input style={{ width: 100 }} value={checkNumber} onChange={e => setCheckNumber(e.target.value)} placeholder="Optional" />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => window.print()} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+
+        <div style={{ border: '1px solid #9CA3AF', width: '100%', minHeight: 330, padding: '34px 42px', background: '#fff', fontFamily: 'Georgia, serif' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 28 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{businessName}</div>
+              <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
+            </div>
+            <div style={{ textAlign: 'right', fontSize: 13 }}>
+              {checkNumber && <div style={{ marginBottom: 8 }}>Check No. <strong>{checkNumber}</strong></div>}
+              <div>Date: <strong>{checkDate}</strong></div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 150px', gap: 10, alignItems: 'end', marginBottom: 24 }}>
+            <div style={{ fontSize: 12 }}>PAY TO THE<br/>ORDER OF</div>
+            <div style={{ borderBottom: '1px solid #111', padding: '4px 6px', fontSize: 16, fontWeight: 700 }}>{payee}</div>
+            <div style={{ border: '1px solid #111', padding: '7px 10px', fontSize: 17, fontWeight: 700, textAlign: 'right' }}>{money(safeAmount)}</div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'end', gap: 8, marginBottom: 34 }}>
+            <div style={{ flex: 1, borderBottom: '1px solid #111', padding: '4px 6px', fontSize: 13 }}>{amountToWords(safeAmount)}</div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 30, marginTop: 42 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: '#6B7280' }}>MEMO</div>
+              <div style={{ borderBottom: '1px solid #111', padding: '5px 0', fontSize: 12 }}>{memo}</div>
+            </div>
+            <div style={{ width: 280, borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 11, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
+          </div>
+        </div>
+      </div>
+      <style>{`@media print {
+        .no-print-overlay { position: static !important; background: none !important; }
+        .print-hide { display: none !important; }
+        body * { visibility: hidden; }
+        #check-print-area, #check-print-area * { visibility: visible; }
+        #check-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 0 !important; }
+      }`}</style>
+    </div>
+  );
+}
+
+function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries }) {
+  const [form, setForm] = useState({
+    employeeId: '',
+    date: todayStr(),
+    leaveType: 'vacation',
+    action: 'accrual',
+    hours: '',
+    note: '',
+  });
+  const [filterEmployee, setFilterEmployee] = useState('');
+  const [error, setError] = useState('');
+
+  function signedHours(entry) {
+    const hrs = Number(entry.hours) || 0;
+    if (entry.action === 'used') return -Math.abs(hrs);
+    if (entry.action === 'accrual') return Math.abs(hrs);
+    return hrs;
+  }
+
+  function balanceFor(employeeId, leaveType) {
+    return leaveEntries
+      .filter(e => e.employeeId === employeeId && e.leaveType === leaveType)
+      .reduce((sum, e) => sum + signedHours(e), 0);
+  }
+
+  function addEntry() {
+    if (!form.employeeId) { setError('Select an employee.'); return; }
+    if (!form.date) { setError('Select a date.'); return; }
+    if (form.hours === '' || Number(form.hours) === 0) { setError('Enter the number of hours.'); return; }
+    const raw = Number(form.hours);
+    if (form.action !== 'adjustment' && raw < 0) { setError('For Accrual or Used, enter a positive number of hours.'); return; }
+
+    setLeaveEntries(prev => [...prev, {
+      id: uid(),
+      employeeId: form.employeeId,
+      date: form.date,
+      leaveType: form.leaveType,
+      action: form.action,
+      hours: raw,
+      note: form.note.trim(),
+    }]);
+    setError('');
+    setForm(f => ({ ...f, hours: '', note: '' }));
+  }
+
+  function deleteEntry(id) {
+    if (!window.confirm('Delete this leave record?')) return;
+    setLeaveEntries(prev => prev.filter(e => e.id !== id));
+  }
+
+  const rows = leaveEntries
+    .filter(e => !filterEmployee || e.employeeId === filterEmployee)
+    .slice()
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 18 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Vacation & Sick Leave Tracking</div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 14 }}>
+          Record accruals, hours used, and balance adjustments. Balances are maintained in hours.
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee</label>
+            <select value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}>
+              <option value="">Select employee</option>
+              {employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Leave type</label>
+            <select value={form.leaveType} onChange={e => setForm(f => ({ ...f, leaveType: e.target.value }))}>
+              <option value="vacation">Vacation</option>
+              <option value="sick">Sick</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Action</label>
+            <select value={form.action} onChange={e => setForm(f => ({ ...f, action: e.target.value }))}>
+              <option value="accrual">Accrual (+)</option>
+              <option value="used">Used (-)</option>
+              <option value="adjustment">Adjustment (+/-)</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
+            <input type="number" step="0.01" style={{ width: 90 }} value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} />
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Note</label>
+            <input style={{ width: '100%' }} placeholder="Opening balance, payroll accrual, vacation used..." value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
+          </div>
+          <button onClick={addEntry} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add record</button>
+        </div>
+        {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8 }}>{error}</div>}
+      </Card>
+
+      <Card style={{ marginBottom: 18 }}>
+        <div style={{ fontWeight: 600, marginBottom: 10 }}>Current balances</div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+              <th style={{ padding: '6px 4px' }}>Employee</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Vacation balance</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Sick balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {employees.filter(e => e.active !== false).map(emp => (
+              <tr key={emp.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px', fontWeight: 600 }}>{emp.name}</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{balanceFor(emp.id, 'vacation').toFixed(2)} hrs</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{balanceFor(emp.id, 'sick').toFixed(2)} hrs</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10, alignItems: 'center' }}>
+          <div style={{ fontWeight: 600 }}>Leave history</div>
+          <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}>
+            <option value="">All employees</option>
+            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
+              <th style={{ padding: '5px 4px' }}>Date</th>
+              <th style={{ padding: '5px 4px' }}>Employee</th>
+              <th style={{ padding: '5px 4px' }}>Type</th>
+              <th style={{ padding: '5px 4px' }}>Action</th>
+              <th style={{ padding: '5px 4px', textAlign: 'right' }}>Hours</th>
+              <th style={{ padding: '5px 4px' }}>Note</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(e => {
+              const emp = employees.find(x => x.id === e.employeeId);
+              const signed = signedHours(e);
+              return (
+                <tr key={e.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                  <td style={{ padding: '5px 4px' }}>{e.date}</td>
+                  <td style={{ padding: '5px 4px' }}>{emp?.name || '(deleted employee)'}</td>
+                  <td style={{ padding: '5px 4px' }}>{e.leaveType === 'vacation' ? 'Vacation' : 'Sick'}</td>
+                  <td style={{ padding: '5px 4px' }}>{e.action}</td>
+                  <td style={{ padding: '5px 4px', textAlign: 'right', fontWeight: 600 }}>{signed > 0 ? '+' : ''}{signed.toFixed(2)}</td>
+                  <td style={{ padding: '5px 4px' }}>{e.note || '—'}</td>
+                  <td style={{ padding: '5px 4px' }}><button onClick={() => deleteEntry(e.id)} style={iconBtn}><Trash2 size={13} /></button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && <div style={{ padding: 10, color: '#6B7280', fontSize: 13 }}>No leave records yet.</div>}
+      </Card>
+    </div>
+  );
+}
+
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -5320,10 +5648,12 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setSubTab('runs')} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 14, background: subTab === 'runs' ? '#17365D' : '#fff', color: subTab === 'runs' ? '#fff' : '#1F2933' }}>Payroll Runs</button>
           <button onClick={() => setSubTab('employees')} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 14, background: subTab === 'employees' ? '#17365D' : '#fff', color: subTab === 'employees' ? '#fff' : '#1F2933' }}>Employees</button>
+          <button onClick={() => setSubTab('leave')} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E5E9', cursor: 'pointer', fontSize: 14, background: subTab === 'leave' ? '#17365D' : '#fff', color: subTab === 'leave' ? '#fff' : '#1F2933' }}>Vacation & Sick Leave</button>
         </div>
       </div>
 
       {subTab === 'employees' && <EmployeesTab employees={employees} setEmployees={setEmployees} />}
+      {subTab === 'leave' && <LeaveTrackingView employees={employees} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries} />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines}
           employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={postPayrollToJournal} />
@@ -5542,6 +5872,7 @@ function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, se
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
   const [payStubLineId, setPayStubLineId] = useState(null);
+  const [checkLineId, setCheckLineId] = useState(null);
   const [editingRunDates, setEditingRunDates] = useState(false);
   const [runDateDraft, setRunDateDraft] = useState({ periodStart: '', periodEnd: '', payDate: '' });
   const [runDateError, setRunDateError] = useState('');
@@ -5772,6 +6103,7 @@ function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, se
                   <td style={{ padding: '4px', display: 'flex', gap: 4 }}>
                     <button onClick={() => recalcFica(l.id)} style={iconBtn} title="Recalculate FICA, PR Tax & SINOT">↻ FICA/PR/SINOT</button>
                     <button onClick={() => setPayStubLineId(l.id)} style={iconBtn}>Pay Stub</button>
+                    <button onClick={() => setCheckLineId(l.id)} style={iconBtn}>Print Check</button>
                     <button onClick={() => removeLine(l.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -5796,6 +6128,21 @@ function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, se
         <PayStubModal line={linesForRun.find(l => l.id === payStubLineId)} run={run} employees={employees}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPayStubLineId(null)} />
       )}
+      {checkLineId && (() => {
+        const line = linesForRun.find(l => l.id === checkLineId);
+        const emp = employees.find(e => e.id === line?.employeeId);
+        if (!line) return null;
+        return (
+          <CheckPrintModal
+            businessName={businessName}
+            payee={emp?.name || 'Employee'}
+            defaultDate={run.payDate}
+            amount={lineNet(line)}
+            memo={`Payroll ${run.periodStart} to ${run.periodEnd}`}
+            onClose={() => setCheckLineId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
