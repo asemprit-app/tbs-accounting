@@ -4263,13 +4263,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         byClient[inv.client] = byClient[inv.client] || { Current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
         byClient[inv.client][bucket] += bal;
       });
-      const rows = Object.keys(byClient).sort().map(client => [
-        client,
-        ...buckets.map(b => byClient[client][b] || 0),
-      ]);
+      const rows = Object.keys(byClient).sort().map(client => {
+        const bucketValues = buckets.map(b => byClient[client][b] || 0);
+        return [client, ...bucketValues, bucketValues.reduce((s, v) => s + v, 0)];
+      });
       const totals = buckets.map(b => Object.values(byClient).reduce((s, row) => s + (row[b] || 0), 0));
-      if (rows.length) rows.push(['Total', ...totals]);
-      return { title: `A/R Aging — as of ${to}`, header: ['Customer', ...buckets], rows };
+      const grandTotal = totals.reduce((s, v) => s + v, 0);
+      if (rows.length) rows.push(['Total', ...totals, grandTotal]);
+      return { title: `A/R Aging — as of ${to}`, header: ['Customer', ...buckets, 'Total'], rows };
     }
     if (key === 'trial_balance') {
       const trialRows = accounts.map(a => {
@@ -4752,20 +4753,26 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
                 <thead><tr style={{ textAlign: 'right', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ textAlign: 'left', padding: '4px' }}>Customer</th>
                   {buckets.map(b => <th key={b} style={{ padding: '4px' }}>{b}</th>)}
+                  <th style={{ padding: '4px' }}>Total</th>
                 </tr></thead>
                 <tbody>
-                  {clients.map(c => (
+                  {clients.map(c => {
+                    const clientTotal = buckets.reduce((s, b) => s + (byClient[c][b] || 0), 0);
+                    return (
                     <tr key={c} style={{ borderBottom: '1px solid #F0F1F3' }}>
                       <td style={{ padding: '4px', textAlign: 'left' }}>{c}</td>
                       {buckets.map(b => <td key={b} style={{ padding: '4px', textAlign: 'right' }}>{byClient[c][b] ? money(byClient[c][b]) : '—'}</td>)}
+                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 600 }}>{money(clientTotal)}</td>
                     </tr>
-                  ))}
-                  {clients.length === 0 && <tr><td colSpan={6} style={{ padding: 8, color: '#6B7280' }}>No open invoices.</td></tr>}
+                    );
+                  })}
+                  {clients.length === 0 && <tr><td colSpan={7} style={{ padding: 8, color: '#6B7280' }}>No open invoices.</td></tr>}
                 </tbody>
                 {clients.length > 0 && (
                   <tfoot><tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                     <td style={{ padding: '4px' }}>Total</td>
                     {buckets.map(b => <td key={b} style={{ padding: '4px', textAlign: 'right' }}>{money(totals[b])}</td>)}
+                    <td style={{ padding: '4px', textAlign: 'right' }}>{money(buckets.reduce((s, b) => s + (totals[b] || 0), 0))}</td>
                   </tr></tfoot>
                 )}
               </table>
@@ -5616,7 +5623,101 @@ function amountToWords(value) {
 function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [checkNumber, setCheckNumber] = useState('');
+  const [templateId, setTemplateId] = useState('standard_top');
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const [scalePct, setScalePct] = useState(100);
   const safeAmount = Number(amount) || 0;
+
+  const CHECK_TEMPLATES = {
+    standard_top: {
+      label: 'Standard Letter — Top Check',
+      pageTop: 0.20,
+      width: 8.00,
+      height: 3.25,
+      padX: 0.34,
+      padY: 0.28,
+      businessFont: 18,
+      payeeFont: 15.5,
+      amountFont: 16,
+      wordsFont: 12.5,
+      memoFont: 11.5,
+      amountWidth: 128,
+      signatureWidth: 250,
+    },
+    office_depot_b7200: {
+      label: 'Office Depot — Form B 7200',
+      pageTop: 0.18,
+      width: 8.00,
+      height: 3.20,
+      padX: 0.30,
+      padY: 0.24,
+      businessFont: 17,
+      payeeFont: 15,
+      amountFont: 15.5,
+      wordsFont: 12,
+      memoFont: 11,
+      amountWidth: 125,
+      signatureWidth: 240,
+    },
+    three_per_page_style2: {
+      label: 'Office Depot — 3-To-A-Page / Style 2',
+      pageTop: 0.12,
+      width: 8.00,
+      height: 3.02,
+      padX: 0.28,
+      padY: 0.20,
+      businessFont: 16,
+      payeeFont: 14.5,
+      amountFont: 15,
+      wordsFont: 11.5,
+      memoFont: 10.5,
+      amountWidth: 122,
+      signatureWidth: 235,
+    },
+    laser_top_voucher: {
+      label: 'Laser Voucher — Check at Top',
+      pageTop: 0.15,
+      width: 8.00,
+      height: 3.35,
+      padX: 0.30,
+      padY: 0.25,
+      businessFont: 17,
+      payeeFont: 15,
+      amountFont: 15.5,
+      wordsFont: 12,
+      memoFont: 11,
+      amountWidth: 128,
+      signatureWidth: 245,
+    },
+    custom: {
+      label: 'Custom / Calibrate',
+      pageTop: 0.20,
+      width: 8.00,
+      height: 3.25,
+      padX: 0.34,
+      padY: 0.28,
+      businessFont: 18,
+      payeeFont: 15.5,
+      amountFont: 16,
+      wordsFont: 12.5,
+      memoFont: 11.5,
+      amountWidth: 128,
+      signatureWidth: 250,
+    },
+  };
+
+  const template = CHECK_TEMPLATES[templateId] || CHECK_TEMPLATES.standard_top;
+  const scale = Math.max(80, Math.min(120, Number(scalePct) || 100)) / 100;
+  const pxPerInch = 96;
+  const previewTranslateX = (Number(offsetX) || 0) * pxPerInch;
+  const previewTranslateY = (Number(offsetY) || 0) * pxPerInch;
+
+  function resetCalibration() {
+    setOffsetX(0);
+    setOffsetY(0);
+    setScalePct(100);
+  }
 
   return (
     <div
@@ -5630,9 +5731,9 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       <div
         style={{
           background: '#fff',
-          width: 'min(940px, 96vw)',
-          maxWidth: '96vw',
-          maxHeight: '92vh',
+          width: 'min(980px, 97vw)',
+          maxWidth: '97vw',
+          maxHeight: '94vh',
           overflowY: 'auto',
           overflowX: 'hidden',
           borderRadius: 8,
@@ -5641,109 +5742,143 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
         }}
         id="check-print-area"
       >
-        <div className="print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
-              <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
+        <div className="print-hide" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check template</label>
+                <select value={templateId} onChange={e => { setTemplateId(e.target.value); resetCalibration(); }} style={{ minWidth: 235 }}>
+                  {Object.entries(CHECK_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
+                <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check #</label>
+                <input style={{ width: 100 }} value={checkNumber} onChange={e => setCheckNumber(e.target.value)} placeholder="Optional" />
+              </div>
             </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check #</label>
-              <input style={{ width: 100 }} value={checkNumber} onChange={e => setCheckNumber(e.target.value)} placeholder="Optional" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => window.print()} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
+              <button onClick={onClose} style={iconBtn}><X size={14} /></button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => window.print()} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
-            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+
+          <div style={{ marginTop: 12, background: '#F7F8FA', border: '1px solid #E2E5E9', borderRadius: 6, padding: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>Printer calibration</div>
+            <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 8 }}>
+              Print one test on plain paper first. If the text is shifted on the physical check, adjust only the offsets below. Positive Vertical moves the print down; positive Horizontal moves it right.
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Horizontal offset (in)</label>
+                <input type="number" step="0.01" style={{ width: 105 }} value={offsetX} onChange={e => setOffsetX(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Vertical offset (in)</label>
+                <input type="number" step="0.01" style={{ width: 105 }} value={offsetY} onChange={e => setOffsetY(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Scale %</label>
+                <input type="number" min="80" max="120" step="1" style={{ width: 85 }} value={scalePct} onChange={e => setScalePct(e.target.value)} />
+              </div>
+              <button onClick={resetCalibration} style={iconBtn}>Reset calibration</button>
+            </div>
           </div>
         </div>
 
-        <div
-          id="check-document"
-          style={{
-            border: '1px solid #9CA3AF',
-            width: '100%',
-            maxWidth: '8in',
-            minHeight: '3.25in',
-            margin: '0 auto',
-            padding: '0.28in 0.34in',
-            background: '#fff',
-            fontFamily: 'Georgia, serif',
-            boxSizing: 'border-box',
-            overflow: 'hidden'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, marginBottom: 22, alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{businessName}</div>
-              <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
-            </div>
-            <div style={{ textAlign: 'right', fontSize: 12.5, flexShrink: 0, whiteSpace: 'nowrap' }}>
-              {checkNumber && <div style={{ marginBottom: 6 }}>Check No. <strong>{checkNumber}</strong></div>}
-              <div>Date: <strong>{checkDate}</strong></div>
-            </div>
-          </div>
-
+        <div style={{ overflow: 'hidden', minHeight: 350 }}>
           <div
+            id="check-document"
             style={{
-              display: 'grid',
-              gridTemplateColumns: '100px minmax(0, 1fr) 128px',
-              gap: 10,
-              alignItems: 'end',
-              marginBottom: 20
+              border: '1px solid #9CA3AF',
+              width: `${template.width}in`,
+              maxWidth: '100%',
+              minHeight: `${template.height}in`,
+              margin: '0 auto',
+              padding: `${template.padY}in ${template.padX}in`,
+              background: '#fff',
+              fontFamily: 'Georgia, serif',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+              transformOrigin: 'top left',
+              transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
             }}
           >
-            <div style={{ fontSize: 11.5, lineHeight: 1.05 }}>PAY TO THE<br/>ORDER OF</div>
-            <div
-              style={{
-                borderBottom: '1px solid #111',
-                padding: '4px 6px',
-                fontSize: 15.5,
-                fontWeight: 700,
-                minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {payee}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, marginBottom: 22, alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: template.businessFont, fontWeight: 700, lineHeight: 1.15 }}>{businessName}</div>
+                <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 12.5, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                {checkNumber && <div style={{ marginBottom: 6 }}>Check No. <strong>{checkNumber}</strong></div>}
+                <div>Date: <strong>{checkDate}</strong></div>
+              </div>
             </div>
-            <div
-              style={{
-                border: '1px solid #111',
-                padding: '6px 8px',
-                fontSize: 16,
-                fontWeight: 700,
-                textAlign: 'right',
-                whiteSpace: 'nowrap',
-                boxSizing: 'border-box'
-              }}
-            >
-              {money(safeAmount)}
-            </div>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'end', marginBottom: 28 }}>
             <div
               style={{
-                flex: 1,
-                borderBottom: '1px solid #111',
-                padding: '4px 6px',
-                fontSize: 12.5,
-                minWidth: 0,
-                whiteSpace: 'normal'
+                display: 'grid',
+                gridTemplateColumns: `100px minmax(0, 1fr) ${template.amountWidth}px`,
+                gap: 10,
+                alignItems: 'end',
+                marginBottom: 20
               }}
             >
-              {amountToWords(safeAmount)}
+              <div style={{ fontSize: 11.5, lineHeight: 1.05 }}>PAY TO THE<br/>ORDER OF</div>
+              <div
+                style={{
+                  borderBottom: '1px solid #111',
+                  padding: '4px 6px',
+                  fontSize: template.payeeFont,
+                  fontWeight: 700,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {payee}
+              </div>
+              <div
+                style={{
+                  border: '1px solid #111',
+                  padding: '6px 8px',
+                  fontSize: template.amountFont,
+                  fontWeight: 700,
+                  textAlign: 'right',
+                  whiteSpace: 'nowrap',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {money(safeAmount)}
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 250px', gap: 28, alignItems: 'end', marginTop: 32 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10.5, color: '#6B7280' }}>MEMO</div>
-              <div style={{ borderBottom: '1px solid #111', padding: '5px 0', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{memo}</div>
+            <div style={{ display: 'flex', alignItems: 'end', marginBottom: 28 }}>
+              <div
+                style={{
+                  flex: 1,
+                  borderBottom: '1px solid #111',
+                  padding: '4px 6px',
+                  fontSize: template.wordsFont,
+                  minWidth: 0,
+                  whiteSpace: 'normal'
+                }}
+              >
+                {amountToWords(safeAmount)}
+              </div>
             </div>
-            <div style={{ borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 10.5, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) ${template.signatureWidth}px`, gap: 28, alignItems: 'end', marginTop: 32 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, color: '#6B7280' }}>MEMO</div>
+                <div style={{ borderBottom: '1px solid #111', padding: '5px 0', fontSize: template.memoFont, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{memo}</div>
+              </div>
+              <div style={{ borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 10.5, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
+            </div>
           </div>
         </div>
       </div>
@@ -5751,7 +5886,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       <style>{`
         @page {
           size: Letter portrait;
-          margin: 0.25in;
+          margin: 0;
         }
 
         @media print {
@@ -5759,6 +5894,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             margin: 0 !important;
             padding: 0 !important;
             width: 8.5in !important;
+            height: 11in !important;
             background: #fff !important;
           }
 
@@ -5783,10 +5919,10 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 8in !important;
-            max-width: 8in !important;
-            height: auto !important;
-            max-height: none !important;
+            width: 8.5in !important;
+            max-width: 8.5in !important;
+            height: 11in !important;
+            max-height: 11in !important;
             overflow: visible !important;
             padding: 0 !important;
             margin: 0 !important;
@@ -5802,10 +5938,15 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           }
 
           #check-document {
-            width: 8in !important;
-            max-width: 8in !important;
-            min-height: 3.25in !important;
+            position: absolute !important;
+            left: calc(0.25in + ${Number(offsetX) || 0}in) !important;
+            top: calc(${template.pageTop}in + ${Number(offsetY) || 0}in) !important;
+            width: ${template.width}in !important;
+            max-width: ${template.width}in !important;
+            min-height: ${template.height}in !important;
             margin: 0 !important;
+            transform: scale(${scale}) !important;
+            transform-origin: top left !important;
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
