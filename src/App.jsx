@@ -3979,6 +3979,13 @@ function CustomerStatementModal({ client, invoices, invoiceTotal, invoiceSubtota
   );
 }
 
+function isValidIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 function getPeriodRange(preset, customFrom, customTo) {
   const today = new Date();
   const y = today.getFullYear(), m = today.getMonth();
@@ -3988,7 +3995,10 @@ function getPeriodRange(preset, customFrom, customTo) {
   if (preset === 'this_quarter') { const q = Math.floor(m / 3); return { from: iso(new Date(y, q * 3, 1)), to: iso(new Date(y, q * 3 + 3, 0)) }; }
   if (preset === 'this_year') return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
   if (preset === 'last_year') return { from: iso(new Date(y - 1, 0, 1)), to: iso(new Date(y - 1, 11, 31)) };
-  return { from: customFrom, to: customTo };
+  const fallback = todayStr();
+  const safeFrom = isValidIsoDate(customFrom) ? customFrom : fallback;
+  const safeTo = isValidIsoDate(customTo) ? customTo : safeFrom;
+  return safeFrom <= safeTo ? { from: safeFrom, to: safeTo } : { from: safeTo, to: safeFrom };
 }
 
 function naturalAmount(gl, amount, accounts) {
@@ -4002,9 +4012,28 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
   const [breakdown, setBreakdown] = useState('none');
   const [showExportPreview, setShowExportPreview] = useState(false);
+  // customFrom/customTo are editable drafts. The report only recalculates after
+  // both dates are valid and the user applies the custom period.
   const [customFrom, setCustomFrom] = useState(todayStr());
   const [customTo, setCustomTo] = useState(todayStr());
-  const { from, to } = getPeriodRange(preset, customFrom, customTo);
+  const [appliedCustomFrom, setAppliedCustomFrom] = useState(todayStr());
+  const [appliedCustomTo, setAppliedCustomTo] = useState(todayStr());
+  const [customDateError, setCustomDateError] = useState('');
+  const { from, to } = getPeriodRange(preset, appliedCustomFrom, appliedCustomTo);
+
+  function applyCustomPeriod() {
+    if (!isValidIsoDate(customFrom) || !isValidIsoDate(customTo)) {
+      setCustomDateError('Enter a complete From and To date.');
+      return;
+    }
+    if (customFrom > customTo) {
+      setCustomDateError('From date cannot be after To date.');
+      return;
+    }
+    setAppliedCustomFrom(customFrom);
+    setAppliedCustomTo(customTo);
+    setCustomDateError('');
+  }
 
   // All unified accounting lines: transactions (one category each) + their source bank/card account +
   // manual journal entry lines. A single bank transaction affects TWO accounts: the category it was
@@ -4078,8 +4107,11 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
 
   // ---- Full Cash Flow Statement (approximates the Sales/Purchases/Payroll/Owners grouping used by Wave) ----
   function dayBefore(dateStr) {
-    const d = new Date(dateStr); d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
+    if (!isValidIsoDate(dateStr)) return todayStr();
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() - 1);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   }
   const isPayrollLiability = a => a.type === 'Liability' && /payroll|s&w|fica|sinot|income tax/i.test(a.name);
   const otherLiabilityAccts = liabilityAccts.filter(a => !isPayrollLiability(a));
@@ -4306,6 +4338,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   }
 
   function parseLocalDate(iso) {
+    if (!isValidIsoDate(iso)) {
+      const safe = todayStr().split('-').map(Number);
+      return new Date(safe[0], safe[1] - 1, safe[2]);
+    }
     const [y, m, d] = iso.split('-').map(Number);
     return new Date(y, m - 1, d);
   }
@@ -4441,7 +4477,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   function applyMonthYear(value) {
     if (!value) return;
     const opt = monthYearOptions.find(o => o.value === value);
-    if (opt) { setCustomFrom(opt.first); setCustomTo(opt.last); setPreset('custom'); }
+    if (opt) {
+      setCustomFrom(opt.first);
+      setCustomTo(opt.last);
+      setAppliedCustomFrom(opt.first);
+      setAppliedCustomTo(opt.last);
+      setCustomDateError('');
+      setPreset('custom');
+    }
   }
 
   return (
@@ -4467,13 +4510,25 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           {preset === 'custom' && (
             <>
               <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
-                <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
+                <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setCustomDateError(''); }} /></div>
               <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
-                <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
+                <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setCustomDateError(''); }} /></div>
+              <button
+                type="button"
+                onClick={applyCustomPeriod}
+                style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 13px', cursor: 'pointer' }}>
+                Apply period
+              </button>
             </>
           )}
         </div>
-        <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>Period: {from} to {to}</div>
+        {customDateError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 7 }}>{customDateError}</div>}
+        <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>
+          Applied period: <strong>{from}</strong> to <strong>{to}</strong>
+          {preset === 'custom' && (customFrom !== appliedCustomFrom || customTo !== appliedCustomTo) && (
+            <span style={{ marginLeft: 8, color: '#854F0B' }}>Unsaved date change — click Apply period.</span>
+          )}
+        </div>
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
