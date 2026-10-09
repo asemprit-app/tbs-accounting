@@ -546,7 +546,7 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const [payrollRuns, setPayrollRunsRaw] = useState([]);
   const [payrollLines, setPayrollLinesRaw] = useState([]);
   const [leaveEntries, setLeaveEntriesRaw] = useState([]);
-  const [leaveSettings, setLeaveSettings] = useState({ workedHoursBase: 0, vacationHoursEarned: 0, sickHoursEarned: 0 });
+  const [leaveRules, setLeaveRulesRaw] = useState([]);
   const [businessName, setBusinessName] = useState('');
 
   useEffect(() => {
@@ -622,10 +622,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         supabase.from('products').select('*').eq('client_id', clientId).order('name'),
         supabase.from('services').select('*').eq('client_id', clientId).order('service_date'),
         fetchAllRows('leave_entries', clientId, 'entry_date'),
-        supabase.from('leave_settings').select('*').eq('client_id', clientId).maybeSingle(),
+        fetchAllRows('leave_accrual_rules', clientId, 'effective_from'),
       ]);
-      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod, svc, leave, leaveCfg] = results;
-      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod, svc, leave, leaveCfg].find(x => x.error);
+      const [t, i, c, a, r, j, rec, ds, cl, emp, pr, pl, prod, svc, leave, leaveRuleRows] = results;
+      const firstErr = [t, i, c, a, r, j, rec, ds, emp, pr, pl, prod, svc, leave, leaveRuleRows].find(x => x.error);
       if (firstErr) {
         setLoadError(firstErr.error.message);
       } else {
@@ -688,11 +688,14 @@ async function fetchAllRows(table, clientId, orderCol) {
           hours: Number(row.hours) || 0,
           note: row.note || '',
         })));
-        setLeaveSettings({
-          workedHoursBase: Number(leaveCfg.data?.worked_hours_base) || 0,
-          vacationHoursEarned: Number(leaveCfg.data?.vacation_hours_earned) || 0,
-          sickHoursEarned: Number(leaveCfg.data?.sick_hours_earned) || 0,
-        });
+        setLeaveRulesRaw((leaveRuleRows.data || []).map(row => ({
+          ...row,
+          employeeId: row.employee_id,
+          effectiveFrom: row.effective_from,
+          workedHoursBase: Number(row.worked_hours_base) || 0,
+          vacationHoursEarned: Number(row.vacation_hours_earned) || 0,
+          sickHoursEarned: Number(row.sick_hours_earned) || 0,
+        })));
       }
       setLoaded(true);
     })();
@@ -877,25 +880,21 @@ async function fetchAllRows(table, clientId, orderCol) {
     });
   }, []);
 
-  async function saveLeaveSettings(nextSettings) {
-    const normalized = {
-      workedHoursBase: Math.max(0, Number(nextSettings.workedHoursBase) || 0),
-      vacationHoursEarned: Math.max(0, Number(nextSettings.vacationHoursEarned) || 0),
-      sickHoursEarned: Math.max(0, Number(nextSettings.sickHoursEarned) || 0),
-    };
-    const { error } = await supabase.from('leave_settings').upsert({
-      client_id: clientId,
-      worked_hours_base: normalized.workedHoursBase,
-      vacation_hours_earned: normalized.vacationHoursEarned,
-      sick_hours_earned: normalized.sickHoursEarned,
-    }, { onConflict: 'client_id' });
-    if (error) {
-      alert('Could not save leave accrual rule: ' + error.message);
-      return false;
-    }
-    setLeaveSettings(normalized);
-    return true;
-  }
+  const setLeaveRules = useCallback((updater) => {
+    setLeaveRulesRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const toDb = arr => arr.map(r => ({
+        id: r.id,
+        employee_id: r.employeeId,
+        effective_from: r.effectiveFrom,
+        worked_hours_base: Number(r.workedHoursBase) || 0,
+        vacation_hours_earned: Number(r.vacationHoursEarned) || 0,
+        sick_hours_earned: Number(r.sickHoursEarned) || 0,
+      }));
+      diffSync('leave_accrual_rules', toDb(prev), toDb(next), clientId);
+      return next;
+    });
+  }, []);
 
   const glName = (code) => accounts.find(g => g.code === code)?.name || 'Uncategorized';
 
@@ -989,7 +988,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} businessName={businessName} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries}
-          leaveSettings={leaveSettings} saveLeaveSettings={saveLeaveSettings}
+          leaveRules={leaveRules} setLeaveRules={setLeaveRules}
           businessName={businessName} accounts={accounts}
           journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
           sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
@@ -5571,7 +5570,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   );
 }
 
-function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRuns, payrollLines, leaveSettings, saveLeaveSettings }) {
+function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRuns, payrollLines, leaveRules, setLeaveRules, businessName }) {
   const [form, setForm] = useState({
     employeeId: '',
     date: todayStr(),
@@ -5587,25 +5586,24 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
     sickHours: '',
   });
   const [ruleDraft, setRuleDraft] = useState({
-    workedHoursBase: leaveSettings?.workedHoursBase ?? 0,
-    vacationHoursEarned: leaveSettings?.vacationHoursEarned ?? 0,
-    sickHoursEarned: leaveSettings?.sickHoursEarned ?? 0,
+    employeeId: '',
+    effectiveFrom: todayStr(),
+    workedHoursBase: '',
+    vacationHoursEarned: '',
+    sickHoursEarned: '',
+  });
+  const [historyFilters, setHistoryFilters] = useState({
+    employeeId: '',
+    leaveType: '',
+    dateFrom: '',
+    dateTo: '',
   });
   const [editingEntryId, setEditingEntryId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [savingRule, setSavingRule] = useState(false);
   const [ruleMsg, setRuleMsg] = useState('');
-  const [filterEmployee, setFilterEmployee] = useState('');
   const [error, setError] = useState('');
   const [openingMsg, setOpeningMsg] = useState('');
-
-  useEffect(() => {
-    setRuleDraft({
-      workedHoursBase: leaveSettings?.workedHoursBase ?? 0,
-      vacationHoursEarned: leaveSettings?.vacationHoursEarned ?? 0,
-      sickHoursEarned: leaveSettings?.sickHoursEarned ?? 0,
-    });
-  }, [leaveSettings?.workedHoursBase, leaveSettings?.vacationHoursEarned, leaveSettings?.sickHoursEarned]);
+  const [showBalanceReport, setShowBalanceReport] = useState(false);
 
   const runById = useMemo(() => {
     const map = new Map();
@@ -5626,10 +5624,15 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       + (Number(line.doubleOvertimeHours) || 0);
   }
 
+  function lineDate(line) {
+    const run = runById.get(line.payrollRunId);
+    return run?.payDate || run?.periodEnd || run?.periodStart || '';
+  }
+
   const autoPayrollEntries = useMemo(() => {
     const rows = [];
 
-    // Payroll Vacation/Sick hours reduce balances automatically.
+    // Vacation/Sick used in payroll reduces the balances automatically.
     payrollLines.forEach(line => {
       const run = runById.get(line.payrollRunId);
       if (!run) return;
@@ -5663,78 +5666,81 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       }
     });
 
-    // Accrual by completed blocks of worked hours.
-    const base = Math.max(0, Number(leaveSettings?.workedHoursBase) || 0);
-    const vacEarned = Math.max(0, Number(leaveSettings?.vacationHoursEarned) || 0);
-    const sickEarned = Math.max(0, Number(leaveSettings?.sickHoursEarned) || 0);
+    // Rules are employee-specific and date-effective.
+    // Each rule only sees payroll hours inside its effective interval, so a future rule
+    // never recalculates or changes accruals earned under an earlier rule.
+    const rulesByEmployee = new Map();
+    leaveRules.forEach(rule => {
+      if (!rulesByEmployee.has(rule.employeeId)) rulesByEmployee.set(rule.employeeId, []);
+      rulesByEmployee.get(rule.employeeId).push(rule);
+    });
 
-    if (base > 0 && (vacEarned > 0 || sickEarned > 0)) {
-      const byEmployee = new Map();
-
-      payrollLines.forEach(line => {
-        const run = runById.get(line.payrollRunId);
-        if (!run) return;
-        const worked = workedHoursForLine(line);
-        if (worked <= 0) return;
-        if (!byEmployee.has(line.employeeId)) byEmployee.set(line.employeeId, []);
-        byEmployee.get(line.employeeId).push({ line, run, worked });
-      });
-
-      byEmployee.forEach((items, employeeId) => {
-        items.sort((a, b) => {
-          const ad = a.run.payDate || a.run.periodEnd || '';
-          const bd = b.run.payDate || b.run.periodEnd || '';
+    rulesByEmployee.forEach((employeeRules, employeeId) => {
+      const sortedRules = employeeRules.slice().sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+      const employeeLines = payrollLines
+        .filter(l => l.employeeId === employeeId && workedHoursForLine(l) > 0 && lineDate(l))
+        .slice()
+        .sort((a, b) => {
+          const ad = lineDate(a);
+          const bd = lineDate(b);
           if (ad !== bd) return ad.localeCompare(bd);
-          return String(a.line.id).localeCompare(String(b.line.id));
+          return String(a.id).localeCompare(String(b.id));
+        });
+
+      sortedRules.forEach((rule, ruleIndex) => {
+        const nextEffective = sortedRules[ruleIndex + 1]?.effectiveFrom || null;
+        const base = Math.max(0, Number(rule.workedHoursBase) || 0);
+        const vacEarned = Math.max(0, Number(rule.vacationHoursEarned) || 0);
+        const sickEarned = Math.max(0, Number(rule.sickHoursEarned) || 0);
+        if (base <= 0 || (vacEarned <= 0 && sickEarned <= 0)) return;
+
+        const eligibleLines = employeeLines.filter(line => {
+          const date = lineDate(line);
+          if (date < rule.effectiveFrom) return false;
+          if (nextEffective && date >= nextEffective) return false;
+          return true;
         });
 
         let cumulative = 0;
-        items.forEach(({ line, run, worked }) => {
+        eligibleLines.forEach(line => {
+          const worked = workedHoursForLine(line);
           const beforeBlocks = Math.floor(cumulative / base);
           cumulative += worked;
           const afterBlocks = Math.floor(cumulative / base);
           const newBlocks = afterBlocks - beforeBlocks;
           if (newBlocks <= 0) return;
 
-          const date = run.payDate || run.periodEnd || run.periodStart || todayStr();
-
+          const date = lineDate(line);
           if (vacEarned > 0) {
             rows.push({
-              id: `auto-hours-vac-${line.id}`,
+              id: `rule-vac-${rule.id}-${line.id}`,
               employeeId,
               date,
               leaveType: 'vacation',
               action: 'auto_accrual',
               hours: newBlocks * vacEarned,
-              note: `${newBlocks} completed block${newBlocks === 1 ? '' : 's'} of ${base.toFixed(2)} worked hrs`,
+              note: `${newBlocks} block${newBlocks === 1 ? '' : 's'} × ${base.toFixed(2)} worked hrs — rule effective ${rule.effectiveFrom}`,
               automatic: true,
             });
           }
-
           if (sickEarned > 0) {
             rows.push({
-              id: `auto-hours-sick-${line.id}`,
+              id: `rule-sick-${rule.id}-${line.id}`,
               employeeId,
               date,
               leaveType: 'sick',
               action: 'auto_accrual',
               hours: newBlocks * sickEarned,
-              note: `${newBlocks} completed block${newBlocks === 1 ? '' : 's'} of ${base.toFixed(2)} worked hrs`,
+              note: `${newBlocks} block${newBlocks === 1 ? '' : 's'} × ${base.toFixed(2)} worked hrs — rule effective ${rule.effectiveFrom}`,
               automatic: true,
             });
           }
         });
       });
-    }
+    });
 
     return rows;
-  }, [
-    payrollLines,
-    runById,
-    leaveSettings?.workedHoursBase,
-    leaveSettings?.vacationHoursEarned,
-    leaveSettings?.sickHoursEarned,
-  ]);
+  }, [payrollLines, runById, leaveRules]);
 
   const allLeaveRows = useMemo(() => [...leaveEntries, ...autoPayrollEntries], [leaveEntries, autoPayrollEntries]);
 
@@ -5744,11 +5750,38 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       .reduce((sum, e) => sum + signedHours(e), 0);
   }
 
-  function workedHoursToDate(employeeId) {
+  function workedHoursForRange(employeeId, fromDate, toDate) {
     return payrollLines
-      .filter(l => l.employeeId === employeeId)
-      .reduce((sum, l) => sum + workedHoursForLine(l), 0);
+      .filter(line => {
+        if (line.employeeId !== employeeId) return false;
+        const date = lineDate(line);
+        if (!date) return false;
+        if (fromDate && date < fromDate) return false;
+        if (toDate && date > toDate) return false;
+        return true;
+      })
+      .reduce((sum, line) => sum + workedHoursForLine(line), 0);
   }
+
+  const currentMonth = todayStr().slice(0, 7);
+  const currentYear = todayStr().slice(0, 4);
+  const monthStart = `${currentMonth}-01`;
+  const monthEnd = `${currentMonth}-31`;
+  const yearStart = `${currentYear}-01-01`;
+  const yearEnd = `${currentYear}-12-31`;
+
+  const balanceRows = useMemo(() => {
+    return employees
+      .filter(e => e.active !== false)
+      .map(emp => ({
+        employeeId: emp.id,
+        employeeName: emp.name,
+        workedMonth: workedHoursForRange(emp.id, monthStart, monthEnd),
+        workedYTD: workedHoursForRange(emp.id, yearStart, yearEnd),
+        vacationBalance: balanceFor(emp.id, 'vacation'),
+        sickBalance: balanceFor(emp.id, 'sick'),
+      }));
+  }, [employees, payrollLines, allLeaveRows, monthStart, monthEnd, yearStart, yearEnd]);
 
   function openingEntry(employeeId, leaveType) {
     return leaveEntries.find(e => e.employeeId === employeeId && e.leaveType === leaveType && e.action === 'opening');
@@ -5769,7 +5802,6 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
   function saveOpeningBalances() {
     if (!openingForm.employeeId) { setOpeningMsg('Select an employee.'); return; }
     if (!openingForm.date) { setOpeningMsg('Select the opening balance date.'); return; }
-
     const vac = Math.max(0, Number(openingForm.vacationHours) || 0);
     const sick = Math.max(0, Number(openingForm.sickHours) || 0);
 
@@ -5778,21 +5810,11 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       [['vacation', vac], ['sick', sick]].forEach(([leaveType, hours]) => {
         const existing = next.find(e => e.employeeId === openingForm.employeeId && e.leaveType === leaveType && e.action === 'opening');
         if (existing) {
-          next = next.map(e => e.id === existing.id ? {
-            ...e,
-            date: openingForm.date,
-            hours,
-            note: 'Opening balance',
-          } : e);
+          next = next.map(e => e.id === existing.id ? { ...e, date: openingForm.date, hours, note: 'Opening balance' } : e);
         } else {
           next.push({
-            id: uid(),
-            employeeId: openingForm.employeeId,
-            date: openingForm.date,
-            leaveType,
-            action: 'opening',
-            hours,
-            note: 'Opening balance',
+            id: uid(), employeeId: openingForm.employeeId, date: openingForm.date,
+            leaveType, action: 'opening', hours, note: 'Opening balance',
           });
         }
       });
@@ -5801,21 +5823,42 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
     setOpeningMsg('Opening balances saved.');
   }
 
-  async function saveRule() {
+  function saveEmployeeRule() {
+    if (!ruleDraft.employeeId) { setRuleMsg('Select an employee.'); return; }
+    if (!ruleDraft.effectiveFrom) { setRuleMsg('Select Effective From.'); return; }
+
     const base = Number(ruleDraft.workedHoursBase) || 0;
     const vac = Number(ruleDraft.vacationHoursEarned) || 0;
     const sick = Number(ruleDraft.sickHoursEarned) || 0;
+    if (base <= 0) { setRuleMsg('Worked-hours base must be greater than zero.'); return; }
+    if (vac < 0 || sick < 0) { setRuleMsg('Accrual hours cannot be negative.'); return; }
 
-    if (base <= 0 && (vac > 0 || sick > 0)) {
-      setRuleMsg('Worked-hours base must be greater than zero.');
-      return;
-    }
+    setLeaveRules(prev => {
+      const sameRule = prev.find(r => r.employeeId === ruleDraft.employeeId && r.effectiveFrom === ruleDraft.effectiveFrom);
+      if (sameRule) {
+        return prev.map(r => r.id === sameRule.id ? {
+          ...r,
+          workedHoursBase: base,
+          vacationHoursEarned: vac,
+          sickHoursEarned: sick,
+        } : r);
+      }
+      return [...prev, {
+        id: uid(),
+        employeeId: ruleDraft.employeeId,
+        effectiveFrom: ruleDraft.effectiveFrom,
+        workedHoursBase: base,
+        vacationHoursEarned: vac,
+        sickHoursEarned: sick,
+      }];
+    });
 
-    setSavingRule(true);
-    setRuleMsg('');
-    const ok = await saveLeaveSettings(ruleDraft);
-    setRuleMsg(ok ? 'Worked-hours accrual rule saved.' : 'Could not save the rule.');
-    setSavingRule(false);
+    setRuleMsg('Employee rule saved.');
+  }
+
+  function deleteRule(id) {
+    if (!window.confirm('Delete this accrual rule? Historical accruals will be recalculated using the remaining rules.')) return;
+    setLeaveRules(prev => prev.filter(r => r.id !== id));
   }
 
   function addEntry() {
@@ -5826,13 +5869,8 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
     if (form.action !== 'adjustment' && raw < 0) { setError('For Accrual or Used, enter a positive number of hours.'); return; }
 
     setLeaveEntries(prev => [...prev, {
-      id: uid(),
-      employeeId: form.employeeId,
-      date: form.date,
-      leaveType: form.leaveType,
-      action: form.action,
-      hours: raw,
-      note: form.note.trim(),
+      id: uid(), employeeId: form.employeeId, date: form.date,
+      leaveType: form.leaveType, action: form.action, hours: raw, note: form.note.trim(),
     }]);
     setError('');
     setForm(f => ({ ...f, hours: '', note: '' }));
@@ -5842,12 +5880,8 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
     if (entry.automatic) return;
     setEditingEntryId(entry.id);
     setEditDraft({
-      employeeId: entry.employeeId,
-      date: entry.date,
-      leaveType: entry.leaveType,
-      action: entry.action,
-      hours: String(entry.hours),
-      note: entry.note || '',
+      employeeId: entry.employeeId, date: entry.date, leaveType: entry.leaveType,
+      action: entry.action, hours: String(entry.hours), note: entry.note || '',
     });
   }
 
@@ -5862,13 +5896,9 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
     if (editDraft.hours === '' || Number(editDraft.hours) === 0) return;
 
     setLeaveEntries(prev => prev.map(e => e.id === editingEntryId ? {
-      ...e,
-      employeeId: editDraft.employeeId,
-      date: editDraft.date,
-      leaveType: editDraft.leaveType,
-      action: editDraft.action,
-      hours: Number(editDraft.hours),
-      note: editDraft.note || '',
+      ...e, employeeId: editDraft.employeeId, date: editDraft.date,
+      leaveType: editDraft.leaveType, action: editDraft.action,
+      hours: Number(editDraft.hours), note: editDraft.note || '',
     } : e));
     cancelEditEntry();
   }
@@ -5879,7 +5909,13 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
   }
 
   const rows = allLeaveRows
-    .filter(e => !filterEmployee || e.employeeId === filterEmployee)
+    .filter(e => {
+      if (historyFilters.employeeId && e.employeeId !== historyFilters.employeeId) return false;
+      if (historyFilters.leaveType && e.leaveType !== historyFilters.leaveType) return false;
+      if (historyFilters.dateFrom && e.date < historyFilters.dateFrom) return false;
+      if (historyFilters.dateTo && e.date > historyFilters.dateTo) return false;
+      return true;
+    })
     .slice()
     .sort((a, b) => {
       const dateCmp = (b.date || '').localeCompare(a.date || '');
@@ -5887,45 +5923,85 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       return String(a.id).localeCompare(String(b.id));
     });
 
+  const sortedRules = leaveRules.slice().sort((a, b) => {
+    const empA = employees.find(e => e.id === a.employeeId)?.name || '';
+    const empB = employees.find(e => e.id === b.employeeId)?.name || '';
+    if (empA !== empB) return empA.localeCompare(empB);
+    return b.effectiveFrom.localeCompare(a.effectiveFrom);
+  });
+
   return (
     <div>
       <Card style={{ marginBottom: 18 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Client Accrual Rule by Worked Hours</div>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Employee Accrual Rule by Worked Hours</div>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
-          Example: every 100.00 hours actually worked → accrue 4.00 Vacation hours and 2.00 Sick hours.
-          Worked hours = Regular + Overtime + Double-OT. Vacation, Sick and Holiday hours are excluded.
+          Each employee can have multiple dated rules. A new rule applies only from its Effective From date forward; earlier payroll periods keep the rule that was in effect at that time.
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee</label>
+            <select value={ruleDraft.employeeId} onChange={e => setRuleDraft(r => ({ ...r, employeeId: e.target.value }))}>
+              <option value="">Select employee</option>
+              {employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Effective From</label>
+            <input type="date" value={ruleDraft.effectiveFrom} onChange={e => setRuleDraft(r => ({ ...r, effectiveFrom: e.target.value }))} />
+          </div>
+          <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>For every worked hours</label>
-            <input type="number" min="0" step="0.01" style={{ width: 145 }}
-              value={ruleDraft.workedHoursBase}
+            <input type="number" min="0" step="0.01" style={{ width: 135 }} value={ruleDraft.workedHoursBase}
               onChange={e => setRuleDraft(r => ({ ...r, workedHoursBase: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Vacation hours earned</label>
-            <input type="number" min="0" step="0.01" style={{ width: 145 }}
-              value={ruleDraft.vacationHoursEarned}
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Vacation earned</label>
+            <input type="number" min="0" step="0.01" style={{ width: 120 }} value={ruleDraft.vacationHoursEarned}
               onChange={e => setRuleDraft(r => ({ ...r, vacationHoursEarned: e.target.value }))} />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sick hours earned</label>
-            <input type="number" min="0" step="0.01" style={{ width: 145 }}
-              value={ruleDraft.sickHoursEarned}
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sick earned</label>
+            <input type="number" min="0" step="0.01" style={{ width: 120 }} value={ruleDraft.sickHoursEarned}
               onChange={e => setRuleDraft(r => ({ ...r, sickHoursEarned: e.target.value }))} />
           </div>
-          <button onClick={saveRule} disabled={savingRule}
-            style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: savingRule ? 'default' : 'pointer' }}>
-            {savingRule ? 'Saving…' : 'Save client rule'}
+          <button onClick={saveEmployeeRule}
+            style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+            Save employee rule
           </button>
-          {ruleMsg && <span style={{ fontSize: 12, color: ruleMsg.startsWith('Worked-hours') ? '#0F6E56' : '#B00020' }}>{ruleMsg}</span>}
+          {ruleMsg && <span style={{ fontSize: 12, color: ruleMsg.startsWith('Employee rule saved') ? '#0F6E56' : '#B00020' }}>{ruleMsg}</span>}
         </div>
+
+        {sortedRules.length > 0 && (
+          <div style={{ marginTop: 14, borderTop: '1px solid #E2E5E9', paddingTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Rule history</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead><tr style={{ textAlign: 'left', color: '#6B7280' }}>
+                <th style={{ padding: '4px' }}>Employee</th><th style={{ padding: '4px' }}>Effective From</th>
+                <th style={{ padding: '4px', textAlign: 'right' }}>Worked hrs</th>
+                <th style={{ padding: '4px', textAlign: 'right' }}>Vacation</th>
+                <th style={{ padding: '4px', textAlign: 'right' }}>Sick</th><th></th>
+              </tr></thead>
+              <tbody>
+                {sortedRules.map(rule => (
+                  <tr key={rule.id} style={{ borderTop: '1px solid #F0F1F3' }}>
+                    <td style={{ padding: '4px' }}>{employees.find(e => e.id === rule.employeeId)?.name || '(deleted employee)'}</td>
+                    <td style={{ padding: '4px' }}>{rule.effectiveFrom}</td>
+                    <td style={{ padding: '4px', textAlign: 'right' }}>{Number(rule.workedHoursBase).toFixed(2)}</td>
+                    <td style={{ padding: '4px', textAlign: 'right' }}>{Number(rule.vacationHoursEarned).toFixed(2)}</td>
+                    <td style={{ padding: '4px', textAlign: 'right' }}>{Number(rule.sickHoursEarned).toFixed(2)}</td>
+                    <td style={{ padding: '4px' }}><button onClick={() => deleteRule(rule.id)} style={iconBtn}><Trash2 size={13} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Opening Balances</div>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
-          Enter the employee's existing Vacation and Sick balances before the Engine begins calculating payroll usage and automatic accruals.
+          Enter the employee's existing Vacation and Sick balances before the Engine begins calculating payroll usage and accruals.
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
@@ -5941,14 +6017,12 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Vacation opening balance</label>
-            <input type="number" min="0" step="0.01" style={{ width: 150 }}
-              value={openingForm.vacationHours}
+            <input type="number" min="0" step="0.01" style={{ width: 150 }} value={openingForm.vacationHours}
               onChange={e => setOpeningForm(f => ({ ...f, vacationHours: e.target.value }))} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Sick opening balance</label>
-            <input type="number" min="0" step="0.01" style={{ width: 150 }}
-              value={openingForm.sickHours}
+            <input type="number" min="0" step="0.01" style={{ width: 150 }} value={openingForm.sickHours}
               onChange={e => setOpeningForm(f => ({ ...f, sickHours: e.target.value }))} />
           </div>
           <button onClick={saveOpeningBalances}
@@ -5960,23 +6034,28 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
       </Card>
 
       <Card style={{ marginBottom: 18 }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>Current balances</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <div style={{ fontWeight: 600 }}>Current balances</div>
+          <button onClick={() => setShowBalanceReport(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Leave Balance Report</button>
+        </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
               <th style={{ padding: '6px 4px' }}>Employee</th>
-              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Worked hours</th>
-              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Vacation balance</th>
-              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Sick balance</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Worked Hours This Month</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Worked Hours YTD</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Vacation Balance</th>
+              <th style={{ padding: '6px 4px', textAlign: 'right' }}>Sick Balance</th>
             </tr>
           </thead>
           <tbody>
-            {employees.filter(e => e.active !== false).map(emp => (
-              <tr key={emp.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
-                <td style={{ padding: '6px 4px', fontWeight: 600 }}>{emp.name}</td>
-                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{workedHoursToDate(emp.id).toFixed(2)} hrs</td>
-                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{balanceFor(emp.id, 'vacation').toFixed(2)} hrs</td>
-                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{balanceFor(emp.id, 'sick').toFixed(2)} hrs</td>
+            {balanceRows.map(row => (
+              <tr key={row.employeeId} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                <td style={{ padding: '6px 4px', fontWeight: 600 }}>{row.employeeName}</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{row.workedMonth.toFixed(2)}</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{row.workedYTD.toFixed(2)}</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{row.vacationBalance.toFixed(2)} hrs</td>
+                <td style={{ padding: '6px 4px', textAlign: 'right' }}>{row.sickBalance.toFixed(2)} hrs</td>
               </tr>
             ))}
           </tbody>
@@ -5985,72 +6064,71 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
 
       <Card style={{ marginBottom: 18 }}>
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Manual Transaction</div>
-        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
-          Use this for corrections or leave activity not already captured by Payroll.
-        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee</label>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee</label>
             <select value={form.employeeId} onChange={e => setForm(f => ({ ...f, employeeId: e.target.value }))}>
               <option value="">Select employee</option>
               {employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
-            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Leave type</label>
+            </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Leave type</label>
             <select value={form.leaveType} onChange={e => setForm(f => ({ ...f, leaveType: e.target.value }))}>
-              <option value="vacation">Vacation</option>
-              <option value="sick">Sick</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Action</label>
+              <option value="vacation">Vacation</option><option value="sick">Sick</option>
+            </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Action</label>
             <select value={form.action} onChange={e => setForm(f => ({ ...f, action: e.target.value }))}>
               <option value="accrual">Extra accrual (+)</option>
               <option value="used">Used outside payroll (-)</option>
               <option value="adjustment">Adjustment (+/-)</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
-            <input type="number" step="0.01" style={{ width: 90 }} value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} />
-          </div>
-          <div style={{ flex: 1, minWidth: 180 }}>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Note</label>
-            <input style={{ width: '100%' }} value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
-          </div>
+            </select></div>
+          <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
+            <input type="number" step="0.01" style={{ width: 90 }} value={form.hours} onChange={e => setForm(f => ({ ...f, hours: e.target.value }))} /></div>
+          <div style={{ flex: 1, minWidth: 180 }}><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Note</label>
+            <input style={{ width: '100%' }} value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} /></div>
           <button onClick={addEntry} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add transaction</button>
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 12, marginTop: 8 }}>{error}</div>}
       </Card>
 
       <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10, alignItems: 'center' }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Leave transaction history</div>
+        <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 10 }}>
+          Manual transactions can be edited or deleted. Payroll and automatic accrual rows are recalculated from Payroll and employee rules.
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', background: '#F7F8FA', padding: 10, borderRadius: 6, marginBottom: 10 }}>
           <div>
-            <div style={{ fontWeight: 600 }}>Leave transaction history</div>
-            <div style={{ fontSize: 11.5, color: '#6B7280' }}>
-              Manual transactions can be edited or deleted. Payroll and automatic accrual rows are recalculated from Payroll.
-            </div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Employee</label>
+            <select value={historyFilters.employeeId} onChange={e => setHistoryFilters(f => ({ ...f, employeeId: e.target.value }))}>
+              <option value="">All employees</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
           </div>
-          <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}>
-            <option value="">All employees</option>
-            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Type</label>
+            <select value={historyFilters.leaveType} onChange={e => setHistoryFilters(f => ({ ...f, leaveType: e.target.value }))}>
+              <option value="">All types</option><option value="vacation">Vacation</option><option value="sick">Sick</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>From</label>
+            <input type="date" value={historyFilters.dateFrom} onChange={e => setHistoryFilters(f => ({ ...f, dateFrom: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>To</label>
+            <input type="date" value={historyFilters.dateTo} onChange={e => setHistoryFilters(f => ({ ...f, dateTo: e.target.value }))} />
+          </div>
+          <button onClick={() => setHistoryFilters({ employeeId: '', leaveType: '', dateFrom: '', dateTo: '' })} style={iconBtn}>Clear filters</button>
+          <span style={{ fontSize: 11.5, color: '#6B7280', paddingBottom: 5 }}>{rows.length} transaction{rows.length === 1 ? '' : 's'}</span>
         </div>
 
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-              <th style={{ padding: '5px 4px' }}>Date</th>
-              <th style={{ padding: '5px 4px' }}>Employee</th>
-              <th style={{ padding: '5px 4px' }}>Type</th>
-              <th style={{ padding: '5px 4px' }}>Source</th>
-              <th style={{ padding: '5px 4px', textAlign: 'right' }}>Hours</th>
-              <th style={{ padding: '5px 4px' }}>Note</th>
+              <th style={{ padding: '5px 4px' }}>Date</th><th style={{ padding: '5px 4px' }}>Employee</th>
+              <th style={{ padding: '5px 4px' }}>Type</th><th style={{ padding: '5px 4px' }}>Source</th>
+              <th style={{ padding: '5px 4px', textAlign: 'right' }}>Hours</th><th style={{ padding: '5px 4px' }}>Note</th>
               <th style={{ padding: '5px 4px' }}>Actions</th>
             </tr>
           </thead>
@@ -6062,41 +6140,19 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
                 : e.action === 'auto_accrual' ? 'Auto accrual'
                 : e.action === 'payroll_used' ? 'Payroll'
                 : e.action === 'accrual' ? 'Manual accrual'
-                : e.action === 'used' ? 'Manual used'
-                : 'Adjustment';
-
+                : e.action === 'used' ? 'Manual used' : 'Adjustment';
               const editing = editingEntryId === e.id && !e.automatic;
-
               return (
                 <tr key={e.id} style={{ borderBottom: '1px solid #F0F1F3', background: e.automatic ? '#FAFBFC' : '#fff' }}>
                   {editing ? (
                     <>
                       <td style={{ padding: '5px 4px' }}><input type="date" value={editDraft.date} onChange={ev => setEditDraft(d => ({ ...d, date: ev.target.value }))} /></td>
-                      <td style={{ padding: '5px 4px' }}>
-                        <select value={editDraft.employeeId} onChange={ev => setEditDraft(d => ({ ...d, employeeId: ev.target.value }))}>
-                          {employees.map(empOpt => <option key={empOpt.id} value={empOpt.id}>{empOpt.name}</option>)}
-                        </select>
-                      </td>
-                      <td style={{ padding: '5px 4px' }}>
-                        <select value={editDraft.leaveType} onChange={ev => setEditDraft(d => ({ ...d, leaveType: ev.target.value }))}>
-                          <option value="vacation">Vacation</option>
-                          <option value="sick">Sick</option>
-                        </select>
-                      </td>
-                      <td style={{ padding: '5px 4px' }}>
-                        <select value={editDraft.action} onChange={ev => setEditDraft(d => ({ ...d, action: ev.target.value }))}>
-                          <option value="opening">Opening</option>
-                          <option value="accrual">Manual accrual</option>
-                          <option value="used">Manual used</option>
-                          <option value="adjustment">Adjustment</option>
-                        </select>
-                      </td>
+                      <td style={{ padding: '5px 4px' }}><select value={editDraft.employeeId} onChange={ev => setEditDraft(d => ({ ...d, employeeId: ev.target.value }))}>{employees.map(empOpt => <option key={empOpt.id} value={empOpt.id}>{empOpt.name}</option>)}</select></td>
+                      <td style={{ padding: '5px 4px' }}><select value={editDraft.leaveType} onChange={ev => setEditDraft(d => ({ ...d, leaveType: ev.target.value }))}><option value="vacation">Vacation</option><option value="sick">Sick</option></select></td>
+                      <td style={{ padding: '5px 4px' }}><select value={editDraft.action} onChange={ev => setEditDraft(d => ({ ...d, action: ev.target.value }))}><option value="opening">Opening</option><option value="accrual">Manual accrual</option><option value="used">Manual used</option><option value="adjustment">Adjustment</option></select></td>
                       <td style={{ padding: '5px 4px' }}><input type="number" step="0.01" style={{ width: 85 }} value={editDraft.hours} onChange={ev => setEditDraft(d => ({ ...d, hours: ev.target.value }))} /></td>
                       <td style={{ padding: '5px 4px' }}><input style={{ width: '100%' }} value={editDraft.note} onChange={ev => setEditDraft(d => ({ ...d, note: ev.target.value }))} /></td>
-                      <td style={{ padding: '5px 4px', whiteSpace: 'nowrap' }}>
-                        <button onClick={saveEditEntry} style={iconBtn}>Save</button>
-                        <button onClick={cancelEditEntry} style={iconBtn}>Cancel</button>
-                      </td>
+                      <td style={{ padding: '5px 4px', whiteSpace: 'nowrap' }}><button onClick={saveEditEntry} style={iconBtn}>Save</button><button onClick={cancelEditEntry} style={iconBtn}>Cancel</button></td>
                     </>
                   ) : (
                     <>
@@ -6107,14 +6163,10 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
                       <td style={{ padding: '5px 4px', textAlign: 'right', fontWeight: 600, color: signed < 0 ? '#B00020' : '#0F6E56' }}>{signed > 0 ? '+' : ''}{signed.toFixed(2)}</td>
                       <td style={{ padding: '5px 4px' }}>{e.note || '—'}</td>
                       <td style={{ padding: '5px 4px', whiteSpace: 'nowrap' }}>
-                        {e.automatic ? (
-                          <span style={{ fontSize: 11, color: '#6B7280' }}>Edit in Payroll</span>
-                        ) : (
-                          <>
-                            <button onClick={() => beginEditEntry(e)} style={iconBtn}>Edit</button>
-                            <button onClick={() => deleteEntry(e.id)} style={iconBtn}><Trash2 size={13} /></button>
-                          </>
-                        )}
+                        {e.automatic ? <span style={{ fontSize: 11, color: '#6B7280' }}>Edit source</span> : <>
+                          <button onClick={() => beginEditEntry(e)} style={iconBtn}>Edit</button>
+                          <button onClick={() => deleteEntry(e.id)} style={iconBtn}><Trash2 size={13} /></button>
+                        </>}
                       </td>
                     </>
                   )}
@@ -6123,13 +6175,85 @@ function LeaveTrackingView({ employees, leaveEntries, setLeaveEntries, payrollRu
             })}
           </tbody>
         </table>
-        {rows.length === 0 && <div style={{ padding: 10, color: '#6B7280', fontSize: 13 }}>No leave records yet.</div>}
+        {rows.length === 0 && <div style={{ padding: 10, color: '#6B7280', fontSize: 13 }}>No leave transactions match the selected filters.</div>}
       </Card>
+
+      {showBalanceReport && (
+        <LeaveBalanceReportModal
+          rows={balanceRows}
+          businessName={businessName}
+          asOf={todayStr()}
+          onClose={() => setShowBalanceReport(false)}
+        />
+      )}
     </div>
   );
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveSettings, saveLeaveSettings, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
+function LeaveBalanceReportModal({ rows, businessName, asOf, onClose }) {
+  function exportCSV() {
+    let csv = 'Employee,Worked Hours This Month,Worked Hours YTD,Vacation Balance,Sick Balance\\n';
+    rows.forEach(r => {
+      csv += `"${String(r.employeeName).replace(/"/g, '""')}",${r.workedMonth.toFixed(2)},${r.workedYTD.toFixed(2)},${r.vacationBalance.toFixed(2)},${r.sickBalance.toFixed(2)}\\n`;
+    });
+    const blob = new Blob(['\\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Leave_Balance_Report_${asOf}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 90 }} className="no-print-overlay">
+      <div id="leave-balance-report" style={{ background: '#fff', width: 900, maxWidth: '96vw', maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 28 }}>
+        <div className="print-hide" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Leave Balance Report</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+
+        <div id="leave-balance-report-content">
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+            <div><div style={{ fontWeight: 700, fontSize: 18 }}>{businessName}</div><div style={{ color: '#6B7280', fontSize: 12 }}>Vacation & Sick Leave Balance Report</div></div>
+            <div style={{ textAlign: 'right', fontSize: 12 }}><span style={{ color: '#6B7280' }}>As of </span><strong>{asOf}</strong></div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <thead><tr style={{ background: '#F3F4F6', textAlign: 'left' }}>
+              <th style={{ padding: '7px' }}>Employee</th>
+              <th style={{ padding: '7px', textAlign: 'right' }}>Worked Hours This Month</th>
+              <th style={{ padding: '7px', textAlign: 'right' }}>Worked Hours YTD</th>
+              <th style={{ padding: '7px', textAlign: 'right' }}>Vacation Balance</th>
+              <th style={{ padding: '7px', textAlign: 'right' }}>Sick Balance</th>
+            </tr></thead>
+            <tbody>{rows.map(r => (
+              <tr key={r.employeeId} style={{ borderBottom: '1px solid #E5E7EB' }}>
+                <td style={{ padding: '7px', fontWeight: 600 }}>{r.employeeName}</td>
+                <td style={{ padding: '7px', textAlign: 'right' }}>{r.workedMonth.toFixed(2)}</td>
+                <td style={{ padding: '7px', textAlign: 'right' }}>{r.workedYTD.toFixed(2)}</td>
+                <td style={{ padding: '7px', textAlign: 'right' }}>{r.vacationBalance.toFixed(2)}</td>
+                <td style={{ padding: '7px', textAlign: 'right' }}>{r.sickBalance.toFixed(2)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+      <style>{`@media print {
+        .no-print-overlay { position: static !important; background: none !important; }
+        .print-hide { display: none !important; }
+        body * { visibility: hidden !important; }
+        #leave-balance-report, #leave-balance-report * { visibility: visible !important; }
+        #leave-balance-report { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; overflow: visible !important; padding: 0 !important; }
+      }`}</style>
+    </div>
+  );
+}
+
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveRules, setLeaveRules, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -6213,8 +6337,9 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
         setLeaveEntries={setLeaveEntries}
         payrollRuns={payrollRuns}
         payrollLines={payrollLines}
-        leaveSettings={leaveSettings}
-        saveLeaveSettings={saveLeaveSettings}
+        leaveRules={leaveRules}
+        setLeaveRules={setLeaveRules}
+        businessName={businessName}
       />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines}
