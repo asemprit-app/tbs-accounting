@@ -3999,6 +3999,7 @@ function naturalAmount(gl, amount, accounts) {
 function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
+  const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
   const [breakdown, setBreakdown] = useState('none');
   const [showExportPreview, setShowExportPreview] = useState(false);
   const [customFrom, setCustomFrom] = useState(todayStr());
@@ -4112,7 +4113,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const cfGrossInflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount > 0).reduce((s, p) => s + p.amount, 0);
   const cfGrossOutflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount < 0).reduce((s, p) => s + p.amount, 0);
 
-  const openInvoicesForExport = invoices.filter(i => i.status !== 'Paid').sort((a, b) => a.date.localeCompare(b.date));
+  function invoicePaidAsOf(inv, asOfDate) {
+    const payments = Array.isArray(inv.payments) ? inv.payments : [];
+    if (payments.length > 0) {
+      return payments
+        .filter(p => !p.date || p.date <= asOfDate)
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    }
+    // Legacy invoices may only have an aggregate paid amount without payment dates.
+    return Number(inv.paid) || 0;
+  }
+
+  const openInvoicesForExport = invoices
+    .filter(i => {
+      if (i.date > to) return false;
+      return invoiceTotal(i) - invoicePaidAsOf(i, to) > 0.005;
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   const uncategorizedTransactions = useMemo(() => {
     return transactions
@@ -4126,12 +4143,23 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
     ['pnl', 'P&L (Income Statement)'],
     ['balance_sheet', 'Balance Sheet'],
     ['cash_flow', 'Cash Flow'],
+    ['ar_aging', 'A/R Aging'],
     ['trial_balance', 'Trial Balance'],
     ['ap', 'A/P (Accounts Payable)'],
     ['open_invoices', 'Open Invoices'],
     ['uncategorized', 'Uncategorized Transactions'],
     ['unreconciled', 'Unreconciled Transactions'],
   ];
+
+  function toggleVisibleReport(key) {
+    setVisibleReports(prev => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]);
+  }
+  function selectAllReports() {
+    setVisibleReports(REPORT_OPTIONS.map(([id]) => id));
+  }
+  function clearReportSelection() {
+    setVisibleReports([]);
+  }
 
   function getReportData(key) {
     if (key === 'pnl') {
@@ -4189,6 +4217,28 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       ];
       return { title: `Cash Flow — ${from} to ${to}`, header: ['Code', 'Line', 'Amount'], rows };
     }
+    if (key === 'ar_aging') {
+      const buckets = ['Current', '1-30', '31-60', '61-90', '90+'];
+      const asOfDate = new Date(`${to}T00:00:00`);
+      const byClient = {};
+      openInvoicesForExport.forEach(inv => {
+        const paidAsOf = invoicePaidAsOf(inv, to);
+        const bal = invoiceTotal(inv) - paidAsOf;
+        if (bal <= 0.005) return;
+        const invoiceDate = new Date(`${inv.date}T00:00:00`);
+        const days = Math.max(0, Math.floor((asOfDate - invoiceDate) / 86400000));
+        const bucket = days <= 0 ? 'Current' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+        byClient[inv.client] = byClient[inv.client] || { Current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+        byClient[inv.client][bucket] += bal;
+      });
+      const rows = Object.keys(byClient).sort().map(client => [
+        client,
+        ...buckets.map(b => byClient[client][b] || 0),
+      ]);
+      const totals = buckets.map(b => Object.values(byClient).reduce((s, row) => s + (row[b] || 0), 0));
+      if (rows.length) rows.push(['Total', ...totals]);
+      return { title: `A/R Aging — as of ${to}`, header: ['Customer', ...buckets], rows };
+    }
     if (key === 'trial_balance') {
       const trialRows = accounts.map(a => {
         const bal = balanceAsOf(a.code, to);
@@ -4214,8 +4264,12 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       return { title: `A/P — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
     }
     if (key === 'open_invoices') {
-      const rows = openInvoicesForExport.map(i => [i.number, i.client, i.date, invoiceTotal(i), invoiceTotal(i) - (i.paid || 0), i.status]);
-      return { title: `Open Invoices — as of ${todayStr()}`, header: ['Invoice #', 'Customer', 'Date', 'Total', 'Balance', 'Status'], rows };
+      const rows = openInvoicesForExport.map(i => {
+        const paidAsOf = invoicePaidAsOf(i, to);
+        const balanceAsOf = invoiceTotal(i) - paidAsOf;
+        return [i.number, i.client, i.date, invoiceTotal(i), balanceAsOf, paidAsOf > 0 ? 'Partial' : 'Pending'];
+      });
+      return { title: `Open Invoices — as of ${to}`, header: ['Invoice #', 'Customer', 'Date', 'Total', 'Balance', 'Status'], rows };
     }
     if (key === 'uncategorized') {
       const rows = uncategorizedTransactions.map(t => [
@@ -4241,12 +4295,12 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       Object.values(latestApproved).forEach(r => {
         const verifiedSet = cumulativeVerifiedByGl[r.gl] || new Set();
         transactions.forEach(t => {
-          if (t.sourceGL !== r.gl || t.date > r.periodEnd || verifiedSet.has(t.id)) return;
+          if (t.sourceGL !== r.gl || t.date > r.periodEnd || t.date < from || t.date > to || verifiedSet.has(t.id)) return;
           rows.push([t.date, t.description, t.amount, `${r.gl} — ${accounts.find(a => a.code === r.gl)?.name || ''}`, `Approved through ${r.periodEnd}`]);
         });
       });
       rows.sort((a, b) => a[0].localeCompare(b[0]));
-      return { title: 'Unreconciled Transactions (in already-approved periods)', header: ['Date', 'Description', 'Amount', 'Account', 'Last approved period'], rows };
+      return { title: `Unreconciled Transactions — ${from} to ${to}`, header: ['Date', 'Description', 'Amount', 'Account', 'Last approved period'], rows };
     }
     return { title: '', header: [], rows: [] };
   }
@@ -4374,6 +4428,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const monthYearOptions = useMemo(() => {
     const months = new Set();
     transactions.forEach(t => months.add(t.date.slice(0, 7)));
+    invoices.forEach(inv => months.add(inv.date.slice(0, 7)));
     return Array.from(months).sort().reverse().map(m => {
       const [y, mo] = m.split('-');
       const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -4382,7 +4437,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       const last = `${m}-${String(lastDay).padStart(2, '0')}`;
       return { value: m, label, first, last };
     });
-  }, [transactions]);
+  }, [transactions, invoices]);
   function applyMonthYear(value) {
     if (!value) return;
     const opt = monthYearOptions.find(o => o.value === value);
@@ -4422,9 +4477,33 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       </Card>
 
       <Card style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Reports using selected period</div>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+          The period above applies to every report selected below. Balance Sheet, Trial Balance, A/P and A/R Aging use the ending date <strong>{to}</strong>.
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          {REPORT_OPTIONS.map(([id, label]) => (
+            <label key={id} style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px',
+              border: '1px solid #E2E5E9', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+              background: visibleReports.includes(id) ? '#F0F5FA' : '#fff'
+            }}>
+              <input type="checkbox" checked={visibleReports.includes(id)} onChange={() => toggleVisibleReport(id)} />
+              {label}
+            </label>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+          <button onClick={selectAllReports} style={iconBtn}>Select all</button>
+          <button onClick={clearReportSelection} style={iconBtn}>Clear selection</button>
+          <span style={{ fontSize: 12, color: '#6B7280' }}>{visibleReports.length} report{visibleReports.length === 1 ? '' : 's'} selected</span>
+        </div>
+
+        <div style={{ borderTop: '1px solid #E2E5E9', paddingTop: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Report</label>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Download individual report</label>
             <select value={selectedReport} onChange={e => setSelectedReport(e.target.value)}>
               {REPORT_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
             </select>
@@ -4448,7 +4527,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         )}
       </Card>
 
-      {selectedReport === 'uncategorized' && (
+      {visibleReports.includes('uncategorized') && (
         <Card style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap' }}>
             <div>
@@ -4493,7 +4572,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-        <Card>
+        <Card style={{ display: visibleReports.includes('pnl') ? 'block' : 'none' }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>P&L (Income Statement)</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Sales</div>
           {revenueRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
@@ -4517,7 +4596,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           </div>
         </Card>
 
-        <Card>
+        <Card style={{ display: visibleReports.includes('balance_sheet') ? 'block' : 'none' }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (as of {to})</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Assets</div>
           {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
@@ -4535,7 +4614,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         </Card>
       </div>
 
-      <Card style={{ marginBottom: 20 }}>
+      <Card style={{ marginBottom: 20, display: visibleReports.includes('cash_flow') ? 'block' : 'none' }}>
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Cash Flow</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 14 }}>{from} to {to}</div>
 
@@ -4597,16 +4676,16 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
-        <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/R Aging (Accounts Receivable)</div>
+        <Card style={{ display: visibleReports.includes('ar_aging') ? 'block' : 'none' }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/R Aging (Accounts Receivable) — as of {to}</div>
           {(() => {
             const buckets = ['Current', '1-30', '31-60', '61-90', '90+'];
             const byClient = {};
-            const todayD = new Date(todayStr());
-            invoices.filter(i => i.status !== 'Paid').forEach(inv => {
-              const bal = invoiceTotal(inv) - (inv.paid || 0);
-              if (bal <= 0) return;
-              const days = Math.floor((todayD - new Date(inv.date)) / 86400000);
+            const asOfD = new Date(`${to}T00:00:00`);
+            openInvoicesForExport.forEach(inv => {
+              const bal = invoiceTotal(inv) - invoicePaidAsOf(inv, to);
+              if (bal <= 0.005) return;
+              const days = Math.max(0, Math.floor((asOfD - new Date(`${inv.date}T00:00:00`)) / 86400000));
               const bucket = days <= 0 ? 'Current' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
               byClient[inv.client] = byClient[inv.client] || { Current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
               byClient[inv.client][bucket] += bal;
@@ -4639,20 +4718,20 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           })()}
         </Card>
 
-        <Card>
-          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Accounts Payable)</div>
+        <Card style={{ display: visibleReports.includes('ap') ? 'block' : 'none' }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>A/P (Accounts Payable) — as of {to}</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Current balance of your liability accounts (cards, payroll, and taxes payable)</div>
           {liabilityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={-r.value} gl={r.code} mode="asOf" />)}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Total A/P" value={-totalLiabilities} bold />
           </div>
           <div style={{ fontSize: 12, color: '#6B7280', marginTop: 10 }}>
-            This reflects your liability accounts as they stand today; the system doesn't yet track individual vendor bills.
+            This reflects liability-account balances as of the selected period end; the system doesn't yet track individual vendor bills.
           </div>
         </Card>
       </div>
 
-      <Card style={{ marginBottom: 20 }}>
+      <Card style={{ marginBottom: 20, display: visibleReports.includes('trial_balance') ? 'block' : 'none' }}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Trial Balance</div>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>Every account's balance as of {to}, split into Debit or Credit — the two totals should match.</div>
         {(() => {
@@ -4697,31 +4776,35 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         })()}
       </Card>
 
-      <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>Open Invoices</div>
+      <Card style={{ marginBottom: 20, display: visibleReports.includes('open_invoices') ? 'block' : 'none' }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Open Invoices — as of {to}</div>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px' }}>Invoice</th><th style={{ padding: '6px 4px' }}>Customer</th><th style={{ padding: '6px 4px' }}>Date</th>
             <th style={{ padding: '6px 4px' }}>Total</th><th style={{ padding: '6px 4px' }}>Balance</th><th style={{ padding: '6px 4px' }}>Status</th>
           </tr></thead>
           <tbody>
-            {invoices.filter(i => i.status !== 'Paid').sort((a, b) => a.date.localeCompare(b.date)).map(i => (
+            {openInvoicesForExport.map(i => {
+              const paidAsOf = invoicePaidAsOf(i, to);
+              const balanceAsOf = invoiceTotal(i) - paidAsOf;
+              return (
               <tr key={i.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                 <td style={{ padding: '6px 4px' }}>{i.number}</td>
                 <td style={{ padding: '6px 4px' }}>{i.client}</td>
                 <td style={{ padding: '6px 4px' }}>{i.date}</td>
                 <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(i))}</td>
-                <td style={{ padding: '6px 4px' }}>{money(invoiceTotal(i) - (i.paid || 0))}</td>
-                <td style={{ padding: '6px 4px' }}>{i.status}</td>
+                <td style={{ padding: '6px 4px' }}>{money(balanceAsOf)}</td>
+                <td style={{ padding: '6px 4px' }}>{paidAsOf > 0 ? 'Partial' : 'Pending'}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
-        {invoices.filter(i => i.status !== 'Paid').length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No open invoices.</div>}
+        {openInvoicesForExport.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No open invoices as of this period.</div>}
       </Card>
 
-      <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Unreconciled Transactions</div>
+      <Card style={{ marginBottom: 20, display: visibleReports.includes('unreconciled') ? 'block' : 'none' }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Unreconciled Transactions — {from} to {to}</div>
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
           For each account's most recently approved reconciliation, these are the transactions dated on or before that period that were never checked off — carry these into your next reconciliation.
         </div>
