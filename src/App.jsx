@@ -5623,6 +5623,11 @@ function amountToWords(value) {
 function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [checkNumber, setCheckNumber] = useState('');
+  const [routingNumber, setRoutingNumber] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [micrOrder, setMicrOrder] = useState('routing_account_check');
+  const [micrOffsetY, setMicrOffsetY] = useState(0);
+  const [micrError, setMicrError] = useState('');
   const [templateId, setTemplateId] = useState('standard_top');
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
@@ -5717,6 +5722,50 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
     setOffsetX(0);
     setOffsetY(0);
     setScalePct(100);
+    setMicrOffsetY(0);
+  }
+
+  function digitsOnly(value) {
+    return String(value || '').replace(/\D/g, '');
+  }
+
+  function validateMicrBeforePrint() {
+    const routing = digitsOnly(routingNumber);
+    const account = digitsOnly(bankAccountNumber);
+    const check = digitsOnly(checkNumber);
+
+    if (!routing || routing.length !== 9) {
+      setMicrError('Routing Number must contain exactly 9 digits.');
+      return false;
+    }
+    if (!account) {
+      setMicrError('Enter the bank Account Number.');
+      return false;
+    }
+    if (!check) {
+      setMicrError('Enter the Check Number.');
+      return false;
+    }
+    setMicrError('');
+    return true;
+  }
+
+  function printCheck() {
+    if (!validateMicrBeforePrint()) return;
+    window.print();
+  }
+
+  function micrPreview() {
+    const routing = digitsOnly(routingNumber) || '123456789';
+    const account = digitsOnly(bankAccountNumber) || '0000000000';
+    const check = digitsOnly(checkNumber) || '0001';
+
+    // Unicode MICR-like separators are only a visual preview.
+    // Actual compliance requires a bank-approved E-13B MICR font and magnetic toner/ink.
+    if (micrOrder === 'check_routing_account') {
+      return `⑈${check}⑈   ⑆${routing}⑆   ${account}⑈`;
+    }
+    return `⑆${routing}⑆   ${account}⑈   ${check}`;
   }
 
   return (
@@ -5761,8 +5810,63 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => window.print()} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
+              <button onClick={printCheck} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
               <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>MICR / Bank Information</div>
+            <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 8 }}>
+              These fields print on the MICR line at the bottom of the check. They are used for this print only and are not saved automatically.
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Routing Number</label>
+                <input
+                  inputMode="numeric"
+                  maxLength={9}
+                  style={{ width: 130 }}
+                  value={routingNumber}
+                  onChange={e => { setRoutingNumber(digitsOnly(e.target.value).slice(0, 9)); setMicrError(''); }}
+                  placeholder="9 digits"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Account Number</label>
+                <input
+                  inputMode="numeric"
+                  style={{ width: 165 }}
+                  value={bankAccountNumber}
+                  onChange={e => { setBankAccountNumber(digitsOnly(e.target.value)); setMicrError(''); }}
+                  placeholder="Bank account"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Check Number</label>
+                <input
+                  inputMode="numeric"
+                  style={{ width: 100 }}
+                  value={checkNumber}
+                  onChange={e => { setCheckNumber(digitsOnly(e.target.value)); setMicrError(''); }}
+                  placeholder="Check #"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>MICR Field Order</label>
+                <select value={micrOrder} onChange={e => setMicrOrder(e.target.value)}>
+                  <option value="routing_account_check">Routing → Account → Check</option>
+                  <option value="check_routing_account">Check → Routing → Account</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>MICR Vertical Offset (in)</label>
+                <input type="number" step="0.01" style={{ width: 105 }} value={micrOffsetY} onChange={e => setMicrOffsetY(e.target.value)} />
+              </div>
+            </div>
+            {micrError && <div style={{ color: '#B00020', fontSize: 11.5, marginTop: 7 }}>{micrError}</div>}
+            <div style={{ fontSize: 11, color: '#854F0B', marginTop: 8 }}>
+              Compliance note: the line below is positioned as a MICR band, but production checks require bank-approved E-13B MICR printing, magnetic toner/ink and bank-validated placement.
             </div>
           </div>
 
@@ -5803,6 +5907,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               fontFamily: 'Georgia, serif',
               boxSizing: 'border-box',
               overflow: 'hidden',
+              position: 'relative',
+              paddingBottom: '0.55in',
               transformOrigin: 'top left',
               transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
             }}
@@ -5879,6 +5985,27 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               </div>
               <div style={{ borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 10.5, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
             </div>
+
+            <div
+              id="micr-line"
+              style={{
+                position: 'absolute',
+                left: '0.35in',
+                right: '0.35in',
+                bottom: `calc(0.12in + ${Number(micrOffsetY) || 0}in)`,
+                fontFamily: '"MICR E13B", "MICR Encoding", "E13B", monospace',
+                fontSize: 17,
+                letterSpacing: '0.02in',
+                whiteSpace: 'nowrap',
+                lineHeight: 1,
+                textAlign: 'left',
+                overflow: 'hidden',
+                color: '#111'
+              }}
+              title="MICR preview — verify bank-approved E-13B font/toner before production use"
+            >
+              {micrPreview()}
+            </div>
           </div>
         </div>
       </div>
@@ -5950,6 +6077,11 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+          }
+
+          #micr-line {
+            visibility: visible !important;
+            font-family: "MICR E13B", "MICR Encoding", "E13B", monospace !important;
           }
         }
       `}</style>
