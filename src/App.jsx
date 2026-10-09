@@ -1567,19 +1567,82 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setSplittingId(null);
   }
 
-  function openLink(t) { setLinkingId(t.id); setLinkInvoiceId(''); }
+  function transactionAlreadyLinked(transactionId) {
+    return invoices.some(inv => (inv.payments || []).some(p => p.transactionId === transactionId));
+  }
+
+  function openLink(t) {
+    if (Number(t.amount) <= 0) {
+      alert('Only positive bank deposits can be matched to an open invoice.');
+      return;
+    }
+    if (transactionAlreadyLinked(t.id)) {
+      alert('This bank transaction is already matched to an invoice.');
+      return;
+    }
+    setLinkingId(t.id);
+    setLinkInvoiceId('');
+  }
+
   function confirmLink() {
     const t = transactions.find(x => x.id === linkingId);
     const inv = invoices.find(i => i.id === linkInvoiceId);
     if (!t || !inv) return;
+
+    if (Number(t.amount) <= 0) {
+      alert('Only positive bank deposits can be matched to an open invoice.');
+      return;
+    }
+    if (transactionAlreadyLinked(t.id)) {
+      alert('This bank transaction is already matched to an invoice.');
+      setLinkingId(null);
+      return;
+    }
+
+    const paymentAmount = Number(Number(t.amount).toFixed(2));
+    const outstanding = Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0));
+    if (paymentAmount > outstanding + 0.005) {
+      alert(`This deposit is ${money(paymentAmount)}, but the invoice outstanding balance is only ${money(outstanding)}. Split or adjust the bank transaction before matching it.`);
+      return;
+    }
+
+    const arGL = matchAccountByName('Accounts Receivable', accounts) || '1100';
+    const payment = {
+      id: uid(),
+      date: t.date,
+      amount: paymentAmount,
+      method: 'Bank transaction',
+      sourceGL: t.sourceGL || '',
+      transactionId: t.id,
+      source: 'bank_match',
+    };
+
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
-      const paid = (i.paid || 0) + t.amount;
+      const payments = Array.isArray(i.payments) ? i.payments : [];
+      const paid = Number(((Number(i.paid) || 0) + paymentAmount).toFixed(2));
       const total = invoiceTotal(i);
-      return { ...i, paid, status: paid >= total ? 'Paid' : 'Partial' };
+      return {
+        ...i,
+        payments: [...payments, payment],
+        paid,
+        status: paid >= total - 0.005 ? 'Paid' : 'Partial',
+      };
     }));
-    setTransactions(prev => prev.map(x => x.id === t.id ? { ...x, description: x.description + ` [Vinculado to ${inv.number}]`, status: 'AUTO' } : x));
+
+    setTransactions(prev => prev.map(x => {
+      if (x.id !== t.id) return x;
+      const cleanDescription = x.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim();
+      return {
+        ...x,
+        gl: arGL,
+        status: 'MATCH',
+        description: `${cleanDescription} [Matched to invoice ${inv.number}]`,
+      };
+    }));
+
     setLinkingId(null);
+    setLinkInvoiceId('');
   }
 
   return (
@@ -1847,8 +1910,11 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                     <button title="Confirm" onClick={() => confirmRow(t.id)} style={iconBtn}><Check size={14} /></button>
                   )}
                   <button title="Split across multiple accounts" onClick={() => openSplit(t)} style={iconBtn}>Split</button>
-                  {t.gl === '1100' && (
-                    <button title="Link to a real invoice" onClick={() => openLink(t)} style={iconBtn}>Link to invoice</button>
+                  {Number(t.amount) > 0 && !transactionAlreadyLinked(t.id) && (
+                    <button title="Match this bank deposit to an open invoice" onClick={() => openLink(t)} style={iconBtn}>Match to invoice</button>
+                  )}
+                  {transactionAlreadyLinked(t.id) && (
+                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched</span>
                   )}
                   <button title="Delete" onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -1910,10 +1976,10 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
             <Card style={{ width: 380 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Link to invoice real</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Match bank deposit to open invoice</div>
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
               <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
-                <option value="">Select the invoice</option>
+                <option value="">Select open invoice</option>
                 {(() => {
                   const openInv = invoices.filter(i => i.status !== 'Paid');
                   const byClient = {};
@@ -1930,7 +1996,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               </select>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancel</button>
-                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Apply payment</button>
+                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Match payment</button>
               </div>
             </Card>
           </div>
@@ -2980,7 +3046,32 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     }
 
     const arGL = matchAccountByName('Accounts Receivable', accounts) || '';
-    const transactionId = editingPayment?.transactionId || uid();
+
+    const linkedTransactionIds = new Set(
+      invoices.flatMap(i => (i.payments || []).map(p => p.transactionId).filter(Boolean))
+    );
+
+    let matchedImportedTransaction = null;
+    if (!editingPayment) {
+      const candidates = transactions.filter(t =>
+        !linkedTransactionIds.has(t.id) &&
+        t.date === payDate &&
+        t.sourceGL === paySourceGL &&
+        Number(t.amount) > 0 &&
+        Math.abs(Number(t.amount) - amt) <= 0.005
+      );
+
+      if (candidates.length > 1) {
+        setPayError('Multiple imported bank transactions match this date, amount and account. Use Match to invoice from Transactions so you can select the correct deposit.');
+        return;
+      }
+
+      if (candidates.length === 1) {
+        matchedImportedTransaction = candidates[0];
+      }
+    }
+
+    const transactionId = editingPayment?.transactionId || matchedImportedTransaction?.id || uid();
 
     const payment = {
       id: editingPayment?.id || uid(),
@@ -2989,6 +3080,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
       method: payMethod.trim(),
       sourceGL: paySourceGL,
       transactionId,
+      source: matchedImportedTransaction ? 'bank_match' : (editingPayment?.source || 'invoice_payment'),
     };
 
     const updatedPayments = editingPayment
@@ -3012,18 +3104,31 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     const txRow = {
       id: transactionId,
       date: payDate,
-      description: `Invoice payment — ${inv.number} — ${inv.client} — ${payMethod.trim()}`,
+      description: matchedImportedTransaction
+        ? `${matchedImportedTransaction.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim()} [Matched to invoice ${inv.number}]`
+        : `Invoice payment — ${inv.number} — ${inv.client} — ${payMethod.trim()}`,
       amount: Number(amt.toFixed(2)),
       gl: arGL,
       sourceGL: paySourceGL,
-      status: arGL ? 'AUTO' : 'REVIEW',
+      status: matchedImportedTransaction ? 'MATCH' : (arGL ? 'AUTO' : 'REVIEW'),
     };
 
     setTransactions(prev => {
       const exists = prev.some(t => t.id === transactionId);
-      return exists
-        ? prev.map(t => t.id === transactionId ? { ...t, ...txRow } : t)
-        : [...prev, txRow];
+      if (exists) {
+        return prev.map(t => t.id === transactionId
+          ? {
+              ...t,
+              ...txRow,
+              // Preserve the bank's original description unless this is a newly-created invoice payment.
+              description: matchedImportedTransaction
+                ? txRow.description
+                : (editingPayment?.source === 'bank_match' ? t.description : txRow.description),
+            }
+          : t
+        );
+      }
+      return [...prev, txRow];
     });
 
     setSelectedInvoiceIds(prev => prev.filter(id => id !== inv.id));
@@ -3436,7 +3541,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
                   ))}
                 </select>
                 <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>
-                  This creates the matching receipt in Transactions and keeps Accounts Receivable from being counted as new revenue.
+                  If an imported bank deposit already exists with the same date, amount and account, the Engine will reuse it instead of creating a duplicate transaction.
                 </div>
               </div>
 
