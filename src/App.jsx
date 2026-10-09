@@ -901,10 +901,12 @@ async function fetchAllRows(table, clientId, orderCol) {
   const summary = useMemo(() => {
     const month = todayStr().slice(0, 7);
     const year = todayStr().slice(0, 4);
+    // Revenue is the amount billed before withholding. Withholding reduces the amount due,
+    // not the revenue earned. IVU is excluded from revenue because it is a tax collected.
     const revenueMTD = invoices.filter(i => i.date.slice(0, 7) === month)
-      .reduce((s, i) => s + invoiceTotal(i), 0);
+      .reduce((s, i) => s + invoiceSubtotal(i), 0);
     const invoiceRevenueYTD = invoices.filter(i => i.date.slice(0, 4) === year)
-      .reduce((s, i) => s + invoiceTotal(i), 0);
+      .reduce((s, i) => s + invoiceSubtotal(i), 0);
     const txRevenueYTD = transactions.filter(t => t.date.slice(0, 4) === year).reduce((s, t) => {
       const acct = accounts.find(a => a.code === t.gl);
       return acct?.type === 'Revenue' ? s + Math.abs(t.amount) : s;
@@ -946,7 +948,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
-        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} />}
+        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} />}
         {tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
@@ -980,7 +982,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
@@ -1141,7 +1143,7 @@ function Card({ children, style }) {
   return <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 16, ...style }}>{children}</div>;
 }
 
-function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) {
+function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, invoiceSubtotal }) {
   const cards = [
     { label: 'Bank (net recorded)', value: money(summary.cash) },
     { label: 'Open A/R', value: money(summary.arOpen) },
@@ -1161,10 +1163,10 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal }) 
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
-      map[m].revenue += invoiceTotal(inv);
+      map[m].revenue += invoiceSubtotal(inv);
     });
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceTotal, accounts]);
+  }, [transactions, invoices, invoiceSubtotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
@@ -3889,7 +3891,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, journalEntries, businessName, reconciliations }) {
+function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [breakdown, setBreakdown] = useState('none');
@@ -3943,8 +3945,9 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
   const equityAccts = accounts.filter(a => a.type === 'Equity');
   const cashAccts = assetAccts.filter(a => /banc|bppr|cash|efectivo|caja/i.test(a.name));
 
-  // Invoices issued in the period count as revenue (Service Revenue) in addition to what's manually categorized
-  const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceTotal(inv), 0);
+  // Invoice revenue is the billed service/product amount before withholding.
+  // Withholding affects A/R / amount due, not revenue. IVU is excluded from revenue.
+  const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceSubtotal(inv), 0);
 
   const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
   const totalRevenue = revenueRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
@@ -4230,10 +4233,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
-      map[m].revenue += invoiceTotal(inv);
+      map[m].revenue += invoiceSubtotal(inv);
     });
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceTotal, accounts]);
+  }, [transactions, invoices, invoiceSubtotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
@@ -4651,7 +4654,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, accounts, j
           invoices.forEach(inv => {
             if (mode === 'period' && (inv.date < from || inv.date > to)) return;
             if (mode === 'asOf' && inv.date > to) return;
-            items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceTotal(inv), type: 'Invoice' });
+            items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceSubtotal(inv), type: 'Invoice' });
           });
         } else {
         transactions.forEach(t => {
