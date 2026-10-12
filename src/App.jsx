@@ -901,24 +901,103 @@ async function fetchAllRows(table, clientId, orderCol) {
   const summary = useMemo(() => {
     const month = todayStr().slice(0, 7);
     const year = todayStr().slice(0, 4);
-    // Revenue is the amount billed before withholding. Withholding reduces the amount due,
-    // not the revenue earned. IVU is excluded from revenue because it is a tax collected.
-    const revenueMTD = invoices.filter(i => i.date.slice(0, 7) === month)
-      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
-    const invoiceRevenueYTD = invoices.filter(i => i.date.slice(0, 4) === year)
-      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
-    const txRevenueYTD = transactions.filter(t => t.date.slice(0, 4) === year).reduce((s, t) => {
-      const acct = accounts.find(a => a.code === t.gl);
-      return acct?.type === 'Revenue' ? s + Math.abs(t.amount) : s;
-    }, 0);
-    const salesYTD = invoiceRevenueYTD + txRevenueYTD;
-    const arOpen = invoices.filter(i => i.status !== 'Paid')
-      .reduce((s, i) => s + invoiceTotal(i) - (i.paid || 0), 0);
-    const cash = transactions.reduce((s, t) => s + (t.gl === '1010' ? t.amount : 0), 0);
-    const review = transactions.filter(t => t.status === 'REVIEW').length;
-    return { revenueMTD, salesYTD, arOpen, cash, review };
-  }, [transactions, invoices, accounts]);
 
+    function transactionNaturalAmount(t) {
+      const acct = accounts.find(a => a.code === t.gl);
+      if (!acct) return { revenue: 0, expense: 0 };
+      if (acct.type === 'Revenue') return { revenue: Number(t.amount) || 0, expense: 0 };
+      if (acct.type === 'Expense') return { revenue: 0, expense: -(Number(t.amount) || 0) };
+      return { revenue: 0, expense: 0 };
+    }
+
+    function journalNaturalAmount(je, line) {
+      const acct = accounts.find(a => a.code === line.gl);
+      if (!acct) return { revenue: 0, expense: 0 };
+      const debit = Number(line.debit) || 0;
+      const credit = Number(line.credit) || 0;
+      if (acct.type === 'Revenue') return { revenue: credit - debit, expense: 0 };
+      if (acct.type === 'Expense') return { revenue: 0, expense: debit - credit };
+      return { revenue: 0, expense: 0 };
+    }
+
+    let txRevenueMTD = 0, txExpenseMTD = 0;
+    let txRevenueYTD = 0, txExpenseYTD = 0;
+
+    transactions.forEach(t => {
+      const natural = transactionNaturalAmount(t);
+      if (t.date?.slice(0, 7) === month) {
+        txRevenueMTD += natural.revenue;
+        txExpenseMTD += natural.expense;
+      }
+      if (t.date?.slice(0, 4) === year) {
+        txRevenueYTD += natural.revenue;
+        txExpenseYTD += natural.expense;
+      }
+    });
+
+    let jeRevenueMTD = 0, jeExpenseMTD = 0;
+    let jeRevenueYTD = 0, jeExpenseYTD = 0;
+
+    journalEntries.forEach(je => {
+      (je.lines || []).forEach(line => {
+        if (!line.gl) return;
+        const natural = journalNaturalAmount(je, line);
+        if (je.date?.slice(0, 7) === month) {
+          jeRevenueMTD += natural.revenue;
+          jeExpenseMTD += natural.expense;
+        }
+        if (je.date?.slice(0, 4) === year) {
+          jeRevenueYTD += natural.revenue;
+          jeExpenseYTD += natural.expense;
+        }
+      });
+    });
+
+    // Invoice revenue includes Service/Product lines only.
+    // Reimbursable Expense lines stay in A/R but are excluded from Income.
+    const invoiceRevenueMTD = invoices
+      .filter(i => i.date?.slice(0, 7) === month)
+      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
+    const invoiceRevenueYTD = invoices
+      .filter(i => i.date?.slice(0, 4) === year)
+      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
+
+    const revenueMTD = txRevenueMTD + jeRevenueMTD + invoiceRevenueMTD;
+    const expensesMTD = txExpenseMTD + jeExpenseMTD;
+    const netIncomeMTD = revenueMTD - expensesMTD;
+
+    const salesYTD = txRevenueYTD + jeRevenueYTD + invoiceRevenueYTD;
+    const expensesYTD = txExpenseYTD + jeExpenseYTD;
+    const netIncomeYTD = salesYTD - expensesYTD;
+
+    const arOpen = invoices
+      .filter(i => i.status !== 'Paid')
+      .reduce((s, i) => s + invoiceTotal(i) - (Number(i.paid) || 0), 0);
+
+    // Bank balance uses the transaction source account when available, not only a hard-coded GL.
+    const cash = transactions.reduce((s, t) => {
+      const source = accounts.find(a => a.code === t.sourceGL);
+      if (source?.type === 'Asset' && /banc|bank|bppr|cash|efectivo|caja/i.test(source.name || '')) {
+        return s + (Number(t.amount) || 0);
+      }
+      if (t.gl === '1010') return s + (Number(t.amount) || 0);
+      return s;
+    }, 0);
+
+    const review = transactions.filter(t => t.status === 'REVIEW').length;
+
+    return {
+      revenueMTD,
+      expensesMTD,
+      netIncomeMTD,
+      salesYTD,
+      expensesYTD,
+      netIncomeYTD,
+      arOpen,
+      cash,
+      review,
+    };
+  }, [transactions, invoices, accounts, journalEntries]);
   function invoiceLineAmount(line) {
     return (Number(line.qty) || 0) * (Number(line.rate) || 0);
   }
@@ -973,7 +1052,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
-        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
+        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
         {tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
@@ -1172,30 +1251,55 @@ function Card({ children, style }) {
   return <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 16, ...style }}>{children}</div>;
 }
 
-function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal }) {
+function Dashboard({ summary, transactions, invoices, accounts, journalEntries, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal }) {
   const cards = [
     { label: 'Bank (net recorded)', value: money(summary.cash) },
     { label: 'Open A/R', value: money(summary.arOpen) },
     { label: 'Revenue this month', value: money(summary.revenueMTD) },
+    { label: 'Expenses this month', value: money(summary.expensesMTD) },
+    { label: 'Net Income this month', value: money(summary.netIncomeMTD) },
     { label: 'Total Sales (YTD)', value: money(summary.salesYTD) },
+    { label: 'Net Income (YTD)', value: money(summary.netIncomeYTD) },
     { label: 'Transactions in Review', value: summary.review },
   ];
   const byMonth = useMemo(() => {
     const map = {};
+    const ensure = m => {
+      if (!map[m]) map[m] = { revenue: 0, expense: 0 };
+      return map[m];
+    };
+
     transactions.forEach(t => {
+      if (!t.date) return;
       const m = t.date.slice(0, 7);
-      map[m] = map[m] || { revenue: 0, expense: 0 };
-      const acct = accounts.find(g => g.code === t.gl);
-      if (acct?.type === 'Expense') map[m].expense += Math.abs(t.amount);
-      if (acct?.type === 'Revenue') map[m].revenue += Math.abs(t.amount);
+      const bucket = ensure(m);
+      const acct = accounts.find(a => a.code === t.gl);
+      if (acct?.type === 'Revenue') bucket.revenue += Number(t.amount) || 0;
+      if (acct?.type === 'Expense') bucket.expense += -(Number(t.amount) || 0);
     });
+
+    (journalEntries || []).forEach(je => {
+      if (!je.date) return;
+      const m = je.date.slice(0, 7);
+      const bucket = ensure(m);
+      (je.lines || []).forEach(line => {
+        if (!line.gl) return;
+        const acct = accounts.find(a => a.code === line.gl);
+        const debit = Number(line.debit) || 0;
+        const credit = Number(line.credit) || 0;
+        if (acct?.type === 'Revenue') bucket.revenue += credit - debit;
+        if (acct?.type === 'Expense') bucket.expense += debit - credit;
+      });
+    });
+
     invoices.forEach(inv => {
+      if (!inv.date) return;
       const m = inv.date.slice(0, 7);
-      map[m] = map[m] || { revenue: 0, expense: 0 };
-      map[m].revenue += invoiceRevenueSubtotal(inv);
+      ensure(m).revenue += invoiceRevenueSubtotal(inv);
     });
+
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceRevenueSubtotal, accounts]);
+  }, [transactions, invoices, journalEntries, invoiceRevenueSubtotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
@@ -1209,7 +1313,10 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, in
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px' }}>Dashboard</h2>
+      <h2 style={{ margin: '0 0 6px' }}>Dashboard</h2>
+      <div style={{ fontSize: 12.5, color: '#6B7280', marginBottom: 16 }}>
+        Revenue, Expenses and Net Income use the same accounting logic as the P&amp;L, including Journal Entries and excluding Reimbursable Expense invoice lines from Income.
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
         {cards.map(c => (
           <Card key={c.label}>
@@ -4307,7 +4414,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           ['', 'Gross Profit', grossProfit],
         ] : []),
         ...otherExpenseRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Total Expenses', totalOtherExpense],
+        ['', 'Operating Expenses', totalOtherExpense],
+        ...(totalCogs !== 0 ? [['', 'Total Expenses incl. COGS', totalExpense]] : []),
         ['', 'Net Income', netIncome],
       ];
       return { title: `P&L — ${from} to ${to}`, header: ['Code', 'Account', 'Amount'], rows };
@@ -4748,7 +4856,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           )}
           <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Expenses</div>
           {otherExpenseRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="period" />)}
-          <Row label="Total Expenses" value={totalOtherExpense} bold />
+          <Row label="Operating Expenses" value={totalOtherExpense} bold />
+          {totalCogs !== 0 && <Row label="Total Expenses incl. COGS" value={totalExpense} bold />}
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Net Income" value={netIncome} bold />
           </div>
