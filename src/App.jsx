@@ -904,9 +904,9 @@ async function fetchAllRows(table, clientId, orderCol) {
     // Revenue is the amount billed before withholding. Withholding reduces the amount due,
     // not the revenue earned. IVU is excluded from revenue because it is a tax collected.
     const revenueMTD = invoices.filter(i => i.date.slice(0, 7) === month)
-      .reduce((s, i) => s + invoiceSubtotal(i), 0);
+      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
     const invoiceRevenueYTD = invoices.filter(i => i.date.slice(0, 4) === year)
-      .reduce((s, i) => s + invoiceSubtotal(i), 0);
+      .reduce((s, i) => s + invoiceRevenueSubtotal(i), 0);
     const txRevenueYTD = transactions.filter(t => t.date.slice(0, 4) === year).reduce((s, t) => {
       const acct = accounts.find(a => a.code === t.gl);
       return acct?.type === 'Revenue' ? s + Math.abs(t.amount) : s;
@@ -919,18 +919,43 @@ async function fetchAllRows(table, clientId, orderCol) {
     return { revenueMTD, salesYTD, arOpen, cash, review };
   }, [transactions, invoices, accounts]);
 
+  function invoiceLineAmount(line) {
+    return (Number(line.qty) || 0) * (Number(line.rate) || 0);
+  }
   function invoiceSubtotal(inv) {
-    return inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+    return (inv.lines || []).reduce((s, l) => s + invoiceLineAmount(l), 0);
+  }
+  function invoiceRevenueSubtotal(inv) {
+    return (inv.lines || [])
+      .filter(l => (l.lineType || 'service') !== 'reimbursable')
+      .reduce((s, l) => s + invoiceLineAmount(l), 0);
+  }
+  function invoiceReimbursableSubtotal(inv) {
+    return (inv.lines || [])
+      .filter(l => (l.lineType || 'service') === 'reimbursable')
+      .reduce((s, l) => s + invoiceLineAmount(l), 0);
+  }
+  function invoiceRetentionBase(inv) {
+    return (inv.lines || [])
+      .filter(l => l.applyRetention !== false)
+      .reduce((s, l) => s + invoiceLineAmount(l), 0);
+  }
+  function invoiceIvuBase(inv) {
+    return (inv.lines || [])
+      .filter(l => l.applyIvu !== false)
+      .reduce((s, l) => s + invoiceLineAmount(l), 0);
   }
   function invoiceTotal(inv) {
     const sub = invoiceSubtotal(inv);
+    const retentionBase = invoiceRetentionBase(inv);
+    const ivuBase = invoiceIvuBase(inv);
     let ret = 0;
     if (inv.retention) {
       ret = (inv.retentionMode || 'percent') === 'amount'
         ? (Number(inv.retentionAmount) || 0)
-        : sub * (Number(inv.retentionPct) || 0) / 100;
+        : retentionBase * (Number(inv.retentionPct) || 0) / 100;
     }
-    const ivu = sub * (Number(inv.ivuPct) || 0) / 100;
+    const ivu = ivuBase * (Number(inv.ivuPct) || 0) / 100;
     return sub - ret + ivu;
   }
 
@@ -948,7 +973,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
-        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} />}
+        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
         {tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
@@ -961,6 +986,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'invoices' && (
           <InvoicesView
             invoiceSubtotal={invoiceSubtotal}
+            invoiceRevenueSubtotal={invoiceRevenueSubtotal}
+            invoiceReimbursableSubtotal={invoiceReimbursableSubtotal}
+            invoiceRetentionBase={invoiceRetentionBase}
+            invoiceIvuBase={invoiceIvuBase}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
             transactions={transactions} setTransactions={setTransactions} accounts={accounts}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
@@ -982,7 +1011,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'customers' && (
           <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
         {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
@@ -1143,7 +1172,7 @@ function Card({ children, style }) {
   return <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E2E5E9', padding: 16, ...style }}>{children}</div>;
 }
 
-function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, invoiceSubtotal }) {
+function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal }) {
   const cards = [
     { label: 'Bank (net recorded)', value: money(summary.cash) },
     { label: 'Open A/R', value: money(summary.arOpen) },
@@ -1163,10 +1192,10 @@ function Dashboard({ summary, transactions, invoices, accounts, invoiceTotal, in
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
-      map[m].revenue += invoiceSubtotal(inv);
+      map[m].revenue += invoiceRevenueSubtotal(inv);
     });
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceSubtotal, accounts]);
+  }, [transactions, invoices, invoiceRevenueSubtotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
@@ -2858,7 +2887,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, invoiceTotal, invoiceSubtotal, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
+function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -3136,7 +3165,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   }
 
   function blankInvoice() {
-    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '' }], retention: false, retentionPct: 10, retentionMode: 'percent', retentionAmount: 0, status: 'Pending', paid: 0, payments: [], ivuPct: 0, paymentMethod: '', notes: '' };
+    return { client: '', date: todayStr(), lines: [{ desc: '', qty: 1, rate: '', lineType: 'service', applyRetention: true, applyIvu: true }], retention: false, retentionPct: 10, retentionMode: 'percent', retentionAmount: 0, status: 'Pending', paid: 0, payments: [], ivuPct: 0, paymentMethod: '', notes: '' };
   }
 
   function updateLine(i, field, val) {
@@ -3146,7 +3175,19 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
       return { ...f, lines };
     });
   }
-  function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { desc: '', qty: 1, rate: '' }] })); }
+  function updateLineType(i, lineType) {
+    setForm(f => {
+      const lines = f.lines.slice();
+      lines[i] = {
+        ...lines[i],
+        lineType,
+        applyRetention: lineType === 'reimbursable' ? false : true,
+        applyIvu: lineType === 'reimbursable' ? false : true,
+      };
+      return { ...f, lines };
+    });
+  }
+  function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { desc: '', qty: 1, rate: '', lineType: 'service', applyRetention: true, applyIvu: true }] })); }
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
   function sendInvoiceEmail(inv) {
@@ -3165,8 +3206,8 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   function saveInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
-    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceSubtotal(form)) {
-      setError('Withholding amount cannot exceed the invoice subtotal.');
+    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceRetentionBase(form)) {
+      setError('Withholding amount cannot exceed the withholding-eligible invoice lines.');
       return;
     }
     setError('');
@@ -3181,7 +3222,12 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     setShowForm(false);
   }
   function startEditInvoice(inv) {
-    setForm({ ...inv, lines: inv.lines.map(l => ({ ...l })) });
+    setForm({ ...inv, lines: inv.lines.map(l => ({
+      ...l,
+      lineType: l.lineType || 'service',
+      applyRetention: l.applyRetention !== false,
+      applyIvu: l.applyIvu !== false,
+    })) });
     setEditingId(inv.id);
     setCopiedFromId(null);
     setShowForm(true);
@@ -3192,7 +3238,12 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     setForm({
       client: inv.client || '',
       date: todayStr(),
-      lines: (inv.lines || []).map(l => ({ ...l })),
+      lines: (inv.lines || []).map(l => ({
+        ...l,
+        lineType: l.lineType || 'service',
+        applyRetention: l.applyRetention !== false,
+        applyIvu: l.applyIvu !== false,
+      })),
       retention: !!inv.retention,
       retentionPct: inv.retentionPct ?? 10,
       retentionMode: inv.retentionMode || 'percent',
@@ -3212,8 +3263,8 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   function saveEditedInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
-    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceSubtotal(form)) {
-      setError('Withholding amount cannot exceed the invoice subtotal.');
+    if (form.retention && form.retentionMode === 'amount' && (Number(form.retentionAmount) || 0) > invoiceRetentionBase(form)) {
+      setError('Withholding amount cannot exceed the withholding-eligible invoice lines.');
       return;
     }
     setError('');
@@ -3274,23 +3325,59 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
           </div>
 
           {form.lines.map((l, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <ProductSearchSelect value={l.desc} onChange={v => updateLine(i, 'desc', v)}
-                onPick={p => setForm(f => { const lines = f.lines.slice(); lines[i] = { ...lines[i], desc: p.description ? `${p.name} — ${p.description}` : p.name, rate: p.price }; return { ...f, lines }; })}
-                products={products} />
-              <input type="number" style={{ width: 70 }} placeholder="Qty." value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} />
-              <input type="number" step="0.01" style={{ width: 100 }} placeholder="Price" value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} />
-              <span style={{ width: 90, fontSize: 14, textAlign: 'right' }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
-              <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
+            <div key={i} style={{ border: '1px solid #E2E5E9', borderRadius: 7, padding: 9, marginBottom: 8, background: (l.lineType || 'service') === 'reimbursable' ? '#FFFDF5' : '#fff' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ width: 180 }}>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Line Type</label>
+                  <select value={l.lineType || 'service'} onChange={e => updateLineType(i, e.target.value)} style={{ width: '100%' }}>
+                    <option value="service">Service / Product</option>
+                    <option value="reimbursable">Reimbursable Expense</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Description</label>
+                  <ProductSearchSelect value={l.desc} onChange={v => updateLine(i, 'desc', v)}
+                    onPick={p => setForm(f => { const lines = f.lines.slice(); lines[i] = { ...lines[i], desc: p.description ? `${p.name} — ${p.description}` : p.name, rate: p.price }; return { ...f, lines }; })}
+                    products={products} />
+                </div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Qty.</label>
+                  <input type="number" style={{ width: 65 }} value={l.qty} onChange={e => updateLine(i, 'qty', e.target.value)} /></div>
+                <div><label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Price</label>
+                  <input type="number" step="0.01" style={{ width: 100 }} value={l.rate} onChange={e => updateLine(i, 'rate', e.target.value)} /></div>
+                <span style={{ width: 90, fontSize: 14, textAlign: 'right', fontWeight: 600 }}>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</span>
+                <button onClick={() => removeLine(i)} style={iconBtn}><Trash2 size={14} /></button>
+              </div>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 7, paddingLeft: 2, flexWrap: 'wrap' }}>
+                {(l.lineType || 'service') === 'reimbursable' && <span style={{ fontSize: 11.5, color: '#7A5B00', fontWeight: 600 }}>1150 — Reimbursable Expenses Receivable · excluded from Income</span>}
+                <label style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="checkbox" checked={l.applyRetention !== false} onChange={e => updateLine(i, 'applyRetention', e.target.checked)} /> Subject to withholding
+                </label>
+                <label style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="checkbox" checked={l.applyIvu !== false} onChange={e => updateLine(i, 'applyIvu', e.target.checked)} /> Subject to IVU
+                </label>
+              </div>
             </div>
           ))}
-          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Plus size={13} /> Line</button>
+          <button onClick={addLine} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Plus size={13} /> Line</button>
+
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', padding: '8px 10px', background: '#F7F8FA', borderRadius: 6, marginBottom: 12, fontSize: 12.5 }}>
+            <span>Service/Product Revenue: <strong>{money(invoiceRevenueSubtotal(form))}</strong></span>
+            <span>Reimbursable Expenses: <strong>{money(invoiceReimbursableSubtotal(form))}</strong></span>
+            <span>Invoice Subtotal: <strong>{money(invoiceSubtotal(form))}</strong></span>
+          </div>
+
+          {!accounts.some(a => a.code === '1150' || /reimbursable expenses receivable/i.test(a.name)) && invoiceReimbursableSubtotal(form) > 0 && (
+            <div style={{ background: '#FCEBEB', color: '#791F1F', borderRadius: 6, padding: 8, fontSize: 12, marginBottom: 10 }}>
+              Account 1150 — Reimbursable Expenses Receivable is missing. Run the included Supabase SQL before using reimbursable invoice lines.
+            </div>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={form.retention} onChange={e => setForm(f => ({ ...f, retention: e.target.checked }))} />
               Apply withholding
             </label>
+            {form.retention && <span style={{ fontSize: 11.5, color: '#6B7280' }}>Eligible base: {money(invoiceRetentionBase(form))}</span>}
             {form.retention && (
               <>
                 <select
@@ -3335,6 +3422,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
               <input type="number" step="0.01" style={{ width: 60 }} value={form.ivuPct} onChange={e => setForm(f => ({ ...f, ivuPct: e.target.value }))} />
               %
             </label>
+            {Number(form.ivuPct) > 0 && <span style={{ fontSize: 11.5, color: '#6B7280' }}>IVU base: {money(invoiceIvuBase(form))}</span>}
           </div>
           <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
@@ -3577,13 +3665,17 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
 }
 
 function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone }) {
-  const subtotal = inv.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0);
+  const lineAmount = l => (Number(l.qty) || 0) * (Number(l.rate) || 0);
+  const subtotal = inv.lines.reduce((s, l) => s + lineAmount(l), 0);
+  const reimbursableSubtotal = inv.lines.filter(l => (l.lineType || 'service') === 'reimbursable').reduce((s, l) => s + lineAmount(l), 0);
+  const retentionBase = inv.lines.filter(l => l.applyRetention !== false).reduce((s, l) => s + lineAmount(l), 0);
+  const ivuBase = inv.lines.filter(l => l.applyIvu !== false).reduce((s, l) => s + lineAmount(l), 0);
   const withholding = inv.retention
     ? ((inv.retentionMode || 'percent') === 'amount'
         ? (Number(inv.retentionAmount) || 0)
-        : subtotal * (Number(inv.retentionPct) || 0) / 100)
+        : retentionBase * (Number(inv.retentionPct) || 0) / 100)
     : 0;
-  const ivu = subtotal * (Number(inv.ivuPct) || 0) / 100;
+  const ivu = ivuBase * (Number(inv.ivuPct) || 0) / 100;
   const payments = Array.isArray(inv.payments) ? inv.payments : [];
   const totalPaid = Number(inv.paid) || 0;
   const balanceDue = Math.max(0, total - totalPaid);
@@ -3594,14 +3686,14 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
 
   const t = isEs ? {
     title: 'FACTURA', billTo: 'FACTURAR A', invNumber: 'NÚMERO DE FACTURA', invDate: 'FECHA DE EMISIÓN',
-    items: 'SERVICIO O DESCRIPCIÓN', qty: 'CANT.', price: 'PRECIO', amount: 'IMPORTE',
+    items: 'SERVICIO O DESCRIPCIÓN', qty: 'CANT.', price: 'PRECIO', amount: 'IMPORTE', reimbursement: 'RECOBRO DE GASTO',
     subtotal: 'Subtotal', withholding: 'Retención', ivu: 'IVU', total: 'TOTAL',
     paymentMethod: 'Método de pago', notes: 'Notas',
     payments: 'PAGOS RECIBIDOS', paymentDate: 'Fecha', paymentAmount: 'Cantidad', paymentMethodCol: 'Método', paymentAccount: 'Cuenta',
     amountPaid: 'Total pagado', balanceDue: 'Balance pendiente',
   } : {
     title: 'INVOICE', billTo: 'Bill to', invNumber: 'Invoice Number:', invDate: 'Invoice Date:',
-    items: 'Items', qty: 'Quantity', price: 'Price', amount: 'Amount',
+    items: 'Items', qty: 'Quantity', price: 'Price', amount: 'Amount', reimbursement: 'EXPENSE REIMBURSEMENT',
     subtotal: 'Total:', withholding: 'Withholding', ivu: 'Sales tax', total: 'Invoice total:',
     paymentMethod: 'Payment method', notes: 'Notes',
     payments: 'PAYMENTS RECEIVED', paymentDate: 'Date', paymentAmount: 'Amount', paymentMethodCol: 'Method', paymentAccount: 'Account',
@@ -3706,7 +3798,10 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
           <tbody>
             {inv.lines.map((l, i) => (
               <tr key={i} style={{ borderBottom: '1px solid #EEE' }}>
-                <td style={{ padding: '8px 10px', fontWeight: 600 }}>{l.desc}</td>
+                <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                  <div>{l.desc}</div>
+                  {(l.lineType || 'service') === 'reimbursable' && <div style={{ fontSize: 9.5, fontWeight: 500, color: '#6B7280', marginTop: 2 }}>{t.reimbursement}</div>}
+                </td>
                 {isEs ? (
                   <>
                     <td style={{ padding: '8px 10px', textAlign: 'right' }}>{money(l.rate)}</td>
@@ -3729,6 +3824,11 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #D8DCE1' }}>
               <span style={{ color: '#6B7280' }}>{t.subtotal}</span><span>{money(subtotal)}</span>
             </div>
+            {reimbursableSubtotal > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: 10.5 }}>
+                <span style={{ color: '#6B7280' }}>{t.reimbursement}</span><span>{money(reimbursableSubtotal)}</span>
+              </div>
+            )}
             {inv.retention && (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
                 <span style={{ color: '#6B7280' }}>{t.withholding}{(inv.retentionMode || 'percent') === 'percent' ? ` (${inv.retentionPct}%)` : ''}:</span><span>-{money(withholding)}</span>
@@ -4006,7 +4106,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
@@ -4082,7 +4182,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
 
   // Invoice revenue is the billed service/product amount before withholding.
   // Withholding affects A/R / amount due, not revenue. IVU is excluded from revenue.
-  const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceSubtotal(inv), 0);
+  const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceRevenueSubtotal(inv), 0);
+  const invoiceReimbursableInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceReimbursableSubtotal(inv), 0);
 
   const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
   const totalRevenue = revenueRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
@@ -4198,6 +4299,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       const rows = [
         ...revenueRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ...(invoiceRevenueInPeriod !== 0 ? [['', 'Invoicing (Service Revenue)', invoiceRevenueInPeriod]] : []),
+        ...(invoiceReimbursableInPeriod !== 0 ? [['', 'Reimbursable Expenses (excluded from income)', invoiceReimbursableInPeriod]] : []),
         ['', 'Total Sales', totalRevenue],
         ...(cogsRows.length > 0 ? [
           ...cogsRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
@@ -4429,10 +4531,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
     invoices.forEach(inv => {
       const m = inv.date.slice(0, 7);
       map[m] = map[m] || { revenue: 0, expense: 0 };
-      map[m].revenue += invoiceSubtotal(inv);
+      map[m].revenue += invoiceRevenueSubtotal(inv);
     });
     return Object.entries(map).sort();
-  }, [transactions, invoices, invoiceSubtotal, accounts]);
+  }, [transactions, invoices, invoiceRevenueSubtotal, accounts]);
 
   function downloadCSV() {
     let csv = 'Month,Revenue,Expenses,Net\n';
@@ -4904,7 +5006,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           invoices.forEach(inv => {
             if (mode === 'period' && (inv.date < from || inv.date > to)) return;
             if (mode === 'asOf' && inv.date > to) return;
-            items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceSubtotal(inv), type: 'Invoice' });
+            items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceRevenueSubtotal(inv), type: 'Invoice' });
           });
         } else {
         transactions.forEach(t => {
