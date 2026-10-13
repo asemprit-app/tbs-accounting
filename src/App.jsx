@@ -2296,7 +2296,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                   return clientNames.map(client => (
                     <optgroup key={client} label={client}>
                       {byClient[client].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(i => (
-                        <option key={i.id} value={i.id}>{i.number} — {money(invoiceTotal(i) - (i.paid || 0))} outstanding</option>
+                        <option key={i.id} value={i.id}>
+                          {i.number} — {i.date ? new Date(`${i.date}T00:00:00`).toLocaleDateString('en-US') : 'No date'} — {money(invoiceTotal(i) - (i.paid || 0))} outstanding
+                        </option>
                       ))}
                     </optgroup>
                   ));
