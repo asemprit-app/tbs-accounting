@@ -1391,7 +1391,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [splitLines, setSplitLines] = useState([]);
   const [splitError, setSplitError] = useState('');
   const [linkingId, setLinkingId] = useState(null);
-  const [linkInvoiceId, setLinkInvoiceId] = useState('');
+  const [allocationCustomer, setAllocationCustomer] = useState('');
+  const [invoiceAllocations, setInvoiceAllocations] = useState({});
+  const [allocationError, setAllocationError] = useState('');
   const [editingLinkedPaymentTxId, setEditingLinkedPaymentTxId] = useState(null);
   const [linkedPaymentDraft, setLinkedPaymentDraft] = useState({ date: '', amount: '', method: '', sourceGL: '' });
   const [linkedPaymentError, setLinkedPaymentError] = useState('');
@@ -1742,12 +1744,27 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setSplittingId(null);
   }
 
+  function getTransactionAllocations(transactionId) {
+    const links = [];
+    invoices.forEach(inv => {
+      (inv.payments || []).forEach(payment => {
+        if (payment.transactionId === transactionId) links.push({ inv, payment });
+      });
+    });
+    return links;
+  }
+
   function findLinkedPayment(transactionId) {
-    for (const inv of invoices) {
-      const payment = (inv.payments || []).find(p => p.transactionId === transactionId);
-      if (payment) return { inv, payment };
-    }
-    return null;
+    return getTransactionAllocations(transactionId)[0] || null;
+  }
+
+  function transactionLinkedAmount(transactionId) {
+    return getTransactionAllocations(transactionId)
+      .reduce((s, x) => s + (Number(x.payment.amount) || 0), 0);
+  }
+
+  function transactionRemainingToAllocate(t) {
+    return Math.max(0, Number((Number(t.amount || 0) - transactionLinkedAmount(t.id)).toFixed(2)));
   }
 
   function recalcInvoiceAfterPayments(inv, payments) {
@@ -1762,7 +1779,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }
 
   function transactionAlreadyLinked(transactionId) {
-    return !!findLinkedPayment(transactionId);
+    return getTransactionAllocations(transactionId).length > 0;
   }
 
   function openLinkedPaymentEditor(t) {
@@ -1880,76 +1897,160 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
 
   function openLink(t) {
     if (Number(t.amount) <= 0) {
-      alert('Only positive bank deposits can be matched to an open invoice.');
+      alert('Only positive bank deposits can be allocated to invoices.');
       return;
     }
-    if (transactionAlreadyLinked(t.id)) {
-      alert('This bank transaction is already matched to an invoice.');
+
+    const remaining = transactionRemainingToAllocate(t);
+    if (remaining <= 0.005) {
+      alert('This bank transaction is already fully allocated to invoice payments.');
       return;
     }
+
+    const existingLinks = getTransactionAllocations(t.id);
+    const existingClients = Array.from(new Set(existingLinks.map(x => x.inv.client).filter(Boolean)));
+
+    // Keep one bank deposit within one customer. If part of the deposit is already
+    // allocated, automatically lock the remainder to that same customer.
+    setAllocationCustomer(existingClients.length === 1 ? existingClients[0] : '');
+    setInvoiceAllocations({});
+    setAllocationError('');
     setLinkingId(t.id);
-    setLinkInvoiceId('');
   }
 
-  function confirmLink() {
+  function updateInvoiceAllocation(invoiceId, value) {
+    const clean = value === '' ? '' : Number(value);
+    setInvoiceAllocations(prev => ({ ...prev, [invoiceId]: clean }));
+    setAllocationError('');
+  }
+
+  function autoAllocateOldest(t, customer) {
+    if (!customer) {
+      setAllocationError('Select a customer first.');
+      return;
+    }
+
+    let remaining = transactionRemainingToAllocate(t);
+    const next = {};
+    const eligible = invoices
+      .filter(i => i.client === customer && i.status !== 'Paid')
+      .map(i => ({
+        inv: i,
+        outstanding: Math.max(0, Number((invoiceTotal(i) - (Number(i.paid) || 0)).toFixed(2))),
+      }))
+      .filter(x => x.outstanding > 0.005)
+      .sort((a, b) => (a.inv.date || '').localeCompare(b.inv.date || '') || a.inv.number.localeCompare(b.inv.number, undefined, { numeric: true }));
+
+    eligible.forEach(({ inv, outstanding }) => {
+      if (remaining <= 0.005) return;
+      const apply = Math.min(remaining, outstanding);
+      if (apply > 0.005) {
+        next[inv.id] = Number(apply.toFixed(2));
+        remaining = Number((remaining - apply).toFixed(2));
+      }
+    });
+
+    setInvoiceAllocations(next);
+    if (remaining > 0.005) {
+      setAllocationError(`Open invoices for this customer are ${money(remaining)} short of the available payment. Enter allocations manually or leave the transaction partially unmatched.`);
+    } else {
+      setAllocationError('');
+    }
+  }
+
+  function confirmAllocation() {
     const t = transactions.find(x => x.id === linkingId);
-    const inv = invoices.find(i => i.id === linkInvoiceId);
-    if (!t || !inv) return;
+    if (!t) return;
 
-    if (Number(t.amount) <= 0) {
-      alert('Only positive bank deposits can be matched to an open invoice.');
+    const available = transactionRemainingToAllocate(t);
+    if (available <= 0.005) {
+      setAllocationError('This transaction is already fully allocated.');
       return;
     }
-    if (transactionAlreadyLinked(t.id)) {
-      alert('This bank transaction is already matched to an invoice.');
-      setLinkingId(null);
+    if (!allocationCustomer) {
+      setAllocationError('Select a customer.');
       return;
     }
 
-    const paymentAmount = Number(Number(t.amount).toFixed(2));
-    const outstanding = Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0));
-    if (paymentAmount > outstanding + 0.005) {
-      alert(`This deposit is ${money(paymentAmount)}, but the invoice outstanding balance is only ${money(outstanding)}. Split or adjust the bank transaction before matching it.`);
+    const selected = Object.entries(invoiceAllocations)
+      .map(([invoiceId, raw]) => ({ invoiceId, amount: Number(raw) || 0 }))
+      .filter(x => x.amount > 0.005);
+
+    if (!selected.length) {
+      setAllocationError('Enter an amount to apply to at least one invoice.');
+      return;
+    }
+
+    let totalAllocated = 0;
+    for (const row of selected) {
+      const inv = invoices.find(i => i.id === row.invoiceId);
+      if (!inv || inv.client !== allocationCustomer) {
+        setAllocationError('All allocations must belong to the selected customer.');
+        return;
+      }
+      const outstanding = Math.max(0, invoiceTotal(inv) - (Number(inv.paid) || 0));
+      if (row.amount > outstanding + 0.005) {
+        setAllocationError(`${inv.number} only has ${money(outstanding)} outstanding.`);
+        return;
+      }
+      totalAllocated += row.amount;
+    }
+    totalAllocated = Number(totalAllocated.toFixed(2));
+
+    // For now the allocation must use the full available portion of the bank deposit.
+    // This prevents an unexplained remainder while still allowing already-partially-
+    // allocated transactions to have their remaining amount reassigned.
+    if (Math.abs(totalAllocated - available) > 0.005) {
+      setAllocationError(`Allocate exactly ${money(available)}. Currently allocated: ${money(totalAllocated)}. Remaining: ${money(available - totalAllocated)}.`);
       return;
     }
 
     const arGL = matchAccountByName('Accounts Receivable', accounts) || '1100';
-    const payment = {
-      id: uid(),
-      date: t.date,
-      amount: paymentAmount,
-      method: 'Bank transaction',
-      sourceGL: t.sourceGL || '',
-      transactionId: t.id,
-      source: 'bank_match',
-    };
+    const selectedMap = new Map(selected.map(x => [x.invoiceId, Number(x.amount.toFixed(2))]));
 
-    setInvoices(prev => prev.map(i => {
-      if (i.id !== inv.id) return i;
-      const payments = Array.isArray(i.payments) ? i.payments : [];
-      const paid = Number(((Number(i.paid) || 0) + paymentAmount).toFixed(2));
-      const total = invoiceTotal(i);
-      return {
-        ...i,
-        payments: [...payments, payment],
-        paid,
-        status: paid >= total - 0.005 ? 'Paid' : 'Partial',
+    setInvoices(prev => prev.map(inv => {
+      const amount = selectedMap.get(inv.id);
+      if (!amount) return inv;
+
+      const payments = Array.isArray(inv.payments) ? inv.payments : [];
+      const payment = {
+        id: uid(),
+        date: t.date,
+        amount,
+        method: selected.length > 1 ? 'Bank transaction — allocated payment' : 'Bank transaction',
+        sourceGL: t.sourceGL || '',
+        transactionId: t.id,
+        source: selected.length > 1 ? 'bank_allocation' : 'bank_match',
       };
+      return recalcInvoiceAfterPayments(inv, [...payments, payment]);
     }));
+
+    const existingInvoiceNumbers = getTransactionAllocations(t.id).map(x => x.inv.number);
+    const newInvoiceNumbers = selected
+      .map(x => invoices.find(i => i.id === x.invoiceId)?.number)
+      .filter(Boolean);
+    const allInvoiceNumbers = Array.from(new Set([...existingInvoiceNumbers, ...newInvoiceNumbers]));
 
     setTransactions(prev => prev.map(x => {
       if (x.id !== t.id) return x;
-      const cleanDescription = x.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim();
+      const cleanDescription = (x.description || '')
+        .replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '')
+        .replace(/\s*\[Allocated to invoices [^\]]+\]\s*/gi, '')
+        .trim();
       return {
         ...x,
         gl: arGL,
         status: 'MATCH',
-        description: `${cleanDescription} [Matched to invoice ${inv.number}]`,
+        description: allInvoiceNumbers.length > 1
+          ? `${cleanDescription} [Allocated to invoices ${allInvoiceNumbers.join(', ')}]`
+          : `${cleanDescription} [Matched to invoice ${allInvoiceNumbers[0]}]`,
       };
     }));
 
     setLinkingId(null);
-    setLinkInvoiceId('');
+    setAllocationCustomer('');
+    setInvoiceAllocations({});
+    setAllocationError('');
   }
 
   return (
@@ -2217,11 +2318,15 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                     <button title="Confirm" onClick={() => confirmRow(t.id)} style={iconBtn}><Check size={14} /></button>
                   )}
                   <button title="Split across multiple accounts" onClick={() => openSplit(t)} style={iconBtn}>Split</button>
-                  {Number(t.amount) > 0 && !transactionAlreadyLinked(t.id) && (
-                    <button title="Match this bank deposit to an open invoice" onClick={() => openLink(t)} style={iconBtn}>Match to invoice</button>
+                  {Number(t.amount) > 0 && transactionRemainingToAllocate(t) > 0.005 && (
+                    <button title="Allocate this bank deposit to one or more open invoices" onClick={() => openLink(t)} style={iconBtn}>
+                      {transactionAlreadyLinked(t.id) ? 'Allocate remainder' : 'Allocate payment'}
+                    </button>
                   )}
                   {transactionAlreadyLinked(t.id) && (
-                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched · unapply from Invoice Edit</span>
+                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>
+                      ✓ {getTransactionAllocations(t.id).length} invoice{getTransactionAllocations(t.id).length === 1 ? '' : 's'} matched
+                    </span>
                   )}
                   <button title={transactionAlreadyLinked(t.id) ? 'Delete transaction and linked invoice payment' : 'Delete'} onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -2281,32 +2386,127 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       {linkingId && (() => {
         const t = transactions.find(x => x.id === linkingId);
         if (!t) return null;
+
+        const existingLinks = getTransactionAllocations(t.id);
+        const existingClients = Array.from(new Set(existingLinks.map(x => x.inv.client).filter(Boolean)));
+        const customerLocked = existingClients.length === 1;
+        const available = transactionRemainingToAllocate(t);
+
+        const customerNames = Array.from(new Set(
+          invoices
+            .filter(i => i.status !== 'Paid')
+            .map(i => i.client)
+            .filter(Boolean)
+        )).sort((a, b) => a.localeCompare(b));
+
+        const customerInvoices = allocationCustomer
+          ? invoices
+              .filter(i => i.client === allocationCustomer && i.status !== 'Paid')
+              .map(i => ({
+                ...i,
+                outstanding: Math.max(0, Number((invoiceTotal(i) - (Number(i.paid) || 0)).toFixed(2))),
+              }))
+              .filter(i => i.outstanding > 0.005)
+              .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.number.localeCompare(b.number, undefined, { numeric: true }))
+          : [];
+
+        const allocated = Number(Object.values(invoiceAllocations)
+          .reduce((s, v) => s + (Number(v) || 0), 0)
+          .toFixed(2));
+        const remaining = Number((available - allocated).toFixed(2));
+        const balanced = Math.abs(remaining) <= 0.005 && allocated > 0;
+
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
-            <Card style={{ width: 380 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Match bank deposit to open invoice</div>
-              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>{t.description} — {money(t.amount)}</div>
-              <select style={{ width: '100%', marginBottom: 12 }} value={linkInvoiceId} onChange={e => setLinkInvoiceId(e.target.value)}>
-                <option value="">Select open invoice</option>
-                {(() => {
-                  const openInv = invoices.filter(i => i.status !== 'Paid');
-                  const byClient = {};
-                  openInv.forEach(i => { (byClient[i.client] = byClient[i.client] || []).push(i); });
-                  const clientNames = Object.keys(byClient).sort((a, b) => a.localeCompare(b));
-                  return clientNames.map(client => (
-                    <optgroup key={client} label={client}>
-                      {byClient[client].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })).map(i => (
-                        <option key={i.id} value={i.id}>
-                          {i.number} — {i.date ? new Date(`${i.date}T00:00:00`).toLocaleDateString('en-US') : 'No date'} — {money(invoiceTotal(i) - (i.paid || 0))} outstanding
-                        </option>
-                      ))}
-                    </optgroup>
-                  ));
-                })()}
-              </select>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: 16 }}>
+            <Card style={{ width: 680, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Allocate bank payment to invoices</div>
+              <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 4 }}>{t.description}</div>
+              <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 12 }}>
+                <span>Bank deposit: <strong>{money(t.amount)}</strong></span>
+                {existingLinks.length > 0 && <span>Already allocated: <strong>{money(transactionLinkedAmount(t.id))}</strong></span>}
+                <span>Available to allocate: <strong>{money(available)}</strong></span>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block', marginBottom: 3 }}>Customer</label>
+                <select
+                  style={{ width: '100%' }}
+                  value={allocationCustomer}
+                  disabled={customerLocked}
+                  onChange={e => { setAllocationCustomer(e.target.value); setInvoiceAllocations({}); setAllocationError(''); }}
+                >
+                  <option value="">Select customer</option>
+                  {customerNames.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                {customerLocked && <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>The remaining amount is locked to the same customer as the existing allocation.</div>}
+              </div>
+
+              {allocationCustomer && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>Open invoices</div>
+                    <button type="button" onClick={() => autoAllocateOldest(t, allocationCustomer)} style={iconBtn}>Auto allocate oldest</button>
+                  </div>
+
+                  <div style={{ border: '1px solid #E2E5E9', borderRadius: 7, overflow: 'hidden', marginBottom: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 125px 135px', gap: 8, padding: '7px 9px', background: '#F3F4F6', fontSize: 11.5, fontWeight: 700 }}>
+                      <div>Invoice</div><div>Date</div><div style={{ textAlign: 'right' }}>Outstanding</div><div style={{ textAlign: 'right' }}>Amount to apply</div>
+                    </div>
+                    {customerInvoices.map(inv => {
+                      const raw = invoiceAllocations[inv.id] ?? '';
+                      return (
+                        <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 125px 135px', gap: 8, alignItems: 'center', padding: '8px 9px', borderTop: '1px solid #EEE', fontSize: 12.5 }}>
+                          <div style={{ fontWeight: 600 }}>{inv.number}</div>
+                          <div>{inv.date ? new Date(`${inv.date}T00:00:00`).toLocaleDateString('en-US') : '—'}</div>
+                          <div style={{ textAlign: 'right' }}>{money(inv.outstanding)}</div>
+                          <input
+                            type="number"
+                            min="0"
+                            max={inv.outstanding}
+                            step="0.01"
+                            style={{ width: '100%', textAlign: 'right' }}
+                            value={raw}
+                            placeholder="0.00"
+                            onChange={e => updateInvoiceAllocation(inv.id, e.target.value)}
+                          />
+                        </div>
+                      );
+                    })}
+                    {customerInvoices.length === 0 && <div style={{ padding: 10, color: '#6B7280', fontSize: 12.5 }}>No open invoices for this customer.</div>}
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginBottom: 10 }}>
+                <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 8 }}>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>Available</div>
+                  <div style={{ fontWeight: 700 }}>{money(available)}</div>
+                </div>
+                <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 8 }}>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>Total allocated</div>
+                  <div style={{ fontWeight: 700 }}>{money(allocated)}</div>
+                </div>
+                <div style={{ background: remaining < -0.005 ? '#FCEBEB' : remaining > 0.005 ? '#FFF8E6' : '#EAF3DE', borderRadius: 6, padding: 8 }}>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>Remaining</div>
+                  <div style={{ fontWeight: 700 }}>{money(remaining)}</div>
+                </div>
+              </div>
+
+              {allocationError && <div style={{ color: '#B00020', fontSize: 12.5, marginBottom: 10 }}>{allocationError}</div>}
+
+              <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 12 }}>
+                One bank transaction is preserved. Each selected invoice receives its own payment allocation linked to the same bank transaction.
+              </div>
+
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setLinkingId(null)} style={iconBtn}>Cancel</button>
-                <button onClick={confirmLink} disabled={!linkInvoiceId} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Match payment</button>
+                <button onClick={() => { setLinkingId(null); setAllocationCustomer(''); setInvoiceAllocations({}); setAllocationError(''); }} style={iconBtn}>Cancel</button>
+                <button
+                  onClick={confirmAllocation}
+                  disabled={!balanced}
+                  style={{ background: balanced ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: balanced ? 'pointer' : 'default' }}
+                >
+                  Allocate payment
+                </button>
               </div>
             </Card>
           </div>
@@ -3585,28 +3785,43 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
 
     if (removedInvoicePayments.length > 0) {
       const unappliedTransactionIds = new Set(
-        removedInvoicePayments
-          .map(p => p.transactionId)
-          .filter(Boolean)
+        removedInvoicePayments.map(p => p.transactionId).filter(Boolean)
+      );
+
+      // Build the post-save invoice picture so a payment that was allocated across
+      // several invoices remains MATCHED to the invoices that still use it.
+      const invoicesAfterSave = invoices.map(i =>
+        i.id === editingId ? { ...finalForm, id: editingId, number: i.number } : i
       );
 
       setTransactions(prev => prev.map(t => {
         if (!unappliedTransactionIds.has(t.id)) return t;
 
+        const remainingLinkedInvoices = invoicesAfterSave.filter(inv =>
+          (inv.payments || []).some(p => p.transactionId === t.id)
+        );
+
         let cleanDescription = (t.description || '')
           .replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '')
-          .trim();
-
-        // Payments originally created from the Invoice screen may contain the old
-        // invoice number in their generated description. Keep the transaction, but
-        // make the wording neutral so it can be matched to another invoice.
-        cleanDescription = cleanDescription
+          .replace(/\s*\[Allocated to invoices [^\]]+\]\s*/gi, '')
+          .trim()
           .replace(/^Invoice payment\s*—\s*[^—]+\s*—\s*/i, 'Customer payment — ');
+
+        if (remainingLinkedInvoices.length > 0) {
+          const numbers = Array.from(new Set(remainingLinkedInvoices.map(inv => inv.number)));
+          return {
+            ...t,
+            description: numbers.length > 1
+              ? `${cleanDescription} [Allocated to invoices ${numbers.join(', ')}]`
+              : `${cleanDescription} [Matched to invoice ${numbers[0]}]`,
+            gl: matchAccountByName('Accounts Receivable', accounts) || t.gl || '1100',
+            status: 'MATCH',
+          };
+        }
 
         return {
           ...t,
           description: cleanDescription,
-          // Remove only the invoice/accounting match. Keep date, amount and sourceGL.
           gl: '',
           status: 'REVIEW',
         };
