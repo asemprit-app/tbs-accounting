@@ -158,6 +158,91 @@ async function generatePdfBase64FromElement(elementId, filename) {
   }).output('blob');
   return blobToBase64(blob);
 }
+
+async function generatePdfBase64FromDetachedClone(elementId, filename, widthPx = 720) {
+  const html2pdf = await loadHtml2Pdf();
+  const source = document.getElementById(elementId);
+  if (!source) throw new Error('Nothing to convert to PDF.');
+
+  // html2canvas can sometimes capture a blank document when the source lives
+  // inside a fixed modal / scrolling container. Render a clean detached copy.
+  const host = document.createElement('div');
+  host.setAttribute('data-pdf-render-host', 'true');
+  Object.assign(host.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: `${widthPx}px`,
+    minHeight: '1px',
+    background: '#ffffff',
+    zIndex: '-2147483647',
+    overflow: 'visible',
+    visibility: 'visible',
+    opacity: '1',
+    pointerEvents: 'none',
+    padding: '0',
+    margin: '0',
+  });
+
+  const clone = source.cloneNode(true);
+  clone.removeAttribute('id');
+  Object.assign(clone.style, {
+    width: '100%',
+    maxWidth: 'none',
+    minWidth: '0',
+    height: 'auto',
+    maxHeight: 'none',
+    overflow: 'visible',
+    background: '#ffffff',
+    color: '#1F2933',
+    visibility: 'visible',
+    opacity: '1',
+    boxSizing: 'border-box',
+  });
+
+  // Make every cloned descendant visible regardless of modal/print styling.
+  clone.querySelectorAll('*').forEach(node => {
+    node.style.visibility = 'visible';
+    if (node.classList?.contains('print-hide')) node.style.display = 'none';
+  });
+
+  host.appendChild(clone);
+  document.body.appendChild(host);
+
+  try {
+    // Give the browser one frame to lay out the detached copy before capture.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const rect = clone.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      throw new Error('Statement PDF could not be rendered.');
+    }
+
+    const blob = await html2pdf().from(clone).set({
+      margin: [18, 18, 18, 18],
+      filename: filename || 'document.pdf',
+      pagebreak: { mode: ['css', 'legacy'] },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: widthPx,
+      },
+      jsPDF: { unit: 'pt', format: 'letter', orientation: 'portrait' },
+    }).output('blob');
+
+    if (!blob || blob.size < 500) {
+      throw new Error('Statement PDF was generated empty.');
+    }
+
+    return await blobToBase64(blob);
+  } finally {
+    host.remove();
+  }
+}
 async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, from, replyTo }) {
   const res = await fetch('/api/send-invoice', {
     method: 'POST',
@@ -4903,7 +4988,10 @@ function CustomerStatementModal({ statement, customers, invoices, invoiceTotal, 
     try {
       const safeClient = String(client || 'Customer').replace(/[^a-z0-9_-]+/gi, '_');
       const filename = `Statement_${safeClient}_${from}_to_${to}.pdf`;
-      const pdfBase64 = await generatePdfBase64FromElement('customer-statement-content', filename);
+      const pdfBase64 = await generatePdfBase64FromDetachedClone('customer-statement-content', filename, 720);
+      if (!pdfBase64 || pdfBase64.length < 1000) {
+        throw new Error('The statement PDF was generated empty. Please try again.');
+      }
       const text =
         `Hello ${client},\n\nAttached is your customer statement for ${from} through ${to}.\n` +
         `Balance as of ${to}: ${money(closingBalance)}.\n\n` +
@@ -4944,7 +5032,7 @@ function CustomerStatementModal({ statement, customers, invoices, invoiceTotal, 
           </div>
         </div>
 
-        <div id="customer-statement-content">
+        <div id="customer-statement-content" style={{ background: '#fff', width: '100%', boxSizing: 'border-box', padding: 2 }}>
           <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 16 }}>
