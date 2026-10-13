@@ -243,6 +243,205 @@ async function generatePdfBase64FromDetachedClone(elementId, filename, widthPx =
     host.remove();
   }
 }
+
+async function generateCustomerStatementPdfBase64({
+  businessName,
+  client,
+  customerEmail,
+  from,
+  to,
+  openingBalance,
+  totalCharges,
+  totalPayments,
+  closingBalance,
+  statementRows,
+  legacyUndatedPayments,
+  filename,
+}) {
+  const html2pdf = await loadHtml2Pdf();
+
+  const esc = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+  const fmt = (value) => money(Number(value) || 0);
+
+  const rowsHtml = [
+    ...(Math.abs(Number(openingBalance) || 0) > 0.005 ? [{
+      date: from,
+      type: 'Opening',
+      reference: 'Balance forward',
+      charge: '',
+      payment: '',
+      runningBalance: openingBalance,
+    }] : []),
+    ...(statementRows || []),
+  ].map(r => `
+    <tr>
+      <td>${esc(r.date || '')}</td>
+      <td>${esc(r.type || '')}</td>
+      <td>${esc(r.reference || '')}</td>
+      <td class="num">${r.charge ? esc(fmt(r.charge)) : ''}</td>
+      <td class="num">${r.payment ? esc('-' + fmt(r.payment)) : ''}</td>
+      <td class="num strong">${esc(fmt(r.runningBalance))}</td>
+    </tr>
+  `).join('');
+
+  const host = document.createElement('div');
+  host.setAttribute('data-customer-statement-pdf', 'true');
+  Object.assign(host.style, {
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    width: '720px',
+    minHeight: '900px',
+    background: '#ffffff',
+    zIndex: '1',
+    boxSizing: 'border-box',
+    overflow: 'visible',
+    pointerEvents: 'none',
+  });
+
+  host.innerHTML = `
+    <div style="width:720px;background:#fff;color:#1F2933;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;padding:34px 38px;">
+      <div style="font-family:Georgia,serif;font-size:25px;font-weight:700;color:#14213D;margin-bottom:5px;">
+        ${esc(businessName)}
+      </div>
+      <div style="font-size:15px;color:#5B6472;margin-bottom:14px;">
+        Customer Statement — ${esc(client)}
+      </div>
+      <div style="height:2px;background:#B08D57;margin-bottom:22px;"></div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+        <tr>
+          <td style="width:55%;vertical-align:top;border:0;padding:0;">
+            <div style="font-size:10px;color:#6B7280;font-weight:700;letter-spacing:.4px;">CUSTOMER</div>
+            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(client)}</div>
+            ${customerEmail ? `<div style="font-size:12px;color:#6B7280;margin-top:2px;">${esc(customerEmail)}</div>` : ''}
+          </td>
+          <td style="width:45%;vertical-align:top;text-align:right;border:0;padding:0;">
+            <div style="font-size:10px;color:#6B7280;font-weight:700;letter-spacing:.4px;">STATEMENT PERIOD</div>
+            <div style="font-size:13px;font-weight:700;margin-top:3px;">${esc(from)} to ${esc(to)}</div>
+          </td>
+        </tr>
+      </table>
+
+      <table style="width:100%;border-collapse:separate;border-spacing:6px 0;margin:0 -6px 20px -6px;table-layout:fixed;">
+        <tr>
+          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
+            <div style="font-size:9.5px;color:#6B7280;">Opening Balance</div>
+            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(openingBalance))}</div>
+          </td>
+          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
+            <div style="font-size:9.5px;color:#6B7280;">Charges</div>
+            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(totalCharges))}</div>
+          </td>
+          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
+            <div style="font-size:9.5px;color:#6B7280;">Payments</div>
+            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(totalPayments))}</div>
+          </td>
+          <td style="background:#EAF3DE;border:0;border-radius:5px;padding:10px;">
+            <div style="font-size:9.5px;color:#6B7280;">Balance as of ${esc(to)}</div>
+            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(closingBalance))}</div>
+          </td>
+        </tr>
+      </table>
+
+      <style>
+        .stmt-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }
+        .stmt-table th { background:#F3F4F6; color:#4B5563; font-weight:700; padding:7px 5px; border-bottom:1px solid #CBD0D6; text-align:left; }
+        .stmt-table td { padding:7px 5px; border-bottom:1px solid #E6E8EB; vertical-align:top; overflow-wrap:anywhere; }
+        .stmt-table .num { text-align:right; white-space:nowrap; }
+        .stmt-table .strong { font-weight:700; }
+      </style>
+
+      <table class="stmt-table">
+        <colgroup>
+          <col style="width:12%;">
+          <col style="width:12%;">
+          <col style="width:31%;">
+          <col style="width:15%;">
+          <col style="width:15%;">
+          <col style="width:15%;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Reference</th>
+            <th style="text-align:right;">Charges</th>
+            <th style="text-align:right;">Payments</th>
+            <th style="text-align:right;">Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml || `
+            <tr>
+              <td colspan="6" style="padding:12px;color:#6B7280;">No statement activity for this period.</td>
+            </tr>
+          `}
+        </tbody>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;margin-top:18px;">
+        <tr>
+          <td style="border:0;"></td>
+          <td style="width:300px;border-top:2px solid #1F2933;padding-top:9px;font-size:14px;font-weight:700;">
+            <span>Balance as of ${esc(to)}</span>
+            <span style="float:right;">${esc(fmt(closingBalance))}</span>
+          </td>
+        </tr>
+      </table>
+
+      ${legacyUndatedPayments ? `
+        <div style="font-size:9.5px;color:#6B7280;margin-top:16px;line-height:1.35;">
+          Note: some older invoices contain aggregate payments without individual payment dates.
+          Those amounts are included in the balance, but may not appear as separate payment activity within the selected period.
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  document.body.appendChild(host);
+
+  try {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const blob = await html2pdf().from(host).set({
+      margin: [18, 18, 18, 18],
+      filename: filename || 'Customer_Statement.pdf',
+      pagebreak: { mode: ['css', 'legacy'] },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        width: 720,
+        windowWidth: 720,
+      },
+      jsPDF: {
+        unit: 'pt',
+        format: 'letter',
+        orientation: 'portrait',
+      },
+    }).output('blob');
+
+    if (!blob || blob.size < 1500) {
+      throw new Error('The statement PDF could not be generated correctly.');
+    }
+
+    return await blobToBase64(blob);
+  } finally {
+    host.remove();
+  }
+}
+
+
 async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, from, replyTo }) {
   const res = await fetch('/api/send-invoice', {
     method: 'POST',
@@ -4988,9 +5187,22 @@ function CustomerStatementModal({ statement, customers, invoices, invoiceTotal, 
     try {
       const safeClient = String(client || 'Customer').replace(/[^a-z0-9_-]+/gi, '_');
       const filename = `Statement_${safeClient}_${from}_to_${to}.pdf`;
-      const pdfBase64 = await generatePdfBase64FromDetachedClone('customer-statement-content', filename, 720);
-      if (!pdfBase64 || pdfBase64.length < 1000) {
-        throw new Error('The statement PDF was generated empty. Please try again.');
+      const pdfBase64 = await generateCustomerStatementPdfBase64({
+        businessName,
+        client,
+        customerEmail,
+        from,
+        to,
+        openingBalance,
+        totalCharges,
+        totalPayments,
+        closingBalance,
+        statementRows,
+        legacyUndatedPayments,
+        filename,
+      });
+      if (!pdfBase64 || pdfBase64.length < 1500) {
+        throw new Error('The statement PDF could not be generated correctly. Please try again.');
       }
       const text =
         `Hello ${client},\n\nAttached is your customer statement for ${from} through ${to}.\n` +
@@ -5032,7 +5244,7 @@ function CustomerStatementModal({ statement, customers, invoices, invoiceTotal, 
           </div>
         </div>
 
-        <div id="customer-statement-content" style={{ background: '#fff', width: '100%', boxSizing: 'border-box', padding: 2 }}>
+        <div id="customer-statement-content" style={{ background: '#fff', width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: 2, overflow: 'visible' }}>
           <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 16 }}>
