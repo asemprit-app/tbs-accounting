@@ -1088,7 +1088,12 @@ async function fetchAllRows(table, clientId, orderCol) {
             accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} />
         )}
         {tab === 'customers' && (
-          <CustomersView customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onPrintStatement={setStatementClient} />
+          <CustomersView
+            customers={customers} setCustomers={setCustomers}
+            invoices={invoices} setInvoices={setInvoices}
+            invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal}
+            onPrintStatement={setStatementClient}
+          />
         )}
         {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
@@ -1106,7 +1111,18 @@ async function fetchAllRows(table, clientId, orderCol) {
         )}
       </div>
       {printInvoice && <InvoicePrintModal inv={printInvoice} total={invoiceTotal(printInvoice)} onClose={() => setPrintInvoice(null)} businessName={businessName} customers={customers} sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail} invoiceLanguage={invoiceLanguage} businessPhone={businessPhone} />}
-      {statementClient && <CustomerStatementModal client={statementClient} invoices={invoices} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} onClose={() => setStatementClient(null)} businessName={businessName} />}
+      {statementClient && (
+        <CustomerStatementModal
+          statement={statementClient}
+          customers={customers}
+          invoices={invoices}
+          invoiceTotal={invoiceTotal}
+          onClose={() => setStatementClient(null)}
+          businessName={businessName}
+          sendingEmail={sendingEmail}
+          replyToEmail={replyToEmail}
+        />
+      )}
     </div>
   );
 }
@@ -4500,13 +4516,82 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
   const [editingName, setEditingName] = useState(null);
   const [editEmail, setEditEmail] = useState('');
   const [editNameDraft, setEditNameDraft] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+
+  // Same master-period behavior used by Reports.
+  const [preset, setPreset] = useState('this_month');
+  const [customFrom, setCustomFrom] = useState(todayStr());
+  const [customTo, setCustomTo] = useState(todayStr());
+  const [appliedCustomFrom, setAppliedCustomFrom] = useState(todayStr());
+  const [appliedCustomTo, setAppliedCustomTo] = useState(todayStr());
+  const [customDateError, setCustomDateError] = useState('');
+  const { from, to } = getPeriodRange(preset, appliedCustomFrom, appliedCustomTo);
+
+  const monthYearOptions = useMemo(() => {
+    const months = new Set();
+    invoices.forEach(inv => {
+      if (inv.date && inv.date.length >= 7) months.add(inv.date.slice(0, 7));
+    });
+    return Array.from(months).sort().reverse().map(m => {
+      const [y, mo] = m.split('-');
+      const first = `${m}-01`;
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      const last = `${m}-${String(lastDay).padStart(2, '0')}`;
+      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      return { value: m, label, first, last };
+    });
+  }, [invoices]);
+
+  function applyMonthYear(value) {
+    if (!value) return;
+    const opt = monthYearOptions.find(o => o.value === value);
+    if (!opt) return;
+    setCustomFrom(opt.first);
+    setCustomTo(opt.last);
+    setAppliedCustomFrom(opt.first);
+    setAppliedCustomTo(opt.last);
+    setCustomDateError('');
+    setPreset('custom');
+  }
+
+  function applyCustomPeriod() {
+    if (!isValidIsoDate(customFrom) || !isValidIsoDate(customTo)) {
+      setCustomDateError('Enter a complete From and To date.');
+      return;
+    }
+    if (customFrom > customTo) {
+      setCustomDateError('From date cannot be after To date.');
+      return;
+    }
+    setAppliedCustomFrom(customFrom);
+    setAppliedCustomTo(customTo);
+    setCustomDateError('');
+  }
+
+  function invoicePaidAsOf(inv, asOfDate) {
+    const payments = Array.isArray(inv.payments) ? inv.payments : [];
+    if (payments.length > 0) {
+      return payments
+        .filter(p => !p.date || p.date <= asOfDate)
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    }
+    // Legacy invoices may only have aggregate paid without payment dates.
+    return Number(inv.paid) || 0;
+  }
+
   function addCustomer() {
     if (!name.trim()) return;
     setCustomers(prev => [...prev, { id: uid(), name: name.trim(), email: email.trim() }]);
     setName('');
     setEmail('');
   }
-  function startEditEmail(c) { setEditingName(c.name); setEditEmail(c.email || ''); setEditNameDraft(c.name); }
+
+  function startEditEmail(c) {
+    setEditingName(c.name);
+    setEditEmail(c.email || '');
+    setEditNameDraft(c.name);
+  }
+
   function saveEditEmail(c) {
     const newName = editNameDraft.trim();
     if (!newName) { setEditingName(null); return; }
@@ -4514,7 +4599,6 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
     if (customers.some(x => x.name === c.name)) {
       setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, name: newName, email: editEmail.trim() } : x));
     } else {
-      // el nombre viene de una factura pero todavía no existe como Customer registrado
       setCustomers(prev => [...prev, { id: uid(), name: newName, email: editEmail.trim() }]);
     }
     if (renamed) {
@@ -4522,6 +4606,7 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
     }
     setEditingName(null);
   }
+
   function removeCustomer(c) {
     const hasInvoices = invoices.some(inv => inv.client === c.name);
     const msg = hasInvoices
@@ -4530,31 +4615,48 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
     if (!window.confirm(msg)) return;
     setCustomers(prev => prev.filter(x => x.name !== c.name));
   }
-  const balances = useMemo(() => {
-    const map = {};
-    invoices.forEach(inv => {
-      map[inv.client] = (map[inv.client] || 0) + invoiceTotal(inv) - (inv.paid || 0);
-    });
-    return map;
-  }, [invoices, invoiceTotal]);
+
+  // Billed = invoice activity within the selected period.
   const billedBeforeWithholding = useMemo(() => {
     const map = {};
     invoices.forEach(inv => {
+      if (!inv.date || inv.date < from || inv.date > to) return;
       map[inv.client] = (map[inv.client] || 0) + invoiceSubtotal(inv);
     });
     return map;
-  }, [invoices, invoiceSubtotal]);
+  }, [invoices, invoiceSubtotal, from, to]);
 
-  const allNames = Array.from(new Set([...customers.map(c => c.name), ...invoices.map(i => i.client)]));
-  const totalBilledBeforeWithholding = allNames.reduce((s, n) => s + (billedBeforeWithholding[n] || 0), 0);
-  const totalOpenBalance = allNames.reduce((s, n) => s + (balances[n] || 0), 0);
+  // A/R follows the same "as of ending date" convention used in Reports.
+  const balances = useMemo(() => {
+    const map = {};
+    invoices.forEach(inv => {
+      if (!inv.date || inv.date > to) return;
+      const outstanding = Math.max(0, invoiceTotal(inv) - invoicePaidAsOf(inv, to));
+      map[inv.client] = (map[inv.client] || 0) + outstanding;
+    });
+    return map;
+  }, [invoices, invoiceTotal, to]);
+
+  const allNames = Array.from(new Set([...customers.map(c => c.name), ...invoices.map(i => i.client)])).filter(Boolean);
+  const searchedNames = allNames.filter(n => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return true;
+    const customer = customers.find(c => c.name === n);
+    return n.toLowerCase().includes(q) || (customer?.email || '').toLowerCase().includes(q);
+  });
+
+  const totalBilledBeforeWithholding = searchedNames.reduce((s, n) => s + (billedBeforeWithholding[n] || 0), 0);
+  const totalOpenBalance = searchedNames.reduce((s, n) => s + (balances[n] || 0), 0);
+
   const [custSort, setCustSort] = useState({ column: null, dir: 'asc' });
   function toggleCustSort(column) {
     setCustSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
   }
+
   const sortedNames = useMemo(() => {
-    if (!custSort.column) return allNames;
-    return allNames.slice().sort((a, b) => {
+    const base = searchedNames.slice();
+    if (!custSort.column) return base.sort((a, b) => a.localeCompare(b));
+    return base.sort((a, b) => {
       let cmp = 0;
       if (custSort.column === 'name') cmp = a.localeCompare(b);
       else if (custSort.column === 'email') cmp = (customers.find(c => c.name === a)?.email || '').localeCompare(customers.find(c => c.name === b)?.email || '');
@@ -4562,25 +4664,90 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
       else if (custSort.column === 'balance') cmp = (balances[a] || 0) - (balances[b] || 0);
       return custSort.dir === 'asc' ? cmp : -cmp;
     });
-  }, [allNames, custSort, customers, billedBeforeWithholding, balances]);
+  }, [searchedNames, custSort, customers, billedBeforeWithholding, balances]);
+
+  function openStatement(customerName) {
+    onPrintStatement({ name: customerName, from, to });
+  }
 
   return (
     <div>
       <h2 style={{ margin: '0 0 16px' }}>Customers</h2>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Customer period</div>
+        <div style={{ fontSize: 12.5, color: '#6B7280', marginBottom: 10 }}>
+          The selected period applies to billed amounts and customer statements. Open A/R is calculated as of the ending date.
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Period</label>
+            <select value={preset} onChange={e => { setPreset(e.target.value); setCustomDateError(''); }}>
+              <option value="this_month">This month</option>
+              <option value="last_month">Last month</option>
+              <option value="this_quarter">This quarter</option>
+              <option value="this_year">This year</option>
+              <option value="last_year">Last year</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Month / Year</label>
+            <select defaultValue="" onChange={e => { applyMonthYear(e.target.value); e.target.value = ''; }}>
+              <option value="">Select month</option>
+              {monthYearOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          {preset === 'custom' && (
+            <>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
+                <input type="date" value={customFrom} onChange={e => { setCustomFrom(e.target.value); setCustomDateError(''); }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
+                <input type="date" value={customTo} onChange={e => { setCustomTo(e.target.value); setCustomDateError(''); }} />
+              </div>
+              <button type="button" onClick={applyCustomPeriod} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 13px', cursor: 'pointer' }}>
+                Apply period
+              </button>
+            </>
+          )}
+
+          <div style={{ flex: 1, minWidth: 190 }}>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search customer</label>
+            <input style={{ width: '100%' }} value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Name or email" />
+          </div>
+        </div>
+
+        {customDateError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 7 }}>{customDateError}</div>}
+        <div style={{ fontSize: 12.5, color: '#6B7280', marginTop: 8 }}>
+          Applied period: <strong>{from}</strong> to <strong>{to}</strong>
+          {preset === 'custom' && (customFrom !== appliedCustomFrom || customTo !== appliedCustomTo) && (
+            <span style={{ marginLeft: 8, color: '#854F0B' }}>Unsaved date change — click Apply period.</span>
+          )}
+        </div>
+      </Card>
+
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <input style={{ flex: 1 }} placeholder="New customer name" value={name} onChange={e => setName(e.target.value)} />
-          <input style={{ flex: 1 }} placeholder="Email (for sending invoices)" value={email} onChange={e => setEmail(e.target.value)} />
+          <input style={{ flex: 1 }} placeholder="Email (for sending invoices/statements)" value={email} onChange={e => setEmail(e.target.value)} />
           <button onClick={addCustomer} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add</button>
         </div>
       </Card>
+
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('name')}>Customer {custSort.column === 'name' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('email')}>Email {custSort.column === 'email' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
-            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('billed')}>Total billed (before withholding) {custSort.column === 'billed' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
-            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('balance')}>Open balance (A/R) {custSort.column === 'balance' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th><th></th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('billed')}>Billed in period {custSort.column === 'billed' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('balance')}>Open A/R as of {to} {custSort.column === 'balance' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th></th>
           </tr></thead>
           <tbody>
             {sortedNames.map(n => {
@@ -4594,7 +4761,7 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
                       </td>
                       <td style={{ padding: '6px 4px' }}>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <input style={{ width: 160 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" />
+                          <input style={{ width: 180 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" />
                           <button onClick={() => saveEditEmail({ name: n, email: c?.email })} style={iconBtn}><Check size={14} /></button>
                           <button onClick={() => setEditingName(null)} style={iconBtn}><X size={14} /></button>
                         </div>
@@ -4610,9 +4777,9 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
                         <span style={{ color: c?.email ? '#1F2933' : '#9CA3AF' }}>{c?.email || 'No email'}</span>
                       </td>
                       <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
-                      <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
-                      <td style={{ padding: '6px 4px', display: 'flex', gap: 4 }}>
-                        <button onClick={() => onPrintStatement(n)} style={iconBtn}>Statement</button>
+                      <td style={{ padding: '6px 4px', fontWeight: (balances[n] || 0) > 0 ? 600 : 400 }}>{money(balances[n] || 0)}</td>
+                      <td style={{ padding: '6px 4px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <button onClick={() => openStatement(n)} style={iconBtn}>Statement / Email</button>
                         <button onClick={() => startEditEmail({ name: n, email: c?.email })} style={iconBtn}>Edit</button>
                         <button onClick={() => removeCustomer({ name: n })} style={iconBtn}><Trash2 size={14} /></button>
                       </td>
@@ -4622,10 +4789,10 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
               );
             })}
           </tbody>
-          {allNames.length > 0 && (
+          {sortedNames.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
-                <td style={{ padding: '6px 4px' }}>Total ({allNames.length})</td>
+                <td style={{ padding: '6px 4px' }}>Total ({sortedNames.length})</td>
                 <td></td>
                 <td style={{ padding: '6px 4px' }}>{money(totalBilledBeforeWithholding)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(totalOpenBalance)}</td>
@@ -4634,49 +4801,246 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
             </tfoot>
           )}
         </table>
-        {allNames.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No customers yet.</div>}
+        {sortedNames.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No customers match the current filter.</div>}
       </Card>
     </div>
   );
 }
 
-function CustomerStatementModal({ client, invoices, invoiceTotal, invoiceSubtotal, onClose, businessName }) {
-  const rows = invoices.filter(i => i.client === client).sort((a, b) => a.date.localeCompare(b.date));
-  const totalInvoiced = rows.reduce((s, i) => s + invoiceTotal(i), 0);
-  const totalPaid = rows.reduce((s, i) => s + (i.paid || 0), 0);
-  const balance = totalInvoiced - totalPaid;
+function CustomerStatementModal({ statement, customers, invoices, invoiceTotal, onClose, businessName, sendingEmail, replyToEmail }) {
+  const client = typeof statement === 'string' ? statement : statement?.name;
+  const from = typeof statement === 'object' && statement?.from ? statement.from : '1900-01-01';
+  const to = typeof statement === 'object' && statement?.to ? statement.to : todayStr();
+  const customer = customers.find(c => c.name === client);
+  const customerEmail = customer?.email || '';
+
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
+
+  function dayBeforeStatement(dateStr) {
+    if (!isValidIsoDate(dateStr)) return dateStr;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() - 1);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  function invoicePaidAsOf(inv, asOfDate) {
+    const payments = Array.isArray(inv.payments) ? inv.payments : [];
+    if (payments.length > 0) {
+      return payments
+        .filter(p => !p.date || p.date <= asOfDate)
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    }
+    return Number(inv.paid) || 0;
+  }
+
+  const clientInvoices = invoices
+    .filter(i => i.client === client)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  const beforeFrom = dayBeforeStatement(from);
+  const openingBalance = clientInvoices
+    .filter(inv => inv.date && inv.date <= beforeFrom)
+    .reduce((s, inv) => s + Math.max(0, invoiceTotal(inv) - invoicePaidAsOf(inv, beforeFrom)), 0);
+
+  const activities = [];
+  clientInvoices.forEach(inv => {
+    if (inv.date && inv.date >= from && inv.date <= to) {
+      activities.push({
+        key: `inv-${inv.id}`,
+        date: inv.date,
+        order: 1,
+        type: 'Invoice',
+        reference: inv.number,
+        charge: invoiceTotal(inv),
+        payment: 0,
+      });
+    }
+
+    const payments = Array.isArray(inv.payments) ? inv.payments : [];
+    payments.forEach(p => {
+      if (p.date && p.date >= from && p.date <= to) {
+        activities.push({
+          key: `pay-${inv.id}-${p.id || `${p.date}-${p.amount}`}`,
+          date: p.date,
+          order: 2,
+          type: 'Payment',
+          reference: `${inv.number}${p.method ? ` — ${p.method}` : ''}`,
+          charge: 0,
+          payment: Number(p.amount) || 0,
+        });
+      }
+    });
+  });
+
+  activities.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.reference.localeCompare(b.reference));
+
+  let running = openingBalance;
+  const statementRows = activities.map(row => {
+    running += (Number(row.charge) || 0) - (Number(row.payment) || 0);
+    return { ...row, runningBalance: running };
+  });
+
+  const totalCharges = activities.reduce((s, r) => s + (Number(r.charge) || 0), 0);
+  const totalPayments = activities.reduce((s, r) => s + (Number(r.payment) || 0), 0);
+
+  const closingBalance = clientInvoices
+    .filter(inv => inv.date && inv.date <= to)
+    .reduce((s, inv) => s + Math.max(0, invoiceTotal(inv) - invoicePaidAsOf(inv, to)), 0);
+
+  const legacyUndatedPayments = clientInvoices.some(inv =>
+    (!Array.isArray(inv.payments) || inv.payments.length === 0) && (Number(inv.paid) || 0) > 0
+  );
+
+  async function handleSendStatement() {
+    if (!customerEmail) {
+      setSendMsg('No email is saved for this customer. Add one in Customers first.');
+      return;
+    }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const safeClient = String(client || 'Customer').replace(/[^a-z0-9_-]+/gi, '_');
+      const filename = `Statement_${safeClient}_${from}_to_${to}.pdf`;
+      const pdfBase64 = await generatePdfBase64FromElement('customer-statement-content', filename);
+      const text =
+        `Hello ${client},\n\nAttached is your customer statement for ${from} through ${to}.\n` +
+        `Balance as of ${to}: ${money(closingBalance)}.\n\n` +
+        `If you have any questions, please contact us.\n\nThank you,\n${businessName}`;
+      const fromEmail = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
+      await sendInvoiceViaResend({
+        to: customerEmail,
+        subject: `Customer Statement — ${businessName} — ${from} to ${to}`,
+        text,
+        pdfBase64,
+        filename,
+        from: fromEmail,
+        replyTo: replyToEmail || undefined,
+      });
+      setSendMsg(`Statement sent to ${customerEmail}.`);
+    } catch (err) {
+      setSendMsg('Could not send statement: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 560, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Statement — {client}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 720, maxWidth: '96vw', maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="customer-statement-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }} className="print-hide">
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>Statement — {client}</div>
+            <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{from} to {to}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {sendMsg && <span style={{ fontSize: 11.5, color: sendMsg.startsWith('Statement sent') ? '#0F6E56' : '#B00020', maxWidth: 250 }}>{sendMsg}</span>}
+            <button onClick={handleSendStatement} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 12px', cursor: sending ? 'default' : 'pointer' }}>
+              {sending ? 'Sending…' : 'Send Statement'}
+            </button>
             <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
-        <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} periodStart={rows[0]?.date || todayStr()} periodEnd={todayStr()} logoUrl={null} />
-        <div>
-          <div style={{ fontSize: 14, marginBottom: 16 }}>Customer: <strong>{client}</strong></div>
-          <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', marginBottom: 16 }}>
-            <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-              <th style={{ padding: '4px 0' }}>Invoice</th><th>Date</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Balance</th>
-            </tr></thead>
+
+        <div id="customer-statement-content">
+          <ReportHeader businessName={businessName} reportName={`Customer Statement — ${client}`} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap', fontSize: 13, marginBottom: 16 }}>
+            <div>
+              <div style={{ color: '#6B7280', fontSize: 11 }}>CUSTOMER</div>
+              <div style={{ fontWeight: 700 }}>{client}</div>
+              {customerEmail && <div style={{ color: '#6B7280' }}>{customerEmail}</div>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: '#6B7280', fontSize: 11 }}>STATEMENT PERIOD</div>
+              <div style={{ fontWeight: 700 }}>{from} to {to}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: 16 }}>
+            <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 9 }}>
+              <div style={{ fontSize: 10.5, color: '#6B7280' }}>Opening Balance</div>
+              <div style={{ fontWeight: 700 }}>{money(openingBalance)}</div>
+            </div>
+            <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 9 }}>
+              <div style={{ fontSize: 10.5, color: '#6B7280' }}>Charges</div>
+              <div style={{ fontWeight: 700 }}>{money(totalCharges)}</div>
+            </div>
+            <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 9 }}>
+              <div style={{ fontSize: 10.5, color: '#6B7280' }}>Payments</div>
+              <div style={{ fontWeight: 700 }}>{money(totalPayments)}</div>
+            </div>
+            <div style={{ background: '#EAF3DE', borderRadius: 6, padding: 9 }}>
+              <div style={{ fontSize: 10.5, color: '#6B7280' }}>Balance as of {to}</div>
+              <div style={{ fontWeight: 700 }}>{money(closingBalance)}</div>
+            </div>
+          </div>
+
+          <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse', marginBottom: 16 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left', color: '#4B5563' }}>
+                <th style={{ padding: '6px 4px' }}>Date</th>
+                <th style={{ padding: '6px 4px' }}>Type</th>
+                <th style={{ padding: '6px 4px' }}>Reference</th>
+                <th style={{ padding: '6px 4px', textAlign: 'right' }}>Charges</th>
+                <th style={{ padding: '6px 4px', textAlign: 'right' }}>Payments</th>
+                <th style={{ padding: '6px 4px', textAlign: 'right' }}>Balance</th>
+              </tr>
+            </thead>
             <tbody>
-              {rows.map(i => (
-                <tr key={i.id}>
-                  <td style={{ padding: '4px 0' }}>{i.number}</td><td>{i.date}</td>
-                  <td style={{ textAlign: 'right' }}>{money(invoiceTotal(i))}</td>
-                  <td style={{ textAlign: 'right' }}>{money(i.paid || 0)}</td>
-                  <td style={{ textAlign: 'right' }}>{money(invoiceTotal(i) - (i.paid || 0))}</td>
+              {openingBalance !== 0 && (
+                <tr style={{ borderBottom: '1px solid #EEE' }}>
+                  <td style={{ padding: '6px 4px' }}>{from}</td>
+                  <td style={{ padding: '6px 4px' }}>Opening</td>
+                  <td style={{ padding: '6px 4px' }}>Balance forward</td>
+                  <td></td><td></td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{money(openingBalance)}</td>
+                </tr>
+              )}
+              {statementRows.map(r => (
+                <tr key={r.key} style={{ borderBottom: '1px solid #EEE' }}>
+                  <td style={{ padding: '6px 4px' }}>{r.date}</td>
+                  <td style={{ padding: '6px 4px' }}>{r.type}</td>
+                  <td style={{ padding: '6px 4px' }}>{r.reference}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{r.charge ? money(r.charge) : ''}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{r.payment ? `-${money(r.payment)}` : ''}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'right', fontWeight: 600 }}>{money(r.runningBalance)}</td>
                 </tr>
               ))}
+              {statementRows.length === 0 && openingBalance === 0 && (
+                <tr><td colSpan={6} style={{ padding: 10, color: '#6B7280' }}>No statement activity for this period.</td></tr>
+              )}
             </tbody>
           </table>
-          <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'right' }}>Total balance: {money(balance)}</div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ width: 280, borderTop: '2px solid #1F2933', paddingTop: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
+                <span>Balance as of {to}</span>
+                <span>{money(closingBalance)}</span>
+              </div>
+            </div>
+          </div>
+
+          {legacyUndatedPayments && (
+            <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 14 }}>
+              Note: some older invoices contain aggregate payments without individual payment dates. Those amounts are included in the balance, but may not appear as separate payment activity within the selected period.
+            </div>
+          )}
         </div>
       </div>
-      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+
+      <style>{`
+        @media print {
+          .no-print-overlay { position: static !important; background: none !important; padding: 0 !important; }
+          .print-hide { display: none !important; }
+          body * { visibility: hidden; }
+          #customer-statement-print-area, #customer-statement-print-area * { visibility: visible; }
+          #customer-statement-print-area { position: absolute; left: 0; top: 0; width: 100%; max-width: none; padding: 24px; box-sizing: border-box; }
+        }
+      `}</style>
     </div>
   );
 }
