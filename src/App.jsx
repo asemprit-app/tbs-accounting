@@ -2221,7 +2221,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                     <button title="Match this bank deposit to an open invoice" onClick={() => openLink(t)} style={iconBtn}>Match to invoice</button>
                   )}
                   {transactionAlreadyLinked(t.id) && (
-                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched · manage from Invoice Edit</span>
+                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched · unapply from Invoice Edit</span>
                   )}
                   <button title={transactionAlreadyLinked(t.id) ? 'Delete transaction and linked invoice payment' : 'Delete'} onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -3541,23 +3541,10 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     setShowForm(true);
     setError('');
   }
-  const approvedReconciledTransactionIds = useMemo(() => {
-    const ids = new Set();
-    (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => {
-      (r.verifiedIds || []).forEach(id => ids.add(id));
-    });
-    return ids;
-  }, [reconciliations]);
-
   function removePaymentWhileEditing(payment) {
     if (!editingId) return;
 
-    if (payment.transactionId && approvedReconciledTransactionIds.has(payment.transactionId)) {
-      alert("This payment is tied to a transaction in an approved reconciliation. Reopen/reset that reconciliation before removing the payment.");
-      return;
-    }
-
-    if (!window.confirm(`Remove this payment of ${money(payment.amount)} dated ${payment.date || '—'} from this invoice?\n\nThe change will take effect when you click Update invoice.`)) return;
+    if (!window.confirm(`Unapply this payment of ${money(payment.amount)} dated ${payment.date || '—'} from this invoice?\n\nThe bank transaction will NOT be deleted. After you click Update invoice, it will be available to match to another invoice.`)) return;
 
     setForm(f => {
       const currentPayments = Array.isArray(f.payments) ? f.payments : [];
@@ -3595,29 +3582,33 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     setInvoices(prev => prev.map(i => i.id === editingId ? { ...finalForm, id: editingId, number: i.number } : i));
 
     if (removedInvoicePayments.length > 0) {
-      const generatedTransactionIds = new Set(
+      const unappliedTransactionIds = new Set(
         removedInvoicePayments
-          .filter(p => p.transactionId && p.source === 'invoice_payment')
           .map(p => p.transactionId)
-      );
-      const bankLinkedIds = new Set(
-        removedInvoicePayments
-          .filter(p => p.transactionId && p.source !== 'invoice_payment')
-          .map(p => p.transactionId)
+          .filter(Boolean)
       );
 
-      setTransactions(prev => prev
-        .filter(t => !generatedTransactionIds.has(t.id))
-        .map(t => {
-          if (!bankLinkedIds.has(t.id)) return t;
-          return {
-            ...t,
-            description: t.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim(),
-            gl: '',
-            status: 'REVIEW',
-          };
-        })
-      );
+      setTransactions(prev => prev.map(t => {
+        if (!unappliedTransactionIds.has(t.id)) return t;
+
+        let cleanDescription = (t.description || '')
+          .replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '')
+          .trim();
+
+        // Payments originally created from the Invoice screen may contain the old
+        // invoice number in their generated description. Keep the transaction, but
+        // make the wording neutral so it can be matched to another invoice.
+        cleanDescription = cleanDescription
+          .replace(/^Invoice payment\s*—\s*[^—]+\s*—\s*/i, 'Customer payment — ');
+
+        return {
+          ...t,
+          description: cleanDescription,
+          // Remove only the invoice/accounting match. Keep date, amount and sourceGL.
+          gl: '',
+          status: 'REVIEW',
+        };
+      }));
     }
 
     setRemovedInvoicePayments([]);
@@ -3791,8 +3782,11 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
 
           {editingId && (
             <div style={{ marginBottom: 14, border: '1px solid #D8DCE1', borderRadius: 7, overflow: 'hidden' }}>
-              <div style={{ background: '#F3F4F6', padding: '8px 10px', fontWeight: 700, fontSize: 13 }}>
-                Payments Applied
+              <div style={{ background: '#F3F4F6', padding: '8px 10px' }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>Payments Applied</div>
+                <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 2 }}>
+                  Unapply removes only the match to this invoice. It does not delete the bank transaction.
+                </div>
               </div>
               {(form.payments || []).length > 0 ? (
                 <div>
@@ -3804,7 +3798,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
                         <div style={{ color: '#6B7280', fontSize: 11 }}>{p.sourceGL ? `Deposit: ${p.sourceGL}` : 'No deposit account'}</div>
                       </div>
                       <div style={{ textAlign: 'right', fontWeight: 600 }}>{money(p.amount)}</div>
-                      <button type="button" onClick={() => removePaymentWhileEditing(p)} style={{ ...iconBtn, color: '#B00020' }}>Remove</button>
+                      <button type="button" onClick={() => removePaymentWhileEditing(p)} style={{ ...iconBtn, color: '#B00020' }}>Unapply / Remove Match</button>
                     </div>
                   ))}
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderTop: '1px solid #D8DCE1', fontSize: 12.5, fontWeight: 700 }}>
@@ -3817,7 +3811,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
               )}
               {removedInvoicePayments.length > 0 && (
                 <div style={{ padding: '8px 10px', background: '#FFF8E6', color: '#7A5B00', fontSize: 11.5, borderTop: '1px solid #F0D896' }}>
-                  {removedInvoicePayments.length} payment{removedInvoicePayments.length === 1 ? '' : 's'} marked for removal. Click <strong>Update invoice</strong> to save the change, or Cancel to discard it.
+                  {removedInvoicePayments.length} payment match{removedInvoicePayments.length === 1 ? '' : 'es'} marked to be unapplied. The transaction will remain available for another invoice. Click <strong>Update invoice</strong> to save, or Cancel to keep the current match.
                 </div>
               )}
             </div>
