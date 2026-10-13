@@ -244,6 +244,29 @@ async function generatePdfBase64FromDetachedClone(elementId, filename, widthPx =
   }
 }
 
+async function loadJsPdf() {
+  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
+
+  await new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-tbs-jspdf="true"]');
+    if (existing) {
+      if (window.jspdf?.jsPDF) { resolve(); return; }
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', () => reject(new Error('Could not load jsPDF.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    script.setAttribute('data-tbs-jspdf', 'true');
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load jsPDF.'));
+    document.head.appendChild(script);
+  });
+
+  if (!window.jspdf?.jsPDF) throw new Error('jsPDF is unavailable.');
+  return window.jspdf.jsPDF;
+}
+
 async function generateCustomerStatementPdfBase64({
   businessName,
   client,
@@ -258,189 +281,246 @@ async function generateCustomerStatementPdfBase64({
   legacyUndatedPayments,
   filename,
 }) {
-  const html2pdf = await loadHtml2Pdf();
+  const jsPDF = await loadJsPdf();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
 
-  const esc = (value) => String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const left = 44;
+  const right = 44;
+  const contentW = pageW - left - right;
+  const bottom = 46;
 
-  const fmt = (value) => money(Number(value) || 0);
+  const moneyPdf = n => (Number(n) || 0).toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  });
 
-  const rowsHtml = [
-    ...(Math.abs(Number(openingBalance) || 0) > 0.005 ? [{
+  function addHeader(isFirstPage = false) {
+    let y = 48;
+
+    doc.setTextColor(20, 33, 61);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(isFirstPage ? 20 : 14);
+    doc.text(String(businessName || 'Business'), left, y);
+
+    if (isFirstPage) {
+      y += 20;
+      doc.setTextColor(91, 100, 114);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Customer Statement — ${client}`, left, y);
+    } else {
+      doc.setTextColor(91, 100, 114);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`Customer Statement — ${client} — ${from} to ${to}`, left, y + 14);
+      y += 14;
+    }
+
+    y += 14;
+    doc.setDrawColor(176, 141, 87);
+    doc.setLineWidth(1.4);
+    doc.line(left, y, pageW - right, y);
+
+    return y + 20;
+  }
+
+  function drawSummaryBox(x, y, w, title, value, emphasis = false) {
+    doc.setFillColor(emphasis ? 234 : 247, emphasis ? 243 : 248, emphasis ? 222 : 250);
+    doc.roundedRect(x, y, w, 46, 4, 4, 'F');
+
+    doc.setTextColor(107, 114, 128);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.text(title, x + 8, y + 13);
+
+    doc.setTextColor(31, 41, 55);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(value, x + 8, y + 31);
+  }
+
+  function drawTableHeader(y) {
+    const widths = [60, 64, 166, 78, 78, 82];
+    const labels = ['Date', 'Type', 'Reference', 'Charges', 'Payments', 'Balance'];
+
+    doc.setFillColor(243, 244, 246);
+    doc.rect(left, y, contentW, 22, 'F');
+
+    let x = left;
+    labels.forEach((label, idx) => {
+      doc.setTextColor(75, 85, 99);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      if (idx >= 3) {
+        doc.text(label, x + widths[idx] - 4, y + 14, { align: 'right' });
+      } else {
+        doc.text(label, x + 4, y + 14);
+      }
+      x += widths[idx];
+    });
+
+    doc.setDrawColor(203, 208, 214);
+    doc.setLineWidth(0.5);
+    doc.line(left, y + 22, pageW - right, y + 22);
+
+    return y + 22;
+  }
+
+  function newPageWithTable() {
+    doc.addPage();
+    let y = addHeader(false);
+    return drawTableHeader(y);
+  }
+
+  let y = addHeader(true);
+
+  doc.setTextColor(107, 114, 128);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('CUSTOMER', left, y);
+  doc.text('STATEMENT PERIOD', pageW - right, y, { align: 'right' });
+
+  y += 13;
+  doc.setTextColor(31, 41, 55);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.text(String(client || ''), left, y);
+  doc.text(`${from} to ${to}`, pageW - right, y, { align: 'right' });
+
+  if (customerEmail) {
+    y += 12;
+    doc.setTextColor(107, 114, 128);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(String(customerEmail), left, y);
+  }
+
+  y += 22;
+
+  const gap = 7;
+  const boxW = (contentW - gap * 3) / 4;
+  drawSummaryBox(left, y, boxW, 'Opening Balance', moneyPdf(openingBalance));
+  drawSummaryBox(left + (boxW + gap), y, boxW, 'Charges', moneyPdf(totalCharges));
+  drawSummaryBox(left + (boxW + gap) * 2, y, boxW, 'Payments', moneyPdf(totalPayments));
+  drawSummaryBox(left + (boxW + gap) * 3, y, boxW, `Balance as of ${to}`, moneyPdf(closingBalance), true);
+
+  y += 64;
+  y = drawTableHeader(y);
+
+  const widths = [60, 64, 166, 78, 78, 82];
+  const rows = [];
+
+  if (Math.abs(Number(openingBalance) || 0) > 0.005) {
+    rows.push({
       date: from,
       type: 'Opening',
       reference: 'Balance forward',
-      charge: '',
-      payment: '',
-      runningBalance: openingBalance,
-    }] : []),
-    ...(statementRows || []),
-  ].map(r => `
-    <tr>
-      <td>${esc(r.date || '')}</td>
-      <td>${esc(r.type || '')}</td>
-      <td>${esc(r.reference || '')}</td>
-      <td class="num">${r.charge ? esc(fmt(r.charge)) : ''}</td>
-      <td class="num">${r.payment ? esc('-' + fmt(r.payment)) : ''}</td>
-      <td class="num strong">${esc(fmt(r.runningBalance))}</td>
-    </tr>
-  `).join('');
-
-  const host = document.createElement('div');
-  host.setAttribute('data-customer-statement-pdf', 'true');
-  Object.assign(host.style, {
-    position: 'absolute',
-    left: '0',
-    top: '0',
-    width: '720px',
-    minHeight: '900px',
-    background: '#ffffff',
-    zIndex: '1',
-    boxSizing: 'border-box',
-    overflow: 'visible',
-    pointerEvents: 'none',
-  });
-
-  host.innerHTML = `
-    <div style="width:720px;background:#fff;color:#1F2933;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;padding:34px 38px;">
-      <div style="font-family:Georgia,serif;font-size:25px;font-weight:700;color:#14213D;margin-bottom:5px;">
-        ${esc(businessName)}
-      </div>
-      <div style="font-size:15px;color:#5B6472;margin-bottom:14px;">
-        Customer Statement — ${esc(client)}
-      </div>
-      <div style="height:2px;background:#B08D57;margin-bottom:22px;"></div>
-
-      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
-        <tr>
-          <td style="width:55%;vertical-align:top;border:0;padding:0;">
-            <div style="font-size:10px;color:#6B7280;font-weight:700;letter-spacing:.4px;">CUSTOMER</div>
-            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(client)}</div>
-            ${customerEmail ? `<div style="font-size:12px;color:#6B7280;margin-top:2px;">${esc(customerEmail)}</div>` : ''}
-          </td>
-          <td style="width:45%;vertical-align:top;text-align:right;border:0;padding:0;">
-            <div style="font-size:10px;color:#6B7280;font-weight:700;letter-spacing:.4px;">STATEMENT PERIOD</div>
-            <div style="font-size:13px;font-weight:700;margin-top:3px;">${esc(from)} to ${esc(to)}</div>
-          </td>
-        </tr>
-      </table>
-
-      <table style="width:100%;border-collapse:separate;border-spacing:6px 0;margin:0 -6px 20px -6px;table-layout:fixed;">
-        <tr>
-          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
-            <div style="font-size:9.5px;color:#6B7280;">Opening Balance</div>
-            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(openingBalance))}</div>
-          </td>
-          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
-            <div style="font-size:9.5px;color:#6B7280;">Charges</div>
-            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(totalCharges))}</div>
-          </td>
-          <td style="background:#F7F8FA;border:0;border-radius:5px;padding:10px;">
-            <div style="font-size:9.5px;color:#6B7280;">Payments</div>
-            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(totalPayments))}</div>
-          </td>
-          <td style="background:#EAF3DE;border:0;border-radius:5px;padding:10px;">
-            <div style="font-size:9.5px;color:#6B7280;">Balance as of ${esc(to)}</div>
-            <div style="font-size:14px;font-weight:700;margin-top:3px;">${esc(fmt(closingBalance))}</div>
-          </td>
-        </tr>
-      </table>
-
-      <style>
-        .stmt-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }
-        .stmt-table th { background:#F3F4F6; color:#4B5563; font-weight:700; padding:7px 5px; border-bottom:1px solid #CBD0D6; text-align:left; }
-        .stmt-table td { padding:7px 5px; border-bottom:1px solid #E6E8EB; vertical-align:top; overflow-wrap:anywhere; }
-        .stmt-table .num { text-align:right; white-space:nowrap; }
-        .stmt-table .strong { font-weight:700; }
-      </style>
-
-      <table class="stmt-table">
-        <colgroup>
-          <col style="width:12%;">
-          <col style="width:12%;">
-          <col style="width:31%;">
-          <col style="width:15%;">
-          <col style="width:15%;">
-          <col style="width:15%;">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Type</th>
-            <th>Reference</th>
-            <th style="text-align:right;">Charges</th>
-            <th style="text-align:right;">Payments</th>
-            <th style="text-align:right;">Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || `
-            <tr>
-              <td colspan="6" style="padding:12px;color:#6B7280;">No statement activity for this period.</td>
-            </tr>
-          `}
-        </tbody>
-      </table>
-
-      <table style="width:100%;border-collapse:collapse;margin-top:18px;">
-        <tr>
-          <td style="border:0;"></td>
-          <td style="width:300px;border-top:2px solid #1F2933;padding-top:9px;font-size:14px;font-weight:700;">
-            <span>Balance as of ${esc(to)}</span>
-            <span style="float:right;">${esc(fmt(closingBalance))}</span>
-          </td>
-        </tr>
-      </table>
-
-      ${legacyUndatedPayments ? `
-        <div style="font-size:9.5px;color:#6B7280;margin-top:16px;line-height:1.35;">
-          Note: some older invoices contain aggregate payments without individual payment dates.
-          Those amounts are included in the balance, but may not appear as separate payment activity within the selected period.
-        </div>
-      ` : ''}
-    </div>
-  `;
-
-  document.body.appendChild(host);
-
-  try {
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-    const blob = await html2pdf().from(host).set({
-      margin: [18, 18, 18, 18],
-      filename: filename || 'Customer_Statement.pdf',
-      pagebreak: { mode: ['css', 'legacy'] },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        scrollX: 0,
-        scrollY: 0,
-        width: 720,
-        windowWidth: 720,
-      },
-      jsPDF: {
-        unit: 'pt',
-        format: 'letter',
-        orientation: 'portrait',
-      },
-    }).output('blob');
-
-    if (!blob || blob.size < 1500) {
-      throw new Error('The statement PDF could not be generated correctly.');
-    }
-
-    return await blobToBase64(blob);
-  } finally {
-    host.remove();
+      charge: 0,
+      payment: 0,
+      runningBalance: Number(openingBalance) || 0,
+    });
   }
-}
+  (statementRows || []).forEach(r => rows.push(r));
 
+  if (!rows.length) {
+    doc.setTextColor(107, 114, 128);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('No statement activity for this period.', left + 4, y + 18);
+    y += 30;
+  } else {
+    for (const r of rows) {
+      const refLines = doc.splitTextToSize(String(r.reference || ''), widths[2] - 8);
+      const rowH = Math.max(22, refLines.length * 10 + 8);
+
+      if (y + rowH > pageH - bottom - 45) {
+        y = newPageWithTable();
+      }
+
+      let x = left;
+      const textY = y + 14;
+
+      doc.setTextColor(31, 41, 55);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+
+      doc.text(String(r.date || ''), x + 4, textY);
+      x += widths[0];
+
+      doc.text(String(r.type || ''), x + 4, textY);
+      x += widths[1];
+
+      doc.text(refLines, x + 4, textY);
+      x += widths[2];
+
+      if (Number(r.charge)) {
+        doc.text(moneyPdf(r.charge), x + widths[3] - 4, textY, { align: 'right' });
+      }
+      x += widths[3];
+
+      if (Number(r.payment)) {
+        doc.text(`-${moneyPdf(r.payment)}`, x + widths[4] - 4, textY, { align: 'right' });
+      }
+      x += widths[4];
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(moneyPdf(r.runningBalance), x + widths[5] - 4, textY, { align: 'right' });
+
+      doc.setDrawColor(230, 232, 235);
+      doc.setLineWidth(0.4);
+      doc.line(left, y + rowH, pageW - right, y + rowH);
+
+      y += rowH;
+    }
+  }
+
+  if (y + 50 > pageH - bottom) {
+    doc.addPage();
+    y = addHeader(false);
+  }
+
+  y += 18;
+  const totalBoxW = 230;
+  const totalX = pageW - right - totalBoxW;
+
+  doc.setDrawColor(31, 41, 55);
+  doc.setLineWidth(1.2);
+  doc.line(totalX, y, pageW - right, y);
+
+  y += 18;
+  doc.setTextColor(31, 41, 55);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(`Balance as of ${to}`, totalX, y);
+  doc.text(moneyPdf(closingBalance), pageW - right, y, { align: 'right' });
+
+  if (legacyUndatedPayments) {
+    y += 28;
+    doc.setTextColor(107, 114, 128);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    const note = 'Note: some older invoices contain aggregate payments without individual payment dates. Those amounts are included in the balance, but may not appear as separate payment activity within the selected period.';
+    const noteLines = doc.splitTextToSize(note, contentW);
+    doc.text(noteLines, left, y);
+  }
+
+  const pageCount = doc.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setTextColor(156, 163, 175);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(`Page ${p} of ${pageCount}`, pageW - right, pageH - 22, { align: 'right' });
+  }
+
+  const blob = doc.output('blob');
+  if (!blob || blob.size < 1000) {
+    throw new Error('The statement PDF could not be generated correctly.');
+  }
+  return blobToBase64(blob);
+}
 
 async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, from, replyTo }) {
   const res = await fetch('/api/send-invoice', {
