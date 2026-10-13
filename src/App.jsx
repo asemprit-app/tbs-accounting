@@ -1392,6 +1392,9 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   const [splitError, setSplitError] = useState('');
   const [linkingId, setLinkingId] = useState(null);
   const [linkInvoiceId, setLinkInvoiceId] = useState('');
+  const [editingLinkedPaymentTxId, setEditingLinkedPaymentTxId] = useState(null);
+  const [linkedPaymentDraft, setLinkedPaymentDraft] = useState({ date: '', amount: '', method: '', sourceGL: '' });
+  const [linkedPaymentError, setLinkedPaymentError] = useState('');
   const [importSource, setImportSource] = useState('bank');
   const [importCardGL, setImportCardGL] = useState('');
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' });
@@ -1621,13 +1624,36 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }
   function updateDate(id, date) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t));
+    const linked = findLinkedPayment(id);
+    if (linked && date) {
+      setInvoices(prev => prev.map(inv => {
+        if (inv.id !== linked.inv.id) return inv;
+        const payments = (inv.payments || []).map(p => p.id === linked.payment.id ? { ...p, date } : p);
+        return recalcInvoiceAfterPayments(inv, payments);
+      }));
+    }
   }
   function updateDescription(id, description) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, description } : t));
   }
   function updateAmount(id, amount) {
     if (amount === '' || isNaN(Number(amount))) return;
-    setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t));
+    const numeric = Number(amount);
+    const linked = findLinkedPayment(id);
+    if (linked) {
+      const otherPaid = (linked.inv.payments || []).filter(p => p.id !== linked.payment.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      const maxPayment = Math.max(0, invoiceTotal(linked.inv) - otherPaid);
+      if (numeric <= 0 || numeric > maxPayment + 0.005) {
+        alert(`Linked invoice payment must be greater than zero and cannot exceed ${money(maxPayment)}.`);
+        return;
+      }
+      setInvoices(prev => prev.map(inv => {
+        if (inv.id !== linked.inv.id) return inv;
+        const payments = (inv.payments || []).map(p => p.id === linked.payment.id ? { ...p, amount: Number(numeric.toFixed(2)) } : p);
+        return recalcInvoiceAfterPayments(inv, payments);
+      }));
+    }
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: numeric } : t));
   }
   function applyBulkAccount() {
     if (!bulkSourceGL || selected.length === 0) return;
@@ -1656,11 +1682,24 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       alert("This transaction is part of an approved reconciliation and can't be deleted. Go to Reconciliation, reopen that period, and reset its approval first — then try again.");
       return;
     }
+
+    const linked = findLinkedPayment(id);
+    if (linked) {
+      if (!window.confirm(`Delete this transaction AND remove its payment from invoice ${linked.inv.number}?\n\nThe invoice balance and status will be recalculated automatically.`)) return;
+      removeLinkedPayment(id, { keepTransaction: false });
+      setTransactions(prev => prev.filter(t => t.id !== id));
+      return;
+    }
+
     if (!window.confirm('Delete this transaction? This cannot be undone.')) return;
     setTransactions(prev => prev.filter(t => t.id !== id));
   }
 
   function openSplit(t) {
+    if (transactionAlreadyLinked(t.id)) {
+      alert('Remove the invoice payment link before splitting this transaction.');
+      return;
+    }
     if (reconciledIds.has(t.id) || (pendingReviewIds || []).includes(t.id)) {
       if (!window.confirm("This transaction is already marked in a reconciliation (approved or in review). Splitting it will carry that verified mark over to the new split lines automatically, so the reconciled total stays correct. Continue?")) return;
     }
@@ -1703,8 +1742,140 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setSplittingId(null);
   }
 
+  function findLinkedPayment(transactionId) {
+    for (const inv of invoices) {
+      const payment = (inv.payments || []).find(p => p.transactionId === transactionId);
+      if (payment) return { inv, payment };
+    }
+    return null;
+  }
+
+  function recalcInvoiceAfterPayments(inv, payments) {
+    const paid = Number(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0).toFixed(2));
+    const total = invoiceTotal(inv);
+    return {
+      ...inv,
+      payments,
+      paid,
+      status: paid >= total - 0.005 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending',
+    };
+  }
+
   function transactionAlreadyLinked(transactionId) {
-    return invoices.some(inv => (inv.payments || []).some(p => p.transactionId === transactionId));
+    return !!findLinkedPayment(transactionId);
+  }
+
+  function openLinkedPaymentEditor(t) {
+    const linked = findLinkedPayment(t.id);
+    if (!linked) return;
+    setEditingLinkedPaymentTxId(t.id);
+    setLinkedPaymentDraft({
+      date: linked.payment.date || t.date || todayStr(),
+      amount: String(linked.payment.amount ?? t.amount ?? ''),
+      method: linked.payment.method || 'Bank transaction',
+      sourceGL: linked.payment.sourceGL || t.sourceGL || '',
+    });
+    setLinkedPaymentError('');
+  }
+
+  function saveLinkedPaymentEdit() {
+    const txId = editingLinkedPaymentTxId;
+    const linked = findLinkedPayment(txId);
+    const tx = transactions.find(t => t.id === txId);
+    if (!linked || !tx) {
+      setLinkedPaymentError('The linked payment could not be found.');
+      return;
+    }
+
+    const amount = Number(linkedPaymentDraft.amount);
+    if (!linkedPaymentDraft.date || !Number.isFinite(amount) || amount <= 0) {
+      setLinkedPaymentError('Enter a valid date and payment amount greater than zero.');
+      return;
+    }
+    if (!linkedPaymentDraft.method.trim()) {
+      setLinkedPaymentError('Enter a payment method.');
+      return;
+    }
+    if (!linkedPaymentDraft.sourceGL) {
+      setLinkedPaymentError('Select the deposit account.');
+      return;
+    }
+
+    const otherPaid = (linked.inv.payments || [])
+      .filter(p => p.id !== linked.payment.id)
+      .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const maxPayment = Math.max(0, invoiceTotal(linked.inv) - otherPaid);
+    if (amount > maxPayment + 0.005) {
+      setLinkedPaymentError(`Payment cannot exceed the remaining invoice balance of ${money(maxPayment)}.`);
+      return;
+    }
+
+    const roundedAmount = Number(amount.toFixed(2));
+    const updatedPayment = {
+      ...linked.payment,
+      date: linkedPaymentDraft.date,
+      amount: roundedAmount,
+      method: linkedPaymentDraft.method.trim(),
+      sourceGL: linkedPaymentDraft.sourceGL,
+      transactionId: txId,
+    };
+
+    setInvoices(prev => prev.map(inv => {
+      if (inv.id !== linked.inv.id) return inv;
+      const payments = (inv.payments || []).map(p => p.id === linked.payment.id ? updatedPayment : p);
+      return recalcInvoiceAfterPayments(inv, payments);
+    }));
+
+    setTransactions(prev => prev.map(t => t.id === txId ? {
+      ...t,
+      date: linkedPaymentDraft.date,
+      amount: roundedAmount,
+      sourceGL: linkedPaymentDraft.sourceGL,
+      gl: matchAccountByName('Accounts Receivable', accounts) || t.gl || '1100',
+      status: 'MATCH',
+    } : t));
+
+    setEditingLinkedPaymentTxId(null);
+    setLinkedPaymentError('');
+  }
+
+  function removeLinkedPayment(transactionId, { keepTransaction = true } = {}) {
+    const linked = findLinkedPayment(transactionId);
+    if (!linked) return false;
+
+    setInvoices(prev => prev.map(inv => {
+      if (inv.id !== linked.inv.id) return inv;
+      const payments = (inv.payments || []).filter(p => p.id !== linked.payment.id);
+      return recalcInvoiceAfterPayments(inv, payments);
+    }));
+
+    if (keepTransaction) {
+      setTransactions(prev => prev.map(t => {
+        if (t.id !== transactionId) return t;
+        return {
+          ...t,
+          description: t.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim(),
+          gl: '',
+          status: 'REVIEW',
+        };
+      }));
+    }
+    return true;
+  }
+
+  function unlinkLinkedPayment(transactionId) {
+    const linked = findLinkedPayment(transactionId);
+    if (!linked) return;
+    if (reconciledIds.has(transactionId)) {
+      alert("This transaction is part of an approved reconciliation. Reopen/reset that reconciliation before removing the invoice payment.");
+      return;
+    }
+    if (!window.confirm(`Remove the payment from invoice ${linked.inv.number}?\n\nThe bank transaction will remain in Transactions as REVIEW so you can recategorize or match it again.`)) return;
+    removeLinkedPayment(transactionId, { keepTransaction: true });
+    if (editingLinkedPaymentTxId === transactionId) {
+      setEditingLinkedPaymentTxId(null);
+      setLinkedPaymentError('');
+    }
   }
 
   function openLink(t) {
@@ -2050,9 +2221,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                     <button title="Match this bank deposit to an open invoice" onClick={() => openLink(t)} style={iconBtn}>Match to invoice</button>
                   )}
                   {transactionAlreadyLinked(t.id) && (
-                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched</span>
+                    <>
+                      <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched</span>
+                      <button title="Edit the payment applied to this invoice" onClick={() => openLinkedPaymentEditor(t)} style={iconBtn}>Edit payment</button>
+                      <button title="Remove payment from invoice but keep the bank transaction" onClick={() => unlinkLinkedPayment(t.id)} style={iconBtn}>Remove payment</button>
+                    </>
                   )}
-                  <button title="Delete" onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
+                  <button title={transactionAlreadyLinked(t.id) ? 'Delete transaction and linked invoice payment' : 'Delete'} onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
             ))}
@@ -2100,6 +2275,60 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button onClick={() => setSplittingId(null)} style={iconBtn}>Cancel</button>
                 <button onClick={confirmSplit} disabled={!balanced} style={{ background: balanced ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: balanced ? 'pointer' : 'default' }}>Confirm split</button>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {editingLinkedPaymentTxId && (() => {
+        const linked = findLinkedPayment(editingLinkedPaymentTxId);
+        const tx = transactions.find(t => t.id === editingLinkedPaymentTxId);
+        if (!linked || !tx) return null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 65 }}>
+            <Card style={{ width: 430, maxWidth: '94vw' }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Edit invoice payment</div>
+              <div style={{ fontSize: 12.5, color: '#6B7280', marginBottom: 12 }}>
+                Invoice {linked.inv.number} — {linked.inv.client}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Payment date</label>
+                  <input type="date" style={{ width: '100%' }} value={linkedPaymentDraft.date} onChange={e => setLinkedPaymentDraft(d => ({ ...d, date: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
+                  <input type="number" step="0.01" min="0.01" style={{ width: '100%' }} value={linkedPaymentDraft.amount} onChange={e => setLinkedPaymentDraft(d => ({ ...d, amount: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Payment method</label>
+                <input style={{ width: '100%' }} value={linkedPaymentDraft.method} onChange={e => setLinkedPaymentDraft(d => ({ ...d, method: e.target.value }))} placeholder="Bank transaction, ACH, check, cash..." />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Deposit account</label>
+                <select style={{ width: '100%' }} value={linkedPaymentDraft.sourceGL} onChange={e => setLinkedPaymentDraft(d => ({ ...d, sourceGL: e.target.value }))}>
+                  <option value="">Select account</option>
+                  {accounts.filter(a => a.type === 'Asset').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                </select>
+              </div>
+
+              <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 8, fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+                Saving updates both the invoice payment history and this transaction. No duplicate transaction is created.
+              </div>
+
+              {linkedPaymentError && <div style={{ color: '#B00020', fontSize: 12.5, marginBottom: 10 }}>{linkedPaymentError}</div>}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => unlinkLinkedPayment(editingLinkedPaymentTxId)} style={{ ...iconBtn, color: '#B00020' }}>Remove payment</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setEditingLinkedPaymentTxId(null); setLinkedPaymentError(''); }} style={iconBtn}>Cancel</button>
+                  <button onClick={saveLinkedPaymentEdit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Save changes</button>
+                </div>
               </div>
             </Card>
           </div>
