@@ -1070,7 +1070,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoiceRetentionBase={invoiceRetentionBase}
             invoiceIvuBase={invoiceIvuBase}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
-            transactions={transactions} setTransactions={setTransactions} accounts={accounts}
+            transactions={transactions} setTransactions={setTransactions} accounts={accounts} reconciliations={reconciliations}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
             products={products}
             sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
@@ -2221,11 +2221,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                     <button title="Match this bank deposit to an open invoice" onClick={() => openLink(t)} style={iconBtn}>Match to invoice</button>
                   )}
                   {transactionAlreadyLinked(t.id) && (
-                    <>
-                      <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched</span>
-                      <button title="Edit the payment applied to this invoice" onClick={() => openLinkedPaymentEditor(t)} style={iconBtn}>Edit payment</button>
-                      <button title="Remove payment from invoice but keep the bank transaction" onClick={() => unlinkLinkedPayment(t.id)} style={iconBtn}>Remove payment</button>
-                    </>
+                    <span style={{ color: '#0F6E56', fontSize: 11.5, fontWeight: 600, alignSelf: 'center' }}>✓ Invoice matched · manage from Invoice Edit</span>
                   )}
                   <button title={transactionAlreadyLinked(t.id) ? 'Delete transaction and linked invoice payment' : 'Delete'} onClick={() => removeRow(t.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
@@ -2281,59 +2277,6 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
         );
       })()}
 
-      {editingLinkedPaymentTxId && (() => {
-        const linked = findLinkedPayment(editingLinkedPaymentTxId);
-        const tx = transactions.find(t => t.id === editingLinkedPaymentTxId);
-        if (!linked || !tx) return null;
-        return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 65 }}>
-            <Card style={{ width: 430, maxWidth: '94vw' }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Edit invoice payment</div>
-              <div style={{ fontSize: 12.5, color: '#6B7280', marginBottom: 12 }}>
-                Invoice {linked.inv.number} — {linked.inv.client}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Payment date</label>
-                  <input type="date" style={{ width: '100%' }} value={linkedPaymentDraft.date} onChange={e => setLinkedPaymentDraft(d => ({ ...d, date: e.target.value }))} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Amount</label>
-                  <input type="number" step="0.01" min="0.01" style={{ width: '100%' }} value={linkedPaymentDraft.amount} onChange={e => setLinkedPaymentDraft(d => ({ ...d, amount: e.target.value }))} />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Payment method</label>
-                <input style={{ width: '100%' }} value={linkedPaymentDraft.method} onChange={e => setLinkedPaymentDraft(d => ({ ...d, method: e.target.value }))} placeholder="Bank transaction, ACH, check, cash..." />
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Deposit account</label>
-                <select style={{ width: '100%' }} value={linkedPaymentDraft.sourceGL} onChange={e => setLinkedPaymentDraft(d => ({ ...d, sourceGL: e.target.value }))}>
-                  <option value="">Select account</option>
-                  {accounts.filter(a => a.type === 'Asset').map(a => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
-                </select>
-              </div>
-
-              <div style={{ background: '#F7F8FA', borderRadius: 6, padding: 8, fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
-                Saving updates both the invoice payment history and this transaction. No duplicate transaction is created.
-              </div>
-
-              {linkedPaymentError && <div style={{ color: '#B00020', fontSize: 12.5, marginBottom: 10 }}>{linkedPaymentError}</div>}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => unlinkLinkedPayment(editingLinkedPaymentTxId)} style={{ ...iconBtn, color: '#B00020' }}>Remove payment</button>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => { setEditingLinkedPaymentTxId(null); setLinkedPaymentError(''); }} style={iconBtn}>Cancel</button>
-                  <button onClick={saveLinkedPaymentEdit} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Save changes</button>
-                </div>
-              </div>
-            </Card>
-          </div>
-        );
-      })()}
 
       {linkingId && (() => {
         const t = transactions.find(x => x.id === linkingId);
@@ -3223,7 +3166,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
+function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, reconciliations, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -3566,6 +3509,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     })) });
     setEditingId(inv.id);
     setCopiedFromId(null);
+    setRemovedInvoicePayments([]);
     setShowForm(true);
     setError('');
   }
@@ -3593,9 +3537,46 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     });
     setEditingId(null);
     setCopiedFromId(inv.id);
+    setRemovedInvoicePayments([]);
     setShowForm(true);
     setError('');
   }
+  const approvedReconciledTransactionIds = useMemo(() => {
+    const ids = new Set();
+    (reconciliations || []).filter(r => r.status === 'PASS').forEach(r => {
+      (r.verifiedIds || []).forEach(id => ids.add(id));
+    });
+    return ids;
+  }, [reconciliations]);
+
+  function removePaymentWhileEditing(payment) {
+    if (!editingId) return;
+
+    if (payment.transactionId && approvedReconciledTransactionIds.has(payment.transactionId)) {
+      alert("This payment is tied to a transaction in an approved reconciliation. Reopen/reset that reconciliation before removing the payment.");
+      return;
+    }
+
+    if (!window.confirm(`Remove this payment of ${money(payment.amount)} dated ${payment.date || '—'} from this invoice?\n\nThe change will take effect when you click Update invoice.`)) return;
+
+    setForm(f => {
+      const currentPayments = Array.isArray(f.payments) ? f.payments : [];
+      const currentPaymentsTotal = currentPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      const legacyPaid = Math.max(0, (Number(f.paid) || 0) - currentPaymentsTotal);
+      const updatedPayments = currentPayments.filter(p => p.id !== payment.id);
+      const paid = Number((legacyPaid + updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)).toFixed(2));
+      const next = { ...f, payments: updatedPayments, paid };
+      const total = invoiceTotal(next);
+      next.status = paid >= total - 0.005 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
+      return next;
+    });
+
+    setRemovedInvoicePayments(prev => [
+      ...prev.filter(p => p.id !== payment.id),
+      { ...payment }
+    ]);
+  }
+
   function saveEditedInvoice() {
     if (!form.client.trim()) { setError("Enter the customer's name."); return; }
     if (form.lines.some(l => !l.desc.trim() || !l.rate)) { setError('Each line needs a description and price.'); return; }
@@ -3604,7 +3585,42 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
       return;
     }
     setError('');
-    setInvoices(prev => prev.map(i => i.id === editingId ? { ...form, id: editingId, number: i.number } : i));
+
+    const finalForm = { ...form };
+    const finalTotal = invoiceTotal(finalForm);
+    finalForm.status = (Number(finalForm.paid) || 0) >= finalTotal - 0.005
+      ? 'Paid'
+      : (Number(finalForm.paid) || 0) > 0 ? 'Partial' : 'Pending';
+
+    setInvoices(prev => prev.map(i => i.id === editingId ? { ...finalForm, id: editingId, number: i.number } : i));
+
+    if (removedInvoicePayments.length > 0) {
+      const generatedTransactionIds = new Set(
+        removedInvoicePayments
+          .filter(p => p.transactionId && p.source === 'invoice_payment')
+          .map(p => p.transactionId)
+      );
+      const bankLinkedIds = new Set(
+        removedInvoicePayments
+          .filter(p => p.transactionId && p.source !== 'invoice_payment')
+          .map(p => p.transactionId)
+      );
+
+      setTransactions(prev => prev
+        .filter(t => !generatedTransactionIds.has(t.id))
+        .map(t => {
+          if (!bankLinkedIds.has(t.id)) return t;
+          return {
+            ...t,
+            description: t.description.replace(/\s*\[Matched to invoice [^\]]+\]\s*/gi, '').trim(),
+            gl: '',
+            status: 'REVIEW',
+          };
+        })
+      );
+    }
+
+    setRemovedInvoicePayments([]);
     setForm(blankInvoice());
     setEditingId(null);
     setCopiedFromId(null);
@@ -3614,6 +3630,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     setForm(blankInvoice());
     setEditingId(null);
     setCopiedFromId(null);
+    setRemovedInvoicePayments([]);
     setShowForm(false);
     setError('');
   }
@@ -3626,6 +3643,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   const [showSettings, setShowSettings] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [copiedFromId, setCopiedFromId] = useState(null);
+  const [removedInvoicePayments, setRemovedInvoicePayments] = useState([]);
 
   return (
     <div>
@@ -3633,7 +3651,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
         <h2 style={{ margin: 0 }}>Invoices</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowSettings(s => !s)} style={iconBtn}>Invoice Settings</button>
-          <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setCopiedFromId(null); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+          <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setCopiedFromId(null); setRemovedInvoicePayments([]); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> New invoice
           </button>
         </div>
@@ -3771,7 +3789,44 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
             </div>
           </div>
 
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>Total: {money(invoiceTotal(form))}</div>
+          {editingId && (
+            <div style={{ marginBottom: 14, border: '1px solid #D8DCE1', borderRadius: 7, overflow: 'hidden' }}>
+              <div style={{ background: '#F3F4F6', padding: '8px 10px', fontWeight: 700, fontSize: 13 }}>
+                Payments Applied
+              </div>
+              {(form.payments || []).length > 0 ? (
+                <div>
+                  {(form.payments || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).map(p => (
+                    <div key={p.id || `${p.date}-${p.amount}`} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 110px auto', gap: 8, alignItems: 'center', padding: '8px 10px', borderTop: '1px solid #EEE', fontSize: 12.5 }}>
+                      <div>{p.date || '—'}</div>
+                      <div>
+                        <div>{p.method || '—'}</div>
+                        <div style={{ color: '#6B7280', fontSize: 11 }}>{p.sourceGL ? `Deposit: ${p.sourceGL}` : 'No deposit account'}</div>
+                      </div>
+                      <div style={{ textAlign: 'right', fontWeight: 600 }}>{money(p.amount)}</div>
+                      <button type="button" onClick={() => removePaymentWhileEditing(p)} style={{ ...iconBtn, color: '#B00020' }}>Remove</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderTop: '1px solid #D8DCE1', fontSize: 12.5, fontWeight: 700 }}>
+                    <span>Total paid</span>
+                    <span>{money(form.paid || 0)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: '10px', fontSize: 12.5, color: '#6B7280' }}>No payments are currently applied to this invoice.</div>
+              )}
+              {removedInvoicePayments.length > 0 && (
+                <div style={{ padding: '8px 10px', background: '#FFF8E6', color: '#7A5B00', fontSize: 11.5, borderTop: '1px solid #F0D896' }}>
+                  {removedInvoicePayments.length} payment{removedInvoicePayments.length === 1 ? '' : 's'} marked for removal. Click <strong>Update invoice</strong> to save the change, or Cancel to discard it.
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div style={{ fontWeight: 700 }}>Total: {money(invoiceTotal(form))}</div>
+            {editingId && <div style={{ fontSize: 12.5, color: '#6B7280' }}>Paid: {money(form.paid || 0)} · Balance: {money(Math.max(0, invoiceTotal(form) - (Number(form.paid) || 0)))}</div>}
+          </div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={editingId ? saveEditedInvoice : saveInvoice} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
