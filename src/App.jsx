@@ -1039,6 +1039,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           ...row, employeeName: row.employee_name, date: row.service_date,
           resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
           ivuPct: Number(row.ivu_pct) || 0,
+          invoiceNumber: row.invoice_number || '',
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
           grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
@@ -1192,6 +1193,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         id: s.id, employee_name: s.employeeName, service_date: s.date,
         resource_type: s.resourceType || 'service_provider',
         ivu_pct: Number(s.ivuPct) || 0,
+        invoice_number: s.invoiceNumber || '',
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
         gross_override: s.grossOverride === '' || s.grossOverride === null || s.grossOverride === undefined ? null : Number(s.grossOverride),
@@ -2942,7 +2944,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
   function blankService() {
-    return { resourceType: 'service_provider', employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, reimbursement: '' };
+    return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, reimbursement: '' };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -2968,7 +2970,8 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     if (form.payRate !== '' && Number(form.payRate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
-      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(), date: form.date,
+      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(),
+      invoiceNumber: (form.invoiceNumber || '').trim(), date: form.date,
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
       grossOverride: hasManualGross ? Number(form.grossOverride) : '',
@@ -2982,6 +2985,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   function saveEdit(id) {
     setServices(prev => prev.map(s => s.id === id ? {
       ...s, ...editDraft,
+      invoiceNumber: (editDraft.invoiceNumber || '').trim(),
       hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
       tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
       grossOverride: editDraft.grossOverride === '' || editDraft.grossOverride === null || editDraft.grossOverride === undefined ? '' : Number(editDraft.grossOverride),
@@ -3039,7 +3043,8 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     jeLines.push({ gl: codes.netPayPayable, debit: '', credit: c.netPay.toFixed(2), desc: 'Net pay payable' });
 
     const jeId = uid();
-    const je = { id: jeId, date: s.date, memo: `Services — ${s.employeeName} (${s.date})`, lines: jeLines };
+    const invoiceRef = s.invoiceNumber ? ` — Invoice ${s.invoiceNumber}` : '';
+    const je = { id: jeId, date: s.date, memo: `Services — ${s.employeeName}${invoiceRef} (${s.date})`, lines: jeLines };
     setJournalEntries(prev => [...prev, je]);
     setServices(prev => prev.map(x => x.id === s.id ? { ...x, postedJeId: jeId } : x));
     alert('Posted to Journal Entries.');
@@ -3121,6 +3126,15 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                 : serviceProviderNames.map(n => <option key={n} value={n} label="Service Provider / Contractor" />)}
             </datalist>
           </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Invoice # (optional)</label>
+            <input
+              style={{ width: 130 }}
+              value={form.invoiceNumber || ''}
+              onChange={e => setForm(f => ({ ...f, invoiceNumber: e.target.value }))}
+              placeholder="Invoice #"
+            />
+          </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Hours</label>
@@ -3183,6 +3197,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             {th('employeeName', 'Resource')}
             {th('resourceType', 'Resource Type')}
+            <th style={{ padding: '6px 4px' }}>Invoice #</th>
             {th('date', 'Date')}
             {th('hours', 'Hours')}
             {th('payRate', 'Pay rate')}
@@ -3219,6 +3234,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                           <option value="employee">Employee</option>
                         </select>
                       </td>
+                      <td style={{ padding: '4px' }}><input style={{ width: 105 }} value={editDraft.invoiceNumber || ''} onChange={e => setEditDraft(d => ({ ...d, invoiceNumber: e.target.value }))} placeholder="Optional" /></td>
                       <td style={{ padding: '4px' }}><input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} /></td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours}
                         onChange={e => setEditDraft(d => { const next = { ...d, hours: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
@@ -3273,6 +3289,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                           {resourceTypeLabel(s.resourceType)}
                         </span>
                       </td>
+                      <td style={{ padding: '4px', color: s.invoiceNumber ? '#1F2933' : '#9CA3AF' }}>{s.invoiceNumber || '—'}</td>
                       <td style={{ padding: '4px' }}>{s.date}</td>
                       <td style={{ padding: '4px' }}>{Number(s.hours || 0).toFixed(2)}</td>
                       <td style={{ padding: '4px' }}>{money(s.payRate)}</td>
@@ -3311,7 +3328,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           {sortedServices.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
-                <td style={{ padding: '4px' }} colSpan={3}>Total ({sortedServices.length})</td>
+                <td style={{ padding: '4px' }} colSpan={4}>Total ({sortedServices.length})</td>
                 <td style={{ padding: '4px' }}>{totals.hours.toFixed(2)}</td>
                 <td></td><td></td>
                 <td style={{ padding: '4px' }}>{money(totals.tipsNet)}</td>
@@ -3454,14 +3471,14 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
 
   function exportCSV() {
     if (rows.length === 0) { setSendMsg('No service entries match the selected period.'); return; }
-    let csv = 'Resource,Resource Type,Date,Hours,Pay Rate,Tips,Gross,Retention,IVU %,IVU Amount,Sub-Total,Reimbursement,Net Pay,Status\n';
+    let csv = 'Resource,Resource Type,Invoice #,Date,Hours,Pay Rate,Tips,Gross,Retention,IVU %,IVU Amount,Sub-Total,Reimbursement,Net Pay,Status\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     rows.forEach(s => {
       const c = serviceCalc(s);
-      csv += [esc(s.employeeName), esc(resourceTypeLabel(s.resourceType)), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
+      csv += [esc(s.employeeName), esc(resourceTypeLabel(s.resourceType)), esc(s.invoiceNumber || ''), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
         Number(s.retentionAmount || 0).toFixed(2), c.ivuPct.toFixed(2), c.ivuAmount.toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
     });
-    csv += `TOTAL,,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},,${totals.ivu.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
+    csv += `TOTAL,,,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},,${totals.ivu.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3526,6 +3543,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
             <th style={{ padding: '4px 4px' }}>Resource</th>
             <th style={{ padding: '4px' }}>Resource Type</th>
+            <th style={{ padding: '4px' }}>Invoice #</th>
             <th style={{ padding: '4px' }}>Date</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Hours</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Pay Rate</th>
@@ -3545,6 +3563,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
                 <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
                   <td style={{ padding: '4px 4px' }}>{s.employeeName}</td>
                   <td style={{ padding: '4px' }}>{resourceTypeLabel(s.resourceType)}</td>
+                  <td style={{ padding: '4px' }}>{s.invoiceNumber || '—'}</td>
                   <td style={{ padding: '4px' }}>{s.date}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{Number(s.hours || 0).toFixed(2)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.payRate)}</td>
@@ -3564,6 +3583,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
             <tfoot>
               <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
                 <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours.toFixed(2)}</td>
@@ -3642,6 +3662,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
           <div style={{ fontSize: 13 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Nombre</span><span style={{ fontWeight: 700 }}>{service.employeeName}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Tipo de recurso</span><span style={{ fontWeight: 700 }}>{resourceTypeLabel(service.resourceType)}</span></div>
+            {service.invoiceNumber && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Número de factura</span><span style={{ fontWeight: 700 }}>{service.invoiceNumber}</span></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Fecha de pago</span><span style={{ fontWeight: 700 }}>{service.date}</span></div>
             {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Horas</span><span>{service.hours}</span></div>}
             {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Pay rate</span><span>{money(service.payRate)}</span></div>}
