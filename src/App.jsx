@@ -2950,6 +2950,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editDraft, setEditDraft] = useState(blankService());
+  const [copiedServiceId, setCopiedServiceId] = useState(null);
   const [sort, setSort] = useState({ column: null, dir: 'asc' });
   const [receiptId, setReceiptId] = useState(null);
   const [checkServiceId, setCheckServiceId] = useState(null);
@@ -2980,8 +2981,31 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       reimbursement: Number(form.reimbursement) || 0,
     }]);
     setForm(blankService());
+    setCopiedServiceId(null);
   }
   function startEdit(s) { setEditingId(s.id); setEditDraft({ ...s }); }
+
+  function copyService(s) {
+    setEditingId(null);
+    setCopiedServiceId(s.id);
+    setError('');
+    setForm({
+      resourceType: s.resourceType || 'service_provider',
+      employeeName: s.employeeName || '',
+      invoiceNumber: s.invoiceNumber || '',
+      date: s.date || todayStr(),
+      hours: Number(s.hours) || 0,
+      payRate: Number(s.payRate) || 0,
+      tipsRaw: Number(s.tipsRaw) || 0,
+      tipsRetentionPct: Number(s.tipsRetentionPct) || 0,
+      grossOverride: s.grossOverride === null || s.grossOverride === undefined ? '' : s.grossOverride,
+      retentionAmount: Number(s.retentionAmount) || 0,
+      ivuPct: Number(s.ivuPct) || 0,
+      reimbursement: Number(s.reimbursement) || 0,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function saveEdit(id) {
     setServices(prev => prev.map(s => s.id === id ? {
       ...s, ...editDraft,
@@ -3093,7 +3117,15 @@ function ServicesView({ services, setServices, employees, businessName, logoData
         <button onClick={() => setShowRegister(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Receipt Register</button>
       </div>
       <Card style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>Add service entry</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontWeight: 600 }}>{copiedServiceId ? 'Copy service entry' : 'Add service entry'}</div>
+          {copiedServiceId && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11.5, color: '#6B7280' }}>Copied values loaded — edit date/amounts, then Add.</span>
+              <button type="button" onClick={() => { setForm(blankService()); setCopiedServiceId(null); setError(''); }} style={iconBtn}>Cancel copy</button>
+            </div>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Resource Type</label>
@@ -3310,6 +3342,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       <td style={{ padding: '4px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => setReceiptId(s.id)} style={iconBtn}>Receipt</button>
                         <button onClick={() => setCheckServiceId(s.id)} style={iconBtn}>Print Check</button>
+                        <button onClick={() => copyService(s)} style={iconBtn}>Copy</button>
                         <button onClick={() => startEdit(s)} style={iconBtn}>Edit</button>
                         {s.status === 'DRAFT'
                           ? <button onClick={() => finalizeService(s.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
@@ -8445,7 +8478,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
         businessName={businessName}
       />}
       {subTab === 'runs' && !openRunId && (
-        <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines}
+        <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={postPayrollToJournal} />
       )}
       {subTab === 'runs' && openRunId && (
@@ -8570,19 +8603,53 @@ function EmployeesTab({ employees, setEmployees }) {
   );
 }
 
-function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees, onOpenRun, onPrintRun, onPost }) {
+function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onPost }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
+  const [copiedRunId, setCopiedRunId] = useState(null);
 
   function createRun() {
     if (!form.periodStart || !form.periodEnd || !form.payDate) { setError('Fill in all three dates.'); return; }
+    if (form.periodEnd < form.periodStart) { setError('Period end cannot be before Period start.'); return; }
     setError('');
     const runId = uid();
-    setPayrollRuns(prev => [...prev, { id: runId, periodStart: form.periodStart, periodEnd: form.periodEnd, payDate: form.payDate, status: 'DRAFT' }]);
+
+    setPayrollRuns(prev => [...prev, {
+      id: runId,
+      periodStart: form.periodStart,
+      periodEnd: form.periodEnd,
+      payDate: form.payDate,
+      status: 'DRAFT',
+      postedJeId: null,
+    }]);
+
+    if (copiedRunId) {
+      const sourceLines = payrollLines.filter(l => l.payrollRunId === copiedRunId);
+      const copiedLines = sourceLines.map(l => ({
+        ...l,
+        id: uid(),
+        payrollRunId: runId,
+      }));
+      if (copiedLines.length) setPayrollLines(prev => [...prev, ...copiedLines]);
+    }
+
     setShowForm(false);
+    setCopiedRunId(null);
     setForm({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
     onOpenRun(runId);
+  }
+
+  function copyPayrollRun(run) {
+    setCopiedRunId(run.id);
+    setForm({
+      periodStart: run.periodStart || todayStr(),
+      periodEnd: run.periodEnd || todayStr(),
+      payDate: run.payDate || todayStr(),
+    });
+    setError('');
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function removeRun(id) {
     if (!window.confirm('Delete this payroll run and all its lines? This cannot be undone.')) return;
@@ -8603,12 +8670,27 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <button onClick={() => setShowForm(s => !s)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
+        <button onClick={() => {
+          if (showForm) {
+            setShowForm(false);
+            setCopiedRunId(null);
+            setError('');
+          } else {
+            setCopiedRunId(null);
+            setForm({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
+            setShowForm(true);
+          }
+        }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
           <Plus size={15} /> New payroll run
         </button>
       </div>
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
+          {copiedRunId && (
+            <div style={{ background: '#F7F8FA', borderRadius: 6, padding: '8px 10px', marginBottom: 10, fontSize: 12.5 }}>
+              <strong>Copy payroll run:</strong> employee lines and amounts will be duplicated as a new DRAFT. Edit the dates below before creating, then adjust hours/amounts inside the new run.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Period start</label>
               <input type="date" value={form.periodStart} onChange={e => setForm(f => ({ ...f, periodStart: e.target.value }))} /></div>
@@ -8616,7 +8698,9 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
               <input type="date" value={form.periodEnd} onChange={e => setForm(f => ({ ...f, periodEnd: e.target.value }))} /></div>
             <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Pay date</label>
               <input type="date" value={form.payDate} onChange={e => setForm(f => ({ ...f, payDate: e.target.value }))} /></div>
-            <button onClick={createRun} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Create</button>
+            <button onClick={createRun} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+              {copiedRunId ? 'Create copied run' : 'Create'}
+            </button>
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8 }}>{error}</div>}
         </Card>
@@ -8643,6 +8727,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, employees,
                   </td>
                   <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                     <button onClick={() => onOpenRun(r.id)} style={iconBtn}>Open</button>
+                    <button onClick={() => copyPayrollRun(r)} style={iconBtn}>Copy</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
                     {r.status === 'DRAFT'
                       ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
