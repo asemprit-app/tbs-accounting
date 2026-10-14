@@ -1038,6 +1038,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setServicesRaw((svc.data || []).map(row => ({
           ...row, employeeName: row.employee_name, date: row.service_date,
           resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
+          ivuPct: Number(row.ivu_pct) || 0,
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
           grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
@@ -1190,6 +1191,7 @@ async function fetchAllRows(table, clientId, orderCol) {
       const toDb = arr => arr.map(s => ({
         id: s.id, employee_name: s.employeeName, service_date: s.date,
         resource_type: s.resourceType || 'service_provider',
+        ivu_pct: Number(s.ivuPct) || 0,
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
         gross_override: s.grossOverride === '' || s.grossOverride === null || s.grossOverride === undefined ? null : Number(s.grossOverride),
@@ -2917,9 +2919,11 @@ function serviceCalc(s) {
   const hasManualGross = s.grossOverride !== '' && s.grossOverride !== null && s.grossOverride !== undefined;
   const calculatedGross = (Number(s.hours) || 0) * (Number(s.payRate) || 0) + tipsNet;
   const gross = hasManualGross ? (Number(s.grossOverride) || 0) : calculatedGross;
+  const ivuPct = (s.resourceType || 'service_provider') === 'employee' ? 0 : (Number(s.ivuPct) || 0);
+  const ivuAmount = Number((gross * ivuPct / 100).toFixed(2));
   const subtotal = gross - (Number(s.retentionAmount) || 0);
-  const netPay = subtotal + (Number(s.reimbursement) || 0);
-  return { tipsNet, gross, subtotal, netPay, hasManualGross, calculatedGross };
+  const netPay = subtotal + ivuAmount + (Number(s.reimbursement) || 0);
+  return { tipsNet, gross, ivuPct, ivuAmount, subtotal, netPay, hasManualGross, calculatedGross };
 }
 function resourceTypeLabel(type) {
   return type === 'employee' ? 'Employee' : 'Service Provider / Contractor';
@@ -2938,7 +2942,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
   function blankService() {
-    return { resourceType: 'service_provider', employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', reimbursement: '' };
+    return { resourceType: 'service_provider', employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, reimbursement: '' };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -2968,7 +2972,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
       grossOverride: hasManualGross ? Number(form.grossOverride) : '',
-      retentionAmount: Number(form.retentionAmount) || 0, reimbursement: Number(form.reimbursement) || 0,
+      retentionAmount: Number(form.retentionAmount) || 0,
+      ivuPct: (form.resourceType || 'service_provider') === 'employee' ? 0 : (Number(form.ivuPct) || 0),
+      reimbursement: Number(form.reimbursement) || 0,
     }]);
     setForm(blankService());
   }
@@ -2979,7 +2985,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
       tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
       grossOverride: editDraft.grossOverride === '' || editDraft.grossOverride === null || editDraft.grossOverride === undefined ? '' : Number(editDraft.grossOverride),
-      retentionAmount: Number(editDraft.retentionAmount) || 0, reimbursement: Number(editDraft.reimbursement) || 0,
+      retentionAmount: Number(editDraft.retentionAmount) || 0,
+      ivuPct: (editDraft.resourceType || 'service_provider') === 'employee' ? 0 : (Number(editDraft.ivuPct) || 0),
+      reimbursement: Number(editDraft.reimbursement) || 0,
     } : s));
     setEditingId(null);
   }
@@ -3005,11 +3013,13 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       wages: 'Service Wages Expense',
       retentionPayable: 'Income Tax Withheld Payable 10%',
       netPayPayable: 'Professional Service Payable',
+      ivuPaid: 'IVU Paid / Input Tax Credit',
     };
     const codes = {
       wages: findCode(ACCOUNT_NAMES.wages),
       retentionPayable: findCode(ACCOUNT_NAMES.retentionPayable),
       netPayPayable: findCode(ACCOUNT_NAMES.netPayPayable),
+      ivuPaid: c.ivuAmount > 0 ? findCode(ACCOUNT_NAMES.ivuPaid) : 'NOT_REQUIRED',
     };
     const missing = Object.entries(codes).filter(([, v]) => !v).map(([k]) => ACCOUNT_NAMES[k]);
     if (missing.length) {
@@ -3019,6 +3029,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     const jeLines = [{ gl: codes.wages, debit: c.gross.toFixed(2), credit: '', desc: `Service pay — ${s.employeeName}` }];
     if (Number(s.reimbursement) > 0) {
       jeLines.push({ gl: codes.wages, debit: Number(s.reimbursement).toFixed(2), credit: '', desc: 'Reimbursement' });
+    }
+    if (c.ivuAmount > 0) {
+      jeLines.push({ gl: codes.ivuPaid, debit: c.ivuAmount.toFixed(2), credit: '', desc: `IVU paid (${c.ivuPct}%)` });
     }
     if (Number(s.retentionAmount) > 0) {
       jeLines.push({ gl: codes.retentionPayable, debit: '', credit: Number(s.retentionAmount).toFixed(2), desc: 'Retention' });
@@ -3058,10 +3071,10 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     const c = serviceCalc(s);
     return {
       hours: t.hours + (Number(s.hours) || 0), tipsNet: t.tipsNet + c.tipsNet, gross: t.gross + c.gross,
-      retention: t.retention + (Number(s.retentionAmount) || 0), subtotal: t.subtotal + c.subtotal,
+      retention: t.retention + (Number(s.retentionAmount) || 0), ivu: t.ivu + c.ivuAmount, subtotal: t.subtotal + c.subtotal,
       reimbursement: t.reimbursement + (Number(s.reimbursement) || 0), netPay: t.netPay + c.netPay,
     };
-  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
+  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, ivu: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
 
   const arrow = col => sort.column === col ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   const th = (col, label) => (
@@ -3083,7 +3096,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
               value={form.resourceType || 'service_provider'}
               onChange={e => setForm(f => {
                 const resourceType = e.target.value;
-                const next = { ...f, resourceType, employeeName: '', payRate: resourceType === 'employee' ? f.payRate : f.payRate };
+                const next = { ...f, resourceType, employeeName: '', ivuPct: resourceType === 'employee' ? 0 : (f.ivuPct || 0) };
                 return { ...next, retentionAmount: resourceType === 'employee' ? autoRetentionFor(next, employees) : f.retentionAmount };
               })}
             >
@@ -3137,6 +3150,22 @@ function ServicesView({ services, setServices, employees, businessName, logoData
             <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} />
             {(form.resourceType || 'service_provider') === 'employee' && employees.some(e => e.name === form.employeeName) && <div style={{ fontSize: 11, color: '#6B7280' }}>employee auto ({((employees.find(e => e.name === form.employeeName)?.prTaxPct || 0) + (employees.find(e => e.name === form.employeeName)?.sinotPct || 0))}%)</div>}
           </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>IVU %</label>
+            <select
+              value={(form.resourceType || 'service_provider') === 'employee' ? 0 : (form.ivuPct || 0)}
+              disabled={(form.resourceType || 'service_provider') === 'employee'}
+              onChange={e => setForm(f => ({ ...f, ivuPct: Number(e.target.value) }))}
+              style={{ width: 88 }}
+            >
+              <option value={0}>0%</option>
+              <option value={4}>4%</option>
+              <option value={6}>6%</option>
+              <option value={10.5}>10.5%</option>
+              <option value={11.5}>11.5%</option>
+            </select>
+            <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>IVU: {money(serviceCalc(form).ivuAmount)}</div>
+          </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reembolso</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.reimbursement} onChange={e => setForm(f => ({ ...f, reimbursement: e.target.value }))} /></div>
           <button onClick={addService} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
@@ -3161,6 +3190,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
             {th('tipsNet', 'Tips (after retention)')}
             {th('gross', 'Gross')}
             {th('retentionAmount', 'Retención')}
+            <th style={{ padding: '6px 4px' }}>IVU</th>
             {th('subtotal', 'Sub-Total')}
             {th('reimbursement', 'Reembolso')}
             {th('netPay', 'Net-Pay')}
@@ -3207,6 +3237,17 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                         <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>{editDraft.grossOverride === '' || editDraft.grossOverride == null ? `Auto ${money(serviceCalc(editDraft).gross)}` : 'Manual'}</div>
                       </td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.retentionAmount} onChange={e => setEditDraft(d => ({ ...d, retentionAmount: e.target.value }))} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <select
+                          value={(editDraft.resourceType || 'service_provider') === 'employee' ? 0 : (editDraft.ivuPct || 0)}
+                          disabled={(editDraft.resourceType || 'service_provider') === 'employee'}
+                          onChange={e => setEditDraft(d => ({ ...d, ivuPct: Number(e.target.value) }))}
+                          style={{ width: 72 }}
+                        >
+                          <option value={0}>0%</option><option value={4}>4%</option><option value={6}>6%</option><option value={10.5}>10.5%</option><option value={11.5}>11.5%</option>
+                        </select>
+                        <div style={{ fontSize: 10.5, color: '#6B7280' }}>{money(serviceCalc(editDraft).ivuAmount)}</div>
+                      </td>
                       <td style={{ padding: '4px' }}>{money(serviceCalc(editDraft).subtotal)}</td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 70 }} value={editDraft.reimbursement} onChange={e => setEditDraft(d => ({ ...d, reimbursement: e.target.value }))} /></td>
                       <td style={{ padding: '4px', fontWeight: 700 }}>{money(serviceCalc(editDraft).netPay)}</td>
@@ -3239,6 +3280,10 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                       <td style={{ padding: '4px' }}>{money(c.tipsNet)}</td>
                       <td style={{ padding: '4px', fontWeight: 600 }}>{money(c.gross)}{c.hasManualGross && <div style={{ fontSize: 10.5, color: '#6B7280', fontWeight: 400 }}>manual</div>}</td>
                       <td style={{ padding: '4px' }}>{money(s.retentionAmount)}</td>
+                      <td style={{ padding: '4px' }}>
+                        <div>{c.ivuPct}%</div>
+                        <div style={{ fontSize: 10.5, color: '#6B7280' }}>{money(c.ivuAmount)}</div>
+                      </td>
                       <td style={{ padding: '4px' }}>{money(c.subtotal)}</td>
                       <td style={{ padding: '4px' }}>{money(s.reimbursement)}</td>
                       <td style={{ padding: '4px', fontWeight: 700 }}>{money(c.netPay)}</td>
@@ -3272,6 +3317,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                 <td style={{ padding: '4px' }}>{money(totals.tipsNet)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.gross)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.retention)}</td>
+                <td style={{ padding: '4px' }}>{money(totals.ivu)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.subtotal)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.reimbursement)}</td>
                 <td style={{ padding: '4px' }}>{money(totals.netPay)}</td>
@@ -3363,10 +3409,10 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
     const c = serviceCalc(s);
     return {
       hours: t.hours + (Number(s.hours) || 0), tipsNet: t.tipsNet + c.tipsNet, gross: t.gross + c.gross,
-      retention: t.retention + (Number(s.retentionAmount) || 0), subtotal: t.subtotal + c.subtotal,
+      retention: t.retention + (Number(s.retentionAmount) || 0), ivu: t.ivu + c.ivuAmount, subtotal: t.subtotal + c.subtotal,
       reimbursement: t.reimbursement + (Number(s.reimbursement) || 0), netPay: t.netPay + c.netPay,
     };
-  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
+  }, { hours: 0, tipsNet: 0, gross: 0, retention: 0, ivu: 0, subtotal: 0, reimbursement: 0, netPay: 0 });
 
   const periodLabel = dateFrom || dateTo
     ? `${dateFrom || 'Beginning'} to ${dateTo || 'Present'}`
@@ -3408,14 +3454,14 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
 
   function exportCSV() {
     if (rows.length === 0) { setSendMsg('No service entries match the selected period.'); return; }
-    let csv = 'Resource,Resource Type,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
+    let csv = 'Resource,Resource Type,Date,Hours,Pay Rate,Tips,Gross,Retention,IVU %,IVU Amount,Sub-Total,Reimbursement,Net Pay,Status\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     rows.forEach(s => {
       const c = serviceCalc(s);
       csv += [esc(s.employeeName), esc(resourceTypeLabel(s.resourceType)), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
-        Number(s.retentionAmount || 0).toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
+        Number(s.retentionAmount || 0).toFixed(2), c.ivuPct.toFixed(2), c.ivuAmount.toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
     });
-    csv += `TOTAL,,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
+    csv += `TOTAL,,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},,${totals.ivu.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3486,6 +3532,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
             <th style={{ padding: '4px', textAlign: 'right' }}>Tips</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Retention</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>IVU</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Sub-Total</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Reimb.</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Net Pay</th>
@@ -3504,6 +3551,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.tipsNet)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.gross)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.retentionAmount)}</td>
+                  <td style={{ padding: '4px', textAlign: 'right' }}>{c.ivuPct}% / {money(c.ivuAmount)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(c.subtotal)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.reimbursement)}</td>
                   <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700 }}>{money(c.netPay)}</td>
@@ -3523,6 +3571,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.tipsNet)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.retention)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ivu)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.subtotal)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.reimbursement)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.netPay)}</td>
@@ -3599,6 +3648,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
             {c.tipsNet > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Tips</span><span>{money(c.tipsNet)}</span></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #E2E5E9', marginTop: 6, fontWeight: 700 }}><span>Gross</span><span>{money(c.gross)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Retention</span><span>-{money(service.retentionAmount)}</span></div>
+            {c.ivuAmount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>IVU ({c.ivuPct}%)</span><span>+{money(c.ivuAmount)}</span></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Sub-Total</span><span>{money(c.subtotal)}</span></div>
             {Number(service.reimbursement) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Reembolso</span><span>+{money(service.reimbursement)}</span></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #1F2933', marginTop: 10, paddingTop: 10, fontWeight: 700, fontSize: 16 }}><span>Net-Pay</span><span>{money(c.netPay)}</span></div>
