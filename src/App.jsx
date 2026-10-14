@@ -1037,6 +1037,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
         setServicesRaw((svc.data || []).map(row => ({
           ...row, employeeName: row.employee_name, date: row.service_date,
+          resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
           grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
@@ -1188,6 +1189,7 @@ async function fetchAllRows(table, clientId, orderCol) {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       const toDb = arr => arr.map(s => ({
         id: s.id, employee_name: s.employeeName, service_date: s.date,
+        resource_type: s.resourceType || 'service_provider',
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
         gross_override: s.grossOverride === '' || s.grossOverride === null || s.grossOverride === undefined ? null : Number(s.grossOverride),
@@ -2919,9 +2921,14 @@ function serviceCalc(s) {
   const netPay = subtotal + (Number(s.reimbursement) || 0);
   return { tipsNet, gross, subtotal, netPay, hasManualGross, calculatedGross };
 }
-// Si el nombre escrito coincide con un empleado ya configurado en Payroll, usa su
-// PR Tax % + SINOT % para calcular la Retención automáticamente (Gross × ese %).
+function resourceTypeLabel(type) {
+  return type === 'employee' ? 'Employee' : 'Service Provider / Contractor';
+}
+
+// Employee resources can reuse the employee's configured withholding percentages.
+// Service Providers remain independent from Payroll and keep the retention entered in Services.
 function autoRetentionFor(s, employees) {
+  if ((s.resourceType || 'service_provider') !== 'employee') return s.retentionAmount;
   const emp = employees.find(e => e.name === s.employeeName);
   if (!emp) return s.retentionAmount;
   const pct = (Number(emp.prTaxPct) || 0) + (Number(emp.sinotPct) || 0);
@@ -2931,7 +2938,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
   function blankService() {
-    return { employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', reimbursement: '' };
+    return { resourceType: 'service_provider', employeeName: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', reimbursement: '' };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -2942,6 +2949,13 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   const [checkServiceId, setCheckServiceId] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
 
+  const serviceProviderNames = useMemo(() => Array.from(new Set(
+    services
+      .filter(s => (s.resourceType || 'service_provider') === 'service_provider')
+      .map(s => (s.employeeName || '').trim())
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b)), [services]);
+
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
     const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
@@ -2950,7 +2964,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     if (form.payRate !== '' && Number(form.payRate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
-      id: uid(), employeeName: form.employeeName.trim(), date: form.date,
+      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(), date: form.date,
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
       grossOverride: hasManualGross ? Number(form.grossOverride) : '',
@@ -3026,6 +3040,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
     return arr.sort((a, b) => {
       let cmp = 0;
       if (sort.column === 'employeeName') cmp = a.employeeName.localeCompare(b.employeeName);
+      else if (sort.column === 'resourceType') cmp = resourceTypeLabel(a.resourceType).localeCompare(resourceTypeLabel(b.resourceType));
       else if (sort.column === 'date') cmp = a.date.localeCompare(b.date);
       else if (sort.column === 'hours') cmp = a.hours - b.hours;
       else if (sort.column === 'payRate') cmp = a.payRate - b.payRate;
@@ -3063,14 +3078,35 @@ function ServicesView({ services, setServices, employees, businessName, logoData
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Add service entry</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Employee / Worker</label>
-            <input list="services-employee-list" style={{ width: 160 }} value={form.employeeName}
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Resource Type</label>
+            <select
+              value={form.resourceType || 'service_provider'}
               onChange={e => setForm(f => {
-                const emp = employees.find(x => x.name === e.target.value);
+                const resourceType = e.target.value;
+                const next = { ...f, resourceType, employeeName: '', payRate: resourceType === 'employee' ? f.payRate : f.payRate };
+                return { ...next, retentionAmount: resourceType === 'employee' ? autoRetentionFor(next, employees) : f.retentionAmount };
+              })}
+            >
+              <option value="service_provider">Service Provider / Contractor</option>
+              <option value="employee">Employee</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Resource Name</label>
+            <input list="services-resource-list" style={{ width: 180 }} value={form.employeeName}
+              placeholder={(form.resourceType || 'service_provider') === 'employee' ? 'Select employee' : 'Enter provider name'}
+              onChange={e => setForm(f => {
+                const emp = (f.resourceType || 'service_provider') === 'employee'
+                  ? employees.find(x => x.name === e.target.value)
+                  : null;
                 const next = { ...f, employeeName: e.target.value, payRate: emp ? emp.rate : f.payRate };
                 return { ...next, retentionAmount: autoRetentionFor(next, employees) };
               })} />
-            <datalist id="services-employee-list">{employees.map(e => <option key={e.id} value={e.name} />)}</datalist>
+            <datalist id="services-resource-list">
+              {(form.resourceType || 'service_provider') === 'employee'
+                ? employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.name} label="Employee" />)
+                : serviceProviderNames.map(n => <option key={n} value={n} label="Service Provider / Contractor" />)}
+            </datalist>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Date</label>
             <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
@@ -3099,7 +3135,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Retención ($)</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.retentionAmount} onChange={e => setForm(f => ({ ...f, retentionAmount: e.target.value }))} />
-            {employees.some(e => e.name === form.employeeName) && <div style={{ fontSize: 11, color: '#6B7280' }}>auto ({((employees.find(e => e.name === form.employeeName)?.prTaxPct || 0) + (employees.find(e => e.name === form.employeeName)?.sinotPct || 0))}%)</div>}
+            {(form.resourceType || 'service_provider') === 'employee' && employees.some(e => e.name === form.employeeName) && <div style={{ fontSize: 11, color: '#6B7280' }}>employee auto ({((employees.find(e => e.name === form.employeeName)?.prTaxPct || 0) + (employees.find(e => e.name === form.employeeName)?.sinotPct || 0))}%)</div>}
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reembolso</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.reimbursement} onChange={e => setForm(f => ({ ...f, reimbursement: e.target.value }))} /></div>
@@ -3108,7 +3144,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           </button>
         </div>
         <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 8 }}>
-          Hours and Pay Rate are optional. You may save the service first and enter Hours, Gross or Tips later.
+          Resource Type identifies whether the payment belongs to an Employee or a Service Provider / Contractor. Hours and Pay Rate are optional.
         </div>
         {error && <div style={{ color: '#B00020', fontSize: 13, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
       </Card>
@@ -3116,7 +3152,8 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       <Card>
         <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            {th('employeeName', 'Employee')}
+            {th('employeeName', 'Resource')}
+            {th('resourceType', 'Resource Type')}
             {th('date', 'Date')}
             {th('hours', 'Hours')}
             {th('payRate', 'Pay rate')}
@@ -3137,12 +3174,21 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                 <tr key={s.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   {editingId === s.id ? (
                     <>
-                      <td style={{ padding: '4px' }}><input style={{ width: 120 }} value={editDraft.employeeName}
+                      <td style={{ padding: '4px' }}><input style={{ width: 130 }} value={editDraft.employeeName}
                         onChange={e => setEditDraft(d => {
-                          const emp = employees.find(x => x.name === e.target.value);
+                          const emp = (d.resourceType || 'service_provider') === 'employee' ? employees.find(x => x.name === e.target.value) : null;
                           const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
                           return { ...next, retentionAmount: autoRetentionFor(next, employees) };
                         })} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <select value={editDraft.resourceType || 'service_provider'} onChange={e => setEditDraft(d => {
+                          const next = { ...d, resourceType: e.target.value };
+                          return { ...next, retentionAmount: autoRetentionFor(next, employees) };
+                        })} style={{ width: 135 }}>
+                          <option value="service_provider">Service Provider</option>
+                          <option value="employee">Employee</option>
+                        </select>
+                      </td>
                       <td style={{ padding: '4px' }}><input type="date" value={editDraft.date} onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))} /></td>
                       <td style={{ padding: '4px' }}><input type="number" step="0.01" style={{ width: 60 }} value={editDraft.hours}
                         onChange={e => setEditDraft(d => { const next = { ...d, hours: e.target.value }; return { ...next, retentionAmount: autoRetentionFor(next, employees) }; })} /></td>
@@ -3173,6 +3219,19 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                   ) : (
                     <>
                       <td style={{ padding: '4px' }}>{s.employeeName}</td>
+                      <td style={{ padding: '4px' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 7px',
+                          borderRadius: 10,
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          background: (s.resourceType || 'service_provider') === 'employee' ? '#E6F1FB' : '#F3E8FF',
+                          color: (s.resourceType || 'service_provider') === 'employee' ? '#0C447C' : '#6B21A8'
+                        }}>
+                          {resourceTypeLabel(s.resourceType)}
+                        </span>
+                      </td>
                       <td style={{ padding: '4px' }}>{s.date}</td>
                       <td style={{ padding: '4px' }}>{Number(s.hours || 0).toFixed(2)}</td>
                       <td style={{ padding: '4px' }}>{money(s.payRate)}</td>
@@ -3207,7 +3266,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
           {sortedServices.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
-                <td style={{ padding: '4px' }} colSpan={2}>Total ({sortedServices.length})</td>
+                <td style={{ padding: '4px' }} colSpan={3}>Total ({sortedServices.length})</td>
                 <td style={{ padding: '4px' }}>{totals.hours.toFixed(2)}</td>
                 <td></td><td></td>
                 <td style={{ padding: '4px' }}>{money(totals.tipsNet)}</td>
@@ -3349,14 +3408,14 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
 
   function exportCSV() {
     if (rows.length === 0) { setSendMsg('No service entries match the selected period.'); return; }
-    let csv = 'Employee,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
+    let csv = 'Resource,Resource Type,Date,Hours,Pay Rate,Tips,Gross,Retention,Sub-Total,Reimbursement,Net Pay,Status\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     rows.forEach(s => {
       const c = serviceCalc(s);
-      csv += [esc(s.employeeName), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
+      csv += [esc(s.employeeName), esc(resourceTypeLabel(s.resourceType)), s.date, Number(s.hours || 0).toFixed(2), Number(s.payRate || 0).toFixed(2), c.tipsNet.toFixed(2), c.gross.toFixed(2),
         Number(s.retentionAmount || 0).toFixed(2), c.subtotal.toFixed(2), Number(s.reimbursement || 0).toFixed(2), c.netPay.toFixed(2), s.status].join(',') + '\n';
     });
-    csv += `TOTAL,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
+    csv += `TOTAL,,,${totals.hours.toFixed(2)},,${totals.tipsNet.toFixed(2)},${totals.gross.toFixed(2)},${totals.retention.toFixed(2)},${totals.subtotal.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.netPay.toFixed(2)},\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3419,7 +3478,8 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
         <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={dateFrom || rows[0]?.date} periodEnd={dateTo || rows[rows.length - 1]?.date} logoUrl={null} />
         <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
-            <th style={{ padding: '4px 4px' }}>Employee</th>
+            <th style={{ padding: '4px 4px' }}>Resource</th>
+            <th style={{ padding: '4px' }}>Resource Type</th>
             <th style={{ padding: '4px' }}>Date</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Hours</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Pay Rate</th>
@@ -3437,6 +3497,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
               return (
                 <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
                   <td style={{ padding: '4px 4px' }}>{s.employeeName}</td>
+                  <td style={{ padding: '4px' }}>{resourceTypeLabel(s.resourceType)}</td>
                   <td style={{ padding: '4px' }}>{s.date}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{Number(s.hours || 0).toFixed(2)}</td>
                   <td style={{ padding: '4px', textAlign: 'right' }}>{money(s.payRate)}</td>
@@ -3455,6 +3516,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
             <tfoot>
               <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
                 <td style={{ padding: '4px 4px' }}>Total ({rows.length})</td>
+                <td></td>
                 <td></td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours.toFixed(2)}</td>
                 <td></td>
@@ -3530,6 +3592,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
 
           <div style={{ fontSize: 13 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Nombre</span><span style={{ fontWeight: 700 }}>{service.employeeName}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Tipo de recurso</span><span style={{ fontWeight: 700 }}>{resourceTypeLabel(service.resourceType)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Fecha de pago</span><span style={{ fontWeight: 700 }}>{service.date}</span></div>
             {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Horas</span><span>{service.hours}</span></div>}
             {showHours && <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span style={{ color: '#6B7280' }}>Pay rate</span><span>{money(service.payRate)}</span></div>}
@@ -8356,6 +8419,10 @@ function EmployeesTab({ employees, setEmployees }) {
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 10 }}>Add employee</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Resource Type</label>
+            <div style={{ padding: '7px 10px', border: '1px solid #D8DCE1', borderRadius: 6, background: '#E6F1FB', color: '#0C447C', fontSize: 13, fontWeight: 600 }}>Employee</div>
+          </div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Name</label>
             <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
           <div><label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Pay type</label>
@@ -8381,7 +8448,7 @@ function EmployeesTab({ employees, setEmployees }) {
       <Card>
         <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
-            <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Pay type</th>
+            <th style={{ padding: '6px 4px' }}>Name</th><th style={{ padding: '6px 4px' }}>Resource Type</th><th style={{ padding: '6px 4px' }}>Pay type</th>
             <th style={{ padding: '6px 4px' }}>Rate</th><th style={{ padding: '6px 4px' }}>PR Tax %</th><th style={{ padding: '6px 4px' }}>SINOT %</th><th style={{ padding: '6px 4px' }}>Email</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
@@ -8390,6 +8457,7 @@ function EmployeesTab({ employees, setEmployees }) {
                 {editingId === e.id ? (
                   <>
                     <td style={{ padding: '6px 4px' }}><input value={editDraft.name} onChange={ev => setEditDraft(d => ({ ...d, name: ev.target.value }))} /></td>
+                    <td style={{ padding: '6px 4px' }}><span style={{ background: '#E6F1FB', color: '#0C447C', borderRadius: 10, padding: '2px 7px', fontSize: 11, fontWeight: 600 }}>Employee</span></td>
                     <td style={{ padding: '6px 4px' }}>
                       <select value={editDraft.payType} onChange={ev => setEditDraft(d => ({ ...d, payType: ev.target.value }))}>
                         <option value="hourly">Hourly</option><option value="salary">Salary (per period)</option>
@@ -8407,6 +8475,7 @@ function EmployeesTab({ employees, setEmployees }) {
                 ) : (
                   <>
                     <td style={{ padding: '6px 4px' }}>{e.name}</td>
+                    <td style={{ padding: '6px 4px' }}><span style={{ background: '#E6F1FB', color: '#0C447C', borderRadius: 10, padding: '2px 7px', fontSize: 11, fontWeight: 600 }}>Employee</span></td>
                     <td style={{ padding: '6px 4px', color: '#6B7280' }}>{e.payType === 'hourly' ? 'Hourly' : 'Salary'}</td>
                     <td style={{ padding: '6px 4px' }}>{money(e.rate)}{e.payType === 'hourly' ? '/hr' : '/period'}</td>
                     <td style={{ padding: '6px 4px' }}>{e.prTaxPct || 0}%</td>
