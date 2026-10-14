@@ -2955,6 +2955,10 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   const [receiptId, setReceiptId] = useState(null);
   const [checkServiceId, setCheckServiceId] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
+  const [servicePeriodPreset, setServicePeriodPreset] = useState('all');
+  const [serviceCustomFrom, setServiceCustomFrom] = useState('');
+  const [serviceCustomTo, setServiceCustomTo] = useState('');
+  const [servicePeriodError, setServicePeriodError] = useState('');
 
   const serviceProviderNames = useMemo(() => Array.from(new Set(
     services
@@ -3076,8 +3080,63 @@ function ServicesView({ services, setServices, employees, businessName, logoData
   function toggleSort(column) {
     setSort(prev => prev.column === column ? { column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { column, dir: 'asc' });
   }
+  const serviceMonthOptions = useMemo(() => {
+    const months = Array.from(new Set(
+      services.map(s => (s.date || '').slice(0, 7)).filter(Boolean)
+    )).sort().reverse();
+
+    return months.map(m => {
+      const [y, mo] = m.split('-');
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      return {
+        value: m,
+        label: new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+        from: `${m}-01`,
+        to: `${m}-${String(lastDay).padStart(2, '0')}`,
+      };
+    });
+  }, [services]);
+
+  function servicePeriodRange() {
+    if (servicePeriodPreset === 'all') return { from: '', to: '' };
+    if (servicePeriodPreset === 'custom') return { from: serviceCustomFrom || '', to: serviceCustomTo || '' };
+    return getPeriodRange(servicePeriodPreset, todayStr(), todayStr());
+  }
+
+  const { from: serviceFrom, to: serviceTo } = servicePeriodRange();
+
+  const filteredServices = useMemo(() => {
+    return services.filter(s => {
+      if (serviceFrom && (!s.date || s.date < serviceFrom)) return false;
+      if (serviceTo && (!s.date || s.date > serviceTo)) return false;
+      return true;
+    });
+  }, [services, serviceFrom, serviceTo]);
+
+  function applyServiceMonth(value) {
+    const opt = serviceMonthOptions.find(o => o.value === value);
+    if (!opt) return;
+    setServicePeriodPreset('custom');
+    setServiceCustomFrom(opt.from);
+    setServiceCustomTo(opt.to);
+    setServicePeriodError('');
+  }
+
+  function validateServiceCustomPeriod() {
+    if (!serviceCustomFrom || !serviceCustomTo) {
+      setServicePeriodError('Enter From and To dates.');
+      return false;
+    }
+    if (serviceCustomFrom > serviceCustomTo) {
+      setServicePeriodError('From date cannot be after To date.');
+      return false;
+    }
+    setServicePeriodError('');
+    return true;
+  }
+
   const sortedServices = useMemo(() => {
-    const arr = services.slice();
+    const arr = filteredServices.slice();
     if (!sort.column) return arr;
     return arr.sort((a, b) => {
       let cmp = 0;
@@ -3094,7 +3153,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       else if (sort.column === 'netPay') cmp = serviceCalc(a).netPay - serviceCalc(b).netPay;
       return sort.dir === 'asc' ? cmp : -cmp;
     });
-  }, [services, sort]);
+  }, [filteredServices, sort]);
 
   const totals = sortedServices.reduce((t, s) => {
     const c = serviceCalc(s);
@@ -3116,6 +3175,71 @@ function ServicesView({ services, setServices, employees, businessName, logoData
         <h2 style={{ margin: 0 }}>Services</h2>
         <button onClick={() => setShowRegister(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Receipt Register</button>
       </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, marginBottom: 9 }}>Payment Period Filter</div>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Period</label>
+            <select value={servicePeriodPreset} onChange={e => {
+              setServicePeriodPreset(e.target.value);
+              setServicePeriodError('');
+              if (e.target.value !== 'custom') {
+                setServiceCustomFrom('');
+                setServiceCustomTo('');
+              }
+            }}>
+              <option value="all">All periods</option>
+              <option value="this_month">This month</option>
+              <option value="last_month">Last month</option>
+              <option value="this_quarter">This quarter</option>
+              <option value="this_year">This year</option>
+              <option value="last_year">Last year</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Month / Year</label>
+            <select defaultValue="" onChange={e => { applyServiceMonth(e.target.value); e.target.value = ''; }}>
+              <option value="">Select month</option>
+              {serviceMonthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          {servicePeriodPreset === 'custom' && (
+            <>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From</label>
+                <input type="date" value={serviceCustomFrom} onChange={e => { setServiceCustomFrom(e.target.value); setServicePeriodError(''); }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To</label>
+                <input type="date" value={serviceCustomTo} onChange={e => { setServiceCustomTo(e.target.value); setServicePeriodError(''); }} />
+              </div>
+              <button type="button" onClick={validateServiceCustomPeriod} style={iconBtn}>Apply</button>
+            </>
+          )}
+
+          <button type="button" onClick={() => {
+            setServicePeriodPreset('all');
+            setServiceCustomFrom('');
+            setServiceCustomTo('');
+            setServicePeriodError('');
+          }} style={iconBtn}>Clear</button>
+
+          <span style={{ fontSize: 12, color: '#6B7280', paddingBottom: 6 }}>
+            {sortedServices.length} of {services.length} entries
+          </span>
+        </div>
+        {servicePeriodError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 7 }}>{servicePeriodError}</div>}
+        {(serviceFrom || serviceTo) && !servicePeriodError && (
+          <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 7 }}>
+            Showing payment period: <strong>{serviceFrom || 'Beginning'}</strong> to <strong>{serviceTo || 'Present'}</strong>
+          </div>
+        )}
+      </Card>
+
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontWeight: 600 }}>{copiedServiceId ? 'Copy service entry' : 'Add service entry'}</div>
@@ -3377,7 +3501,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
             </tfoot>
           )}
         </table>
-        {sortedServices.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No service entries yet.</div>}
+        {sortedServices.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>
+          {services.length === 0 ? 'No service entries yet.' : 'No service entries match the selected payment period.'}
+        </div>}
       </Card>
       {receiptId && (
         <ServiceReceiptModal service={services.find(s => s.id === receiptId)} employees={employees}
@@ -8608,6 +8734,11 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
   const [copiedRunId, setCopiedRunId] = useState(null);
+  const [payrollPeriodPreset, setPayrollPeriodPreset] = useState('all');
+  const [payrollCustomFrom, setPayrollCustomFrom] = useState('');
+  const [payrollCustomTo, setPayrollCustomTo] = useState('');
+  const [selectedPayPeriodId, setSelectedPayPeriodId] = useState('');
+  const [payrollPeriodError, setPayrollPeriodError] = useState('');
 
   function createRun() {
     if (!form.periodStart || !form.periodEnd || !form.payDate) { setError('Fill in all three dates.'); return; }
@@ -8667,6 +8798,66 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
     return { gross: lines.reduce((s, l) => s + (Number(l.gross) || 0), 0), net: lines.reduce((s, l) => s + lineNet(l), 0), count: lines.length };
   }
 
+  const payrollMonthOptions = useMemo(() => {
+    const months = Array.from(new Set(
+      payrollRuns.map(r => (r.payDate || '').slice(0, 7)).filter(Boolean)
+    )).sort().reverse();
+
+    return months.map(m => {
+      const [y, mo] = m.split('-');
+      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
+      return {
+        value: m,
+        label: new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+        from: `${m}-01`,
+        to: `${m}-${String(lastDay).padStart(2, '0')}`,
+      };
+    });
+  }, [payrollRuns]);
+
+  function payrollPayDateRange() {
+    if (payrollPeriodPreset === 'all') return { from: '', to: '' };
+    if (payrollPeriodPreset === 'custom') return { from: payrollCustomFrom || '', to: payrollCustomTo || '' };
+    return getPeriodRange(payrollPeriodPreset, todayStr(), todayStr());
+  }
+
+  const { from: payrollFrom, to: payrollTo } = payrollPayDateRange();
+
+  const filteredPayrollRuns = useMemo(() => {
+    return payrollRuns
+      .filter(r => {
+        if (selectedPayPeriodId) return r.id === selectedPayPeriodId;
+        if (payrollFrom && (!r.payDate || r.payDate < payrollFrom)) return false;
+        if (payrollTo && (!r.payDate || r.payDate > payrollTo)) return false;
+        return true;
+      })
+      .slice()
+      .sort((a, b) => (b.payDate || '').localeCompare(a.payDate || ''));
+  }, [payrollRuns, selectedPayPeriodId, payrollFrom, payrollTo]);
+
+  function applyPayrollMonth(value) {
+    const opt = payrollMonthOptions.find(o => o.value === value);
+    if (!opt) return;
+    setSelectedPayPeriodId('');
+    setPayrollPeriodPreset('custom');
+    setPayrollCustomFrom(opt.from);
+    setPayrollCustomTo(opt.to);
+    setPayrollPeriodError('');
+  }
+
+  function validatePayrollCustomPeriod() {
+    if (!payrollCustomFrom || !payrollCustomTo) {
+      setPayrollPeriodError('Enter From and To dates.');
+      return false;
+    }
+    if (payrollCustomFrom > payrollCustomTo) {
+      setPayrollPeriodError('From date cannot be after To date.');
+      return false;
+    }
+    setPayrollPeriodError('');
+    return true;
+  }
+
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
@@ -8684,6 +8875,97 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
           <Plus size={15} /> New payroll run
         </button>
       </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, marginBottom: 9 }}>Payment Period Filter</div>
+        <div style={{ display: 'flex', gap: 9, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Pay Date Period</label>
+            <select value={payrollPeriodPreset} onChange={e => {
+              setPayrollPeriodPreset(e.target.value);
+              setSelectedPayPeriodId('');
+              setPayrollPeriodError('');
+              if (e.target.value !== 'custom') {
+                setPayrollCustomFrom('');
+                setPayrollCustomTo('');
+              }
+            }}>
+              <option value="all">All periods</option>
+              <option value="this_month">This month</option>
+              <option value="last_month">Last month</option>
+              <option value="this_quarter">This quarter</option>
+              <option value="this_year">This year</option>
+              <option value="last_year">Last year</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Month / Year</label>
+            <select defaultValue="" onChange={e => { applyPayrollMonth(e.target.value); e.target.value = ''; }}>
+              <option value="">Select month</option>
+              {payrollMonthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Existing Pay Period</label>
+            <select value={selectedPayPeriodId} onChange={e => {
+              setSelectedPayPeriodId(e.target.value);
+              if (e.target.value) {
+                setPayrollPeriodPreset('all');
+                setPayrollCustomFrom('');
+                setPayrollCustomTo('');
+              }
+              setPayrollPeriodError('');
+            }} style={{ minWidth: 250 }}>
+              <option value="">All / use date filter</option>
+              {payrollRuns.slice().sort((a, b) => (b.payDate || '').localeCompare(a.payDate || '')).map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.periodStart} → {r.periodEnd} · Pay {r.payDate}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {payrollPeriodPreset === 'custom' && !selectedPayPeriodId && (
+            <>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>From Pay Date</label>
+                <input type="date" value={payrollCustomFrom} onChange={e => { setPayrollCustomFrom(e.target.value); setPayrollPeriodError(''); }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>To Pay Date</label>
+                <input type="date" value={payrollCustomTo} onChange={e => { setPayrollCustomTo(e.target.value); setPayrollPeriodError(''); }} />
+              </div>
+              <button type="button" onClick={validatePayrollCustomPeriod} style={iconBtn}>Apply</button>
+            </>
+          )}
+
+          <button type="button" onClick={() => {
+            setPayrollPeriodPreset('all');
+            setPayrollCustomFrom('');
+            setPayrollCustomTo('');
+            setSelectedPayPeriodId('');
+            setPayrollPeriodError('');
+          }} style={iconBtn}>Clear</button>
+
+          <span style={{ fontSize: 12, color: '#6B7280', paddingBottom: 6 }}>
+            {filteredPayrollRuns.length} of {payrollRuns.length} runs
+          </span>
+        </div>
+
+        {payrollPeriodError && <div style={{ color: '#B00020', fontSize: 12, marginTop: 7 }}>{payrollPeriodError}</div>}
+        {selectedPayPeriodId && (
+          <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 7 }}>Showing one selected payroll period.</div>
+        )}
+        {!selectedPayPeriodId && (payrollFrom || payrollTo) && !payrollPeriodError && (
+          <div style={{ fontSize: 11.5, color: '#6B7280', marginTop: 7 }}>
+            Filtering by Pay Date: <strong>{payrollFrom || 'Beginning'}</strong> to <strong>{payrollTo || 'Present'}</strong>
+          </div>
+        )}
+      </Card>
+
       {showForm && (
         <Card style={{ marginBottom: 20 }}>
           {copiedRunId && (
@@ -8713,7 +8995,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
             <th style={{ padding: '6px 4px' }}>Net</th><th style={{ padding: '6px 4px' }}>Status</th><th></th>
           </tr></thead>
           <tbody>
-            {payrollRuns.slice().sort((a, b) => b.payDate.localeCompare(a.payDate)).map(r => {
+            {filteredPayrollRuns.map(r => {
               const t = runTotals(r.id);
               return (
                 <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
@@ -8742,7 +9024,9 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
             })}
           </tbody>
         </table>
-        {payrollRuns.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No payroll runs yet.</div>}
+        {filteredPayrollRuns.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>
+          {payrollRuns.length === 0 ? 'No payroll runs yet.' : 'No payroll runs match the selected payment period.'}
+        </div>}
       </Card>
     </div>
   );
