@@ -7438,6 +7438,23 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       amountWidth: 128,
       signatureWidth: 245,
     },
+    checkworks_laser_top: {
+      label: 'CheckWorks — Laser Top Check (8.5 x 3.5)',
+      // CheckWorks publishes its Laser Top Check section as 8.5" x 3.5".
+      // The printable content uses 0.25" side margins inside the Letter sheet.
+      pageTop: 0.04,
+      width: 8.00,
+      height: 3.50,
+      padX: 0.30,
+      padY: 0.22,
+      businessFont: 17,
+      payeeFont: 15,
+      amountFont: 15.5,
+      wordsFont: 12,
+      memoFont: 11,
+      amountWidth: 128,
+      signatureWidth: 245,
+    },
     custom: {
       label: 'Custom / Calibrate',
       pageTop: 0.20,
@@ -7557,6 +7574,15 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               <button onClick={onClose} style={iconBtn}><X size={14} /></button>
             </div>
           </div>
+
+          {templateId === 'checkworks_laser_top' && (
+            <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>CheckWorks Laser Top Check</div>
+              <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4 }}>
+                Calibrated for a top check section measuring 8.5&quot; × 3.5&quot;. Print one test on plain paper and place it behind the physical CheckWorks stock before printing a live check. Use Horizontal / Vertical Offset for final printer alignment.
+              </div>
+            </div>
+          )}
 
           <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>MICR / Bank Information</div>
