@@ -888,14 +888,16 @@ export default function App() {
       addClientBusy={addClientBusy}
       onLogout={handleLogout}
       userEmail={session.user.email}
+      accessRole={profile.role}
     />
   );
 }
 
-function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail }) {
+function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, accessRole }) {
+  const portalLimited = accessRole !== 'staff';
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState(portalLimited ? 'payroll' : 'dashboard');
   const [transactions, setTransactionsRaw] = useState([]);
   const [invoices, setInvoicesRaw] = useState([]);
   const [customers, setCustomersRaw] = useState([]);
@@ -970,6 +972,66 @@ async function fetchAllRows(table, clientId, orderCol) {
 
   useEffect(() => {
     (async () => {
+      if (portalLimited) {
+        const portalResults = await Promise.all([
+          supabase.from('clients').select('name, sending_email, logo_data_uri, reply_to_email, invoice_language, business_phone, invoice_prefix, invoice_number_padding').eq('id', clientId).single(),
+          supabase.from('employees').select('*').eq('client_id', clientId).order('name'),
+          supabase.from('payroll_runs').select('*').eq('client_id', clientId).order('period_end'),
+          fetchAllRows('payroll_lines', clientId),
+          supabase.from('services').select('*').eq('client_id', clientId).order('service_date'),
+          fetchAllRows('leave_entries', clientId, 'entry_date'),
+          fetchAllRows('leave_accrual_rules', clientId, 'effective_from'),
+        ]);
+        const [cl, emp, pr, pl, svc, leave, leaveRuleRows] = portalResults;
+        const firstErr = [cl, emp, pr, pl, svc, leave, leaveRuleRows].find(x => x.error);
+        if (firstErr) {
+          setLoadError(firstErr.error.message);
+        } else {
+          setBusinessName(cl?.data?.name || 'Business');
+          setSendingEmail(cl?.data?.sending_email || '');
+          setLogoDataUri(cl?.data?.logo_data_uri || '');
+          setReplyToEmail(cl?.data?.reply_to_email || '');
+          setInvoiceLanguage(cl?.data?.invoice_language || 'en');
+          setBusinessPhone(cl?.data?.business_phone || '');
+          setInvoicePrefix(cl?.data?.invoice_prefix || 'TBS');
+          setInvoiceNumberPadding(cl?.data?.invoice_number_padding || 4);
+          setEmployeesRaw((emp.data || []).map(row => ({ ...row, rate: Number(row.rate), payType: row.pay_type, active: row.active !== false, prTaxPct: Number(row.pr_tax_pct) || 0, sinotPct: Number(row.sinot_pct) || 0 })));
+          setPayrollRunsRaw((pr.data || []).map(row => ({ ...row, periodStart: row.period_start, periodEnd: row.period_end, payDate: row.pay_date, postedJeId: row.posted_je_id || null })));
+          setPayrollLinesRaw((pl.data || []).map(row => ({
+            ...row, payrollRunId: row.payroll_run_id, employeeId: row.employee_id,
+            hours: row.hours === null ? '' : Number(row.hours), extraGross: Number(row.extra_gross) || 0,
+            gross: Number(row.gross), federalIncomeTax: Number(row.federal_income_tax) || 0,
+            prIncomeTax: Number(row.pr_income_tax) || 0, socialSecurity: Number(row.social_security) || 0,
+            medicare: Number(row.medicare) || 0, sinot: Number(row.sinot) || 0,
+            otherDeductions: Number(row.other_deductions) || 0, otherDeductionsDesc: row.other_deductions_desc || '',
+            reimbursement: Number(row.reimbursement) || 0,
+            regularHours: Number(row.regular_hours) || 0, vacationHours: Number(row.vacation_hours) || 0,
+            sickHours: Number(row.sick_hours) || 0, overtimeHours: Number(row.overtime_hours) || 0,
+            doubleOvertimeHours: Number(row.double_overtime_hours) || 0, holidayHours: Number(row.holiday_hours) || 0,
+            tips: Number(row.tips) || 0,
+          })));
+          setServicesRaw((svc.data || []).map(row => ({
+            ...row, employeeName: row.employee_name, date: row.service_date,
+            resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
+            ivuPct: Number(row.ivu_pct) || 0,
+            ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
+            invoiceNumber: row.invoice_number || '',
+            sourceInvoiceId: row.source_invoice_id || '',
+            sourceClientId: row.source_client_id || '',
+            sourceInvoiceTotal: Number(row.source_invoice_total) || 0,
+            hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
+            tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
+            grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
+            retentionAmount: Number(row.retention_amount) || 0, reimbursement: Number(row.reimbursement) || 0,
+            status: row.status || 'DRAFT', postedJeId: row.posted_je_id || null,
+          })));
+          setLeaveEntriesRaw((leave.data || []).map(row => ({ ...row, employeeId: row.employee_id, date: row.entry_date, leaveType: row.leave_type, action: row.action, hours: Number(row.hours) || 0, note: row.note || '' })));
+          setLeaveRulesRaw((leaveRuleRows.data || []).map(row => ({ ...row, employeeId: row.employee_id, effectiveFrom: row.effective_from, workedHoursBase: Number(row.worked_hours_base) || 0, vacationHoursEarned: Number(row.vacation_hours_earned) || 0, sickHoursEarned: Number(row.sick_hours_earned) || 0 })));
+        }
+        setLoaded(true);
+        return;
+      }
+
       const results = await Promise.all([
         fetchAllRows('transactions', clientId, 'date'),
         fetchAllRows('invoices', clientId, 'date'),
@@ -996,6 +1058,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         setTransactionsRaw((t.data || []).map(row => ({ ...row, amount: Number(row.amount), sourceGL: row.source_gl })));
         setInvoicesRaw((i.data || []).map(row => ({
           ...row,
+          syncClientId: row.synced_client_id || '',
+          syncServiceId: row.synced_service_id || '',
+          syncedAt: row.synced_at || '',
           retentionPct: row.retention_pct,
           retentionMode: row.retention_mode || 'percent',
           retentionAmount: Number(row.retention_amount) || 0,
@@ -1005,7 +1070,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           notes: row.notes || '',
           payments: Array.isArray(row.payments) ? row.payments : [],
         })));
-        setCustomersRaw(c.data || []);
+        setCustomersRaw((c.data || []).map(row => ({ ...row, linkedClientId: row.linked_client_id || '' })));
         setAccountsRaw((a.data || []).map(row => ({ ...row, isCogs: !!row.is_cogs })));
         setRulesRaw(r.data || []);
         setJournalEntriesRaw(j.data || []);
@@ -1039,7 +1104,11 @@ async function fetchAllRows(table, clientId, orderCol) {
           ...row, employeeName: row.employee_name, date: row.service_date,
           resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
           ivuPct: Number(row.ivu_pct) || 0,
+          ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
           invoiceNumber: row.invoice_number || '',
+          sourceInvoiceId: row.source_invoice_id || '',
+          sourceClientId: row.source_client_id || '',
+          sourceInvoiceTotal: Number(row.source_invoice_total) || 0,
           hours: Number(row.hours) || 0, payRate: Number(row.pay_rate) || 0,
           tipsRaw: Number(row.tips_raw) || 0, tipsRetentionPct: Number(row.tips_retention_pct) || 0,
           grossOverride: row.gross_override === null || row.gross_override === undefined ? '' : Number(row.gross_override),
@@ -1087,6 +1156,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
         payments: Array.isArray(inv.payments) ? inv.payments : [],
+        synced_client_id: inv.syncClientId || null,
+        synced_service_id: inv.syncServiceId || null,
+        synced_at: inv.syncedAt || null,
       }));
       const prevForDb = prev.map(inv => ({
         id: inv.id, number: inv.number, client: inv.client, date: inv.date, lines: inv.lines,
@@ -1096,6 +1168,9 @@ async function fetchAllRows(table, clientId, orderCol) {
         status: inv.status, paid: inv.paid || 0,
         ivu_pct: inv.ivuPct || 0, payment_method: inv.paymentMethod || '', notes: inv.notes || '',
         payments: Array.isArray(inv.payments) ? inv.payments : [],
+        synced_client_id: inv.syncClientId || null,
+        synced_service_id: inv.syncServiceId || null,
+        synced_at: inv.syncedAt || null,
       }));
       diffSync('invoices', prevForDb, forDb, clientId);
       return next;
@@ -1104,7 +1179,13 @@ async function fetchAllRows(table, clientId, orderCol) {
   const setCustomers = useCallback((updater) => {
     setCustomersRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      diffSync('customers', prev, next, clientId);
+      const toDb = arr => arr.map(c => ({
+        id: c.id,
+        name: c.name,
+        email: c.email || '',
+        linked_client_id: c.linkedClientId || null,
+      }));
+      diffSync('customers', toDb(prev), toDb(next), clientId);
       return next;
     });
   }, []);
@@ -1193,7 +1274,11 @@ async function fetchAllRows(table, clientId, orderCol) {
         id: s.id, employee_name: s.employeeName, service_date: s.date,
         resource_type: s.resourceType || 'service_provider',
         ivu_pct: Number(s.ivuPct) || 0,
+        ivu_amount_override: s.ivuAmountOverride === '' || s.ivuAmountOverride === null || s.ivuAmountOverride === undefined ? null : Number(s.ivuAmountOverride),
         invoice_number: s.invoiceNumber || '',
+        source_invoice_id: s.sourceInvoiceId || null,
+        source_client_id: s.sourceClientId || null,
+        source_invoice_total: Number(s.sourceInvoiceTotal) || 0,
         hours: Number(s.hours) || 0, pay_rate: Number(s.payRate) || 0,
         tips_raw: Number(s.tipsRaw) || 0, tips_retention_pct: Number(s.tipsRetentionPct) || 0,
         gross_override: s.grossOverride === '' || s.grossOverride === null || s.grossOverride === undefined ? null : Number(s.grossOverride),
@@ -1410,9 +1495,14 @@ async function fetchAllRows(table, clientId, orderCol) {
 
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
-      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} clients={clients}
+      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} portalLimited={portalLimited} clients={clients}
         selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
+        {portalLimited && (
+          <div style={{ background: '#EAF3DE', color: '#27500A', padding: '9px 12px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
+            Client access: Payroll and Services only. Checks can be printed from saved Payroll or Service entries, keeping them in the corresponding register.
+          </div>
+        )}
         {loadError && (
           <div style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>
             Could not connect to the database: {loadError}. Check your .env file (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
@@ -1422,8 +1512,8 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
-        {tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
-        {tab === 'transactions' && (
+        {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
+        {!portalLimited && tab === 'transactions' && (
           <TransactionsView
             transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
@@ -1432,7 +1522,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             pendingReviewIds={reconcilingVerified} setReconcilingVerified={setReconcilingVerified}
           />
         )}
-        {tab === 'invoices' && (
+        {!portalLimited && tab === 'invoices' && (
           <InvoicesView
             invoiceSubtotal={invoiceSubtotal}
             invoiceRevenueSubtotal={invoiceRevenueSubtotal}
@@ -1447,36 +1537,38 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoiceLanguage={invoiceLanguage} businessPhone={businessPhone}
             invoicePrefix={invoicePrefix} invoiceNumberPadding={invoiceNumberPadding}
             onSaveInvoiceSettings={saveInvoiceSettings} savingInvoiceSettings={savingInvoiceSettings}
+            clients={clients} isStaff={isStaff}
           />
         )}
-        {tab === 'products' && (
+        {!portalLimited && tab === 'products' && (
           <ProductsView products={products} setProducts={setProducts} />
         )}
         {tab === 'services' && (
           <ServicesView services={services} setServices={setServices} employees={employees}
             businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
-            accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} />
+            accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} canPostJournal={isStaff} />
         )}
-        {tab === 'customers' && (
+        {!portalLimited && tab === 'customers' && (
           <CustomersView
             customers={customers} setCustomers={setCustomers}
             invoices={invoices} setInvoices={setInvoices}
             invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal}
             onPrintStatement={setStatementClient}
+            clients={clients} isStaff={isStaff} businessName={businessName}
           />
         )}
-        {tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
-        {tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
-        {tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
-        {tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
-        {tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
+        {!portalLimited && tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
+        {!portalLimited && tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
+        {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
+        {!portalLimited && tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} businessName={businessName} />}
         {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries}
           leaveRules={leaveRules} setLeaveRules={setLeaveRules}
           businessName={businessName} accounts={accounts}
           journalEntries={journalEntries} setJournalEntries={setJournalEntries} logoDataUri={logoDataUri}
-          sendingEmail={sendingEmail} replyToEmail={replyToEmail} />}
+          sendingEmail={sendingEmail} replyToEmail={replyToEmail} canPostJournal={isStaff} />}
         </>
         )}
       </div>
@@ -1497,11 +1589,47 @@ async function fetchAllRows(table, clientId, orderCol) {
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, businessName }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, businessName }) {
   const [addingClient, setAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [editingClient, setEditingClient] = useState(false);
   const [editClientName, setEditClientName] = useState('');
+  const [showClientAccess, setShowClientAccess] = useState(false);
+  const [accessEmail, setAccessEmail] = useState('');
+  const [accessPassword, setAccessPassword] = useState('');
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessMsg, setAccessMsg] = useState('');
+
+  async function createClientAccess() {
+    if (!accessEmail.trim() || !accessPassword) {
+      setAccessMsg('Enter an email and temporary password.');
+      return;
+    }
+    if (accessPassword.length < 8) {
+      setAccessMsg('Password must contain at least 8 characters.');
+      return;
+    }
+    setAccessBusy(true);
+    setAccessMsg('');
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) throw new Error('Your staff session is not available. Sign in again.');
+      const res = await fetch('/api/create-client-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: accessEmail.trim(), password: accessPassword, clientId: selectedClientId }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || 'Could not create client access.');
+      setAccessMsg(payload.mode === 'updated' ? 'Client access updated successfully.' : 'Client access created successfully.');
+      setAccessPassword('');
+    } catch (err) {
+      setAccessMsg(err.message || String(err));
+    } finally {
+      setAccessBusy(false);
+    }
+  }
 
   function beginEditClient() {
     const client = clients.find(c => c.id === selectedClientId);
@@ -1537,7 +1665,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
     setNewClientName('');
     setAddingClient(false);
   }
-  const items = [
+  const allItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions', label: 'Transactions', icon: Receipt, badge: reviewCount },
     { id: 'invoices', label: 'Invoices', icon: FileText },
@@ -1551,6 +1679,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
     { id: 'payroll', label: 'Payroll', icon: Wallet },
     { id: 'services', label: 'Services', icon: DollarSign },
   ];
+  const items = portalLimited ? allItems.filter(it => it.id === 'payroll' || it.id === 'services') : allItems;
   return (
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>{businessName || 'Accounting'}</div>
@@ -1571,6 +1700,25 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, clients, selectedClientId,
               <button onClick={confirmDeleteClient} style={{ background: 'rgba(226,75,74,0.25)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 7px', cursor: 'pointer', fontSize: 11 }} title="Delete selected client">
                 <Trash2 size={12} />
               </button>
+            </div>
+          )}
+          {!addingClient && !editingClient && (
+            <div style={{ margin: '-8px 10px 16px' }}>
+              <button onClick={() => { setShowClientAccess(v => !v); setAccessMsg(''); }} style={{ width: '100%', background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '6px 8px', cursor: 'pointer', fontSize: 11 }}>
+                Client Access — Payroll & Services
+              </button>
+            </div>
+          )}
+          {showClientAccess && !addingClient && !editingClient && (
+            <div style={{ margin: '0 10px 16px', padding: 9, background: 'rgba(255,255,255,0.10)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700 }}>Access for {clients.find(c => c.id === selectedClientId)?.name || 'selected client'}</div>
+              <input type="email" placeholder="Client email" value={accessEmail} onChange={e => setAccessEmail(e.target.value)} style={{ fontSize: 12, borderRadius: 5, border: 'none', padding: '6px 7px' }} />
+              <input type="password" placeholder="Temporary password (8+ chars)" value={accessPassword} onChange={e => setAccessPassword(e.target.value)} style={{ fontSize: 12, borderRadius: 5, border: 'none', padding: '6px 7px' }} />
+              <button onClick={createClientAccess} disabled={accessBusy} style={{ background: '#0F6E56', color: '#fff', border: 'none', borderRadius: 5, padding: '6px 8px', cursor: accessBusy ? 'default' : 'pointer', fontSize: 11 }}>
+                {accessBusy ? 'Saving…' : 'Create / Update Access'}
+              </button>
+              {accessMsg && <div style={{ fontSize: 10.5, lineHeight: 1.3, color: accessMsg.toLowerCase().includes('success') ? '#DFF7E8' : '#FFE3E3' }}>{accessMsg}</div>}
+              <div style={{ fontSize: 10, opacity: 0.78 }}>The client signs in with this email and password and only sees Payroll and Services.</div>
             </div>
           )}
 
@@ -2922,7 +3070,8 @@ function serviceCalc(s) {
   const calculatedGross = (Number(s.hours) || 0) * (Number(s.payRate) || 0) + tipsNet;
   const gross = hasManualGross ? (Number(s.grossOverride) || 0) : calculatedGross;
   const ivuPct = (s.resourceType || 'service_provider') === 'employee' ? 0 : (Number(s.ivuPct) || 0);
-  const ivuAmount = Number((gross * ivuPct / 100).toFixed(2));
+  const hasIvuOverride = s.ivuAmountOverride !== '' && s.ivuAmountOverride !== null && s.ivuAmountOverride !== undefined;
+  const ivuAmount = (s.resourceType || 'service_provider') === 'employee' ? 0 : Number((hasIvuOverride ? Number(s.ivuAmountOverride) || 0 : gross * ivuPct / 100).toFixed(2));
   const subtotal = gross - (Number(s.retentionAmount) || 0);
   const netPay = subtotal + ivuAmount + (Number(s.reimbursement) || 0);
   return { tipsNet, gross, ivuPct, ivuAmount, subtotal, netPay, hasManualGross, calculatedGross };
@@ -2942,9 +3091,9 @@ function autoRetentionFor(s, employees) {
   return Number((gross * pct / 100).toFixed(2));
 }
 
-function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries }) {
+function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries, canPostJournal = true }) {
   function blankService() {
-    return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, reimbursement: '' };
+    return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -2982,7 +3131,11 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       grossOverride: hasManualGross ? Number(form.grossOverride) : '',
       retentionAmount: Number(form.retentionAmount) || 0,
       ivuPct: (form.resourceType || 'service_provider') === 'employee' ? 0 : (Number(form.ivuPct) || 0),
+      ivuAmountOverride: form.ivuAmountOverride === '' || form.ivuAmountOverride === null || form.ivuAmountOverride === undefined ? '' : Number(form.ivuAmountOverride),
       reimbursement: Number(form.reimbursement) || 0,
+      sourceInvoiceId: form.sourceInvoiceId || '',
+      sourceClientId: form.sourceClientId || '',
+      sourceInvoiceTotal: Number(form.sourceInvoiceTotal) || 0,
     }]);
     setForm(blankService());
     setCopiedServiceId(null);
@@ -3005,7 +3158,11 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       grossOverride: s.grossOverride === null || s.grossOverride === undefined ? '' : s.grossOverride,
       retentionAmount: Number(s.retentionAmount) || 0,
       ivuPct: Number(s.ivuPct) || 0,
+      ivuAmountOverride: '',
       reimbursement: Number(s.reimbursement) || 0,
+      sourceInvoiceId: '',
+      sourceClientId: '',
+      sourceInvoiceTotal: 0,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -3019,6 +3176,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
       grossOverride: editDraft.grossOverride === '' || editDraft.grossOverride === null || editDraft.grossOverride === undefined ? '' : Number(editDraft.grossOverride),
       retentionAmount: Number(editDraft.retentionAmount) || 0,
       ivuPct: (editDraft.resourceType || 'service_provider') === 'employee' ? 0 : (Number(editDraft.ivuPct) || 0),
+      ivuAmountOverride: editDraft.ivuAmountOverride === '' || editDraft.ivuAmountOverride === null || editDraft.ivuAmountOverride === undefined ? '' : Number(editDraft.ivuAmountOverride),
       reimbursement: Number(editDraft.reimbursement) || 0,
     } : s));
     setEditingId(null);
@@ -3334,7 +3492,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
               <option value={10.5}>10.5%</option>
               <option value={11.5}>11.5%</option>
             </select>
-            <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>IVU: {money(serviceCalc(form).ivuAmount)}</div>
+            <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>IVU: {money(serviceCalc(form).ivuAmount)}{form.sourceInvoiceId ? ' · synced exact amount' : ''}</div>
           </div>
           <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Reembolso</label>
             <input type="number" step="0.01" style={{ width: 80 }} value={form.reimbursement} onChange={e => setForm(f => ({ ...f, reimbursement: e.target.value }))} /></div>
@@ -3431,7 +3589,10 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                     </>
                   ) : (
                     <>
-                      <td style={{ padding: '4px' }}>{s.employeeName}</td>
+                      <td style={{ padding: '4px' }}>
+                        {s.employeeName}
+                        {s.sourceInvoiceId && <div style={{ fontSize: 10.5, color: '#0F6E56', marginTop: 2 }}>↔ TBS invoice sync</div>}
+                      </td>
                       <td style={{ padding: '4px' }}>
                         <span style={{
                           display: 'inline-block',
@@ -3471,9 +3632,9 @@ function ServicesView({ services, setServices, employees, businessName, logoData
                         {s.status === 'DRAFT'
                           ? <button onClick={() => finalizeService(s.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
                           : <button onClick={() => reopenService(s.id)} style={iconBtn}>Reopen</button>}
-                        {s.postedJeId
+                        {canPostJournal && (s.postedJeId
                           ? <span style={{ fontSize: 12, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted</span>
-                          : <button onClick={() => postServiceToJournal(s)} style={iconBtn}>Post to JE</button>}
+                          : <button onClick={() => postServiceToJournal(s)} style={iconBtn}>Post to JE</button>)}
                         <button onClick={() => removeService(s.id)} style={iconBtn}><Trash2 size={14} /></button>
                       </td>
                     </>
@@ -4041,7 +4202,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, reconciliations, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings }) {
+function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, reconciliations, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings, clients = [], isStaff = false }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -4054,6 +4215,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   const [payError, setPayError] = useState('');
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', status: '' });
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
+  const [syncingInvoiceId, setSyncingInvoiceId] = useState(null);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
@@ -4343,6 +4505,63 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
   }
   function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { desc: '', qty: 1, rate: '', lineType: 'service', applyRetention: true, applyIvu: true }] })); }
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
+
+  function invoiceWithholdingAmount(inv) {
+    if (!inv.retention) return 0;
+    return (inv.retentionMode || 'percent') === 'amount'
+      ? (Number(inv.retentionAmount) || 0)
+      : invoiceRetentionBase(inv) * (Number(inv.retentionPct) || 0) / 100;
+  }
+
+  function invoiceIvuAmount(inv) {
+    return Number((invoiceIvuBase(inv) * (Number(inv.ivuPct) || 0) / 100).toFixed(2));
+  }
+
+  async function syncInvoiceToClientServices(inv) {
+    const customer = customers.find(c => c.name === inv.client);
+    if (!customer?.linkedClientId) {
+      alert(`Link ${inv.client} to a Client Workspace in Customers first.`);
+      return;
+    }
+    const target = clients.find(c => c.id === customer.linkedClientId);
+    if (!target) {
+      alert('The linked Client Workspace could not be found.');
+      return;
+    }
+    if (!window.confirm(`${inv.syncServiceId ? 'Re-sync' : 'Send'} invoice ${inv.number} to Services for ${target.name}?`)) return;
+
+    setSyncingInvoiceId(inv.id);
+    try {
+      const { data, error } = await supabase.rpc('sync_tbs_invoice_to_client_service', {
+        p_source_invoice_id: inv.id,
+        p_target_client_id: customer.linkedClientId,
+        p_service_date: inv.date,
+        p_gross: Number(invoiceRevenueSubtotal(inv).toFixed(2)),
+        p_retention: Number(invoiceWithholdingAmount(inv).toFixed(2)),
+        p_ivu_pct: Number(inv.ivuPct) || 0,
+        p_ivu_amount: invoiceIvuAmount(inv),
+        p_reimbursement: Number(invoiceReimbursableSubtotal(inv).toFixed(2)),
+        p_total: Number(invoiceTotal(inv).toFixed(2)),
+      });
+      if (error) throw error;
+      if (data?.status === 'locked') {
+        alert(`The linked Service is already FINAL or posted to Journal Entries in ${target.name}. It was not overwritten.`);
+        return;
+      }
+      const syncedAt = data?.synced_at || new Date().toISOString();
+      setInvoices(prev => prev.map(x => x.id === inv.id ? {
+        ...x,
+        syncClientId: customer.linkedClientId,
+        syncServiceId: data?.service_id || x.syncServiceId || '',
+        syncedAt,
+      } : x));
+      alert(`Invoice ${inv.number} synced to Services for ${target.name}.`);
+    } catch (err) {
+      alert('Could not sync invoice to Client Services: ' + (err.message || err));
+    } finally {
+      setSyncingInvoiceId(null);
+    }
+  }
 
   function sendInvoiceEmail(inv) {
     const customer = customers.find(c => c.name === inv.client);
@@ -4838,6 +5057,14 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
                   <button onClick={() => sendInvoiceEmail(inv)} style={iconBtn}>Email</button>
                   <button onClick={() => startEditInvoice(inv)} style={iconBtn}>Edit</button>
                   <button onClick={() => copyInvoice(inv)} style={iconBtn}>Copy</button>
+                  {isStaff && businessName === 'Twelve Business Strategies' && customers.find(c => c.name === inv.client)?.linkedClientId && (
+                    <button onClick={() => syncInvoiceToClientServices(inv)} disabled={syncingInvoiceId === inv.id} style={{ ...iconBtn, color: '#0F6E56', fontWeight: 600 }}>
+                      {syncingInvoiceId === inv.id ? 'Syncing…' : (inv.syncServiceId ? 'Re-sync Services' : 'Send to Client Services')}
+                    </button>
+                  )}
+                  {isStaff && businessName === 'Twelve Business Strategies' && inv.syncServiceId && (
+                    <span style={{ fontSize: 10.5, color: '#0F6E56', alignSelf: 'center' }}>✓ Services linked</span>
+                  )}
                   {inv.status !== 'Paid' && (
                     <button onClick={() => { setPayingId(inv.id); setEditingPaymentId(null); setPayAmount(''); setPayDate(todayStr()); setPayMethod(''); setPaySourceGL(''); setPayError(''); }} style={iconBtn}>Apply payment</button>
                   )}
@@ -5167,11 +5394,13 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
   );
 }
 
-function CustomersView({ customers, setCustomers, invoices, setInvoices, invoiceTotal, invoiceSubtotal, onPrintStatement }) {
+function CustomersView({ customers, setCustomers, invoices, setInvoices, invoiceTotal, invoiceSubtotal, onPrintStatement, clients = [], isStaff = false, businessName = '' }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [linkedClientId, setLinkedClientId] = useState('');
   const [editingName, setEditingName] = useState(null);
   const [editEmail, setEditEmail] = useState('');
+  const [editLinkedClientId, setEditLinkedClientId] = useState('');
   const [editNameDraft, setEditNameDraft] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
 
@@ -5238,14 +5467,16 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
 
   function addCustomer() {
     if (!name.trim()) return;
-    setCustomers(prev => [...prev, { id: uid(), name: name.trim(), email: email.trim() }]);
+    setCustomers(prev => [...prev, { id: uid(), name: name.trim(), email: email.trim(), linkedClientId: linkedClientId || '' }]);
     setName('');
     setEmail('');
+    setLinkedClientId('');
   }
 
   function startEditEmail(c) {
     setEditingName(c.name);
     setEditEmail(c.email || '');
+    setEditLinkedClientId(c.linkedClientId || '');
     setEditNameDraft(c.name);
   }
 
@@ -5254,9 +5485,9 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
     if (!newName) { setEditingName(null); return; }
     const renamed = newName !== c.name;
     if (customers.some(x => x.name === c.name)) {
-      setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, name: newName, email: editEmail.trim() } : x));
+      setCustomers(prev => prev.map(x => x.name === c.name ? { ...x, name: newName, email: editEmail.trim(), linkedClientId: editLinkedClientId || '' } : x));
     } else {
-      setCustomers(prev => [...prev, { id: uid(), name: newName, email: editEmail.trim() }]);
+      setCustomers(prev => [...prev, { id: uid(), name: newName, email: editEmail.trim(), linkedClientId: editLinkedClientId || '' }]);
     }
     if (renamed) {
       setInvoices(prev => prev.map(inv => inv.client === c.name ? { ...inv, client: newName } : inv));
@@ -5393,6 +5624,12 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
         <div style={{ display: 'flex', gap: 8 }}>
           <input style={{ flex: 1 }} placeholder="New customer name" value={name} onChange={e => setName(e.target.value)} />
           <input style={{ flex: 1 }} placeholder="Email (for sending invoices/statements)" value={email} onChange={e => setEmail(e.target.value)} />
+          {isStaff && businessName === 'Twelve Business Strategies' && (
+            <select value={linkedClientId} onChange={e => setLinkedClientId(e.target.value)} style={{ minWidth: 210 }}>
+              <option value="">Link to Client Workspace (optional)</option>
+              {clients.filter(cl => cl.name !== 'Twelve Business Strategies').map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+            </select>
+          )}
           <button onClick={addCustomer} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Add</button>
         </div>
       </Card>
@@ -5402,6 +5639,7 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
           <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('name')}>Customer {custSort.column === 'name' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('email')}>Email {custSort.column === 'email' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            {isStaff && businessName === 'Twelve Business Strategies' && <th style={{ padding: '6px 4px' }}>Client Workspace</th>}
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('billed')}>Billed in period {custSort.column === 'billed' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleCustSort('balance')}>Open A/R as of {to} {custSort.column === 'balance' ? (custSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th></th>
@@ -5419,10 +5657,18 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
                       <td style={{ padding: '6px 4px' }}>
                         <div style={{ display: 'flex', gap: 4 }}>
                           <input style={{ width: 180 }} value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="Email" />
-                          <button onClick={() => saveEditEmail({ name: n, email: c?.email })} style={iconBtn}><Check size={14} /></button>
+                          <button onClick={() => saveEditEmail({ name: n, email: c?.email, linkedClientId: c?.linkedClientId })} style={iconBtn}><Check size={14} /></button>
                           <button onClick={() => setEditingName(null)} style={iconBtn}><X size={14} /></button>
                         </div>
                       </td>
+                      {isStaff && businessName === 'Twelve Business Strategies' && (
+                        <td style={{ padding: '6px 4px' }}>
+                          <select value={editLinkedClientId} onChange={e => setEditLinkedClientId(e.target.value)} style={{ width: 190 }}>
+                            <option value="">Not linked</option>
+                            {clients.filter(cl => cl.name !== 'Twelve Business Strategies').map(cl => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                          </select>
+                        </td>
+                      )}
                       <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
                       <td style={{ padding: '6px 4px' }}>{money(balances[n] || 0)}</td>
                       <td></td>
@@ -5433,11 +5679,18 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
                       <td style={{ padding: '6px 4px' }}>
                         <span style={{ color: c?.email ? '#1F2933' : '#9CA3AF' }}>{c?.email || 'No email'}</span>
                       </td>
+                      {isStaff && businessName === 'Twelve Business Strategies' && (
+                        <td style={{ padding: '6px 4px', fontSize: 12.5 }}>
+                          {c?.linkedClientId
+                            ? <span style={{ color: '#0F6E56', fontWeight: 600 }}>✓ {clients.find(cl => cl.id === c.linkedClientId)?.name || 'Linked client'}</span>
+                            : <span style={{ color: '#9CA3AF' }}>Not linked</span>}
+                        </td>
+                      )}
                       <td style={{ padding: '6px 4px' }}>{money(billedBeforeWithholding[n] || 0)}</td>
                       <td style={{ padding: '6px 4px', fontWeight: (balances[n] || 0) > 0 ? 600 : 400 }}>{money(balances[n] || 0)}</td>
                       <td style={{ padding: '6px 4px', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => openStatement(n)} style={iconBtn}>Statement / Email</button>
-                        <button onClick={() => startEditEmail({ name: n, email: c?.email })} style={iconBtn}>Edit</button>
+                        <button onClick={() => startEditEmail({ name: n, email: c?.email, linkedClientId: c?.linkedClientId })} style={iconBtn}>Edit</button>
                         <button onClick={() => removeCustomer({ name: n })} style={iconBtn}><Trash2 size={14} /></button>
                       </td>
                     </>
@@ -5451,6 +5704,7 @@ function CustomersView({ customers, setCustomers, invoices, setInvoices, invoice
               <tr style={{ borderTop: '2px solid #E2E5E9', fontWeight: 700 }}>
                 <td style={{ padding: '6px 4px' }}>Total ({sortedNames.length})</td>
                 <td></td>
+                {isStaff && businessName === 'Twelve Business Strategies' && <td></td>}
                 <td style={{ padding: '6px 4px' }}>{money(totalBilledBeforeWithholding)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(totalOpenBalance)}</td>
                 <td></td>
@@ -8541,7 +8795,7 @@ function LeaveBalanceReportModal({ rows, businessName, asOf, onClose }) {
   );
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveRules, setLeaveRules, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveRules, setLeaveRules, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail, canPostJournal = true }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -8631,11 +8885,11 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
       />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={postPayrollToJournal} />
+          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={postPayrollToJournal}
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
@@ -9040,9 +9294,9 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
                     {r.status === 'DRAFT'
                       ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
                       : <button onClick={() => reopenRun(r.id)} style={iconBtn}>Reopen</button>}
-                    {r.postedJeId
+                    {onPost && (r.postedJeId
                       ? <span style={{ fontSize: 12, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted</span>
-                      : <button onClick={() => onPost(r)} style={iconBtn}>Post to JE</button>}
+                      : <button onClick={() => onPost(r)} style={iconBtn}>Post to JE</button>)}
                     <button onClick={() => removeRun(r.id)} style={iconBtn}><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -9199,9 +9453,9 @@ function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, se
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
-          {run.postedJeId
+          {onPost && (run.postedJeId
             ? <span style={{ fontSize: 13, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted to Journal Entries</span>
-            : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>}
+            : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>)}
         </div>
       </div>
 
