@@ -13,9 +13,18 @@ function safeErrorMessage(err) {
 
 export default async function handler(req, res) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  // Safe health check. Does not expose any secret values.
+  // Prefer Supabase's current server-side secret key.
+  // Keep the legacy service_role variable as a fallback for existing deployments.
+  const adminKey =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const keyType = process.env.SUPABASE_SECRET_KEY
+    ? 'secret'
+    : (process.env.SUPABASE_SERVICE_ROLE_KEY ? 'legacy_service_role' : 'missing');
+
+  // Safe health check. It validates the admin key without exposing it.
   if (req.method === 'GET') {
     let supabaseHost = '';
     try {
@@ -24,13 +33,51 @@ export default async function handler(req, res) {
       supabaseHost = 'INVALID_URL';
     }
 
-    return json(res, 200, {
-      ok: true,
-      service: 'create-client-user',
-      hasSupabaseUrl: Boolean(supabaseUrl),
-      hasServiceRoleKey: Boolean(serviceRoleKey),
-      supabaseHost,
-    });
+    if (!supabaseUrl || !adminKey || supabaseHost === 'INVALID_URL') {
+      return json(res, 200, {
+        ok: false,
+        service: 'create-client-user',
+        hasSupabaseUrl: Boolean(supabaseUrl),
+        hasAdminKey: Boolean(adminKey),
+        keyType,
+        supabaseHost,
+        adminKeyValid: false,
+      });
+    }
+
+    try {
+      const admin = createClient(supabaseUrl, adminKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      // Harmless server-side call that requires a valid elevated key.
+      const { error: validationError } = await admin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1,
+      });
+
+      return json(res, 200, {
+        ok: !validationError,
+        service: 'create-client-user',
+        hasSupabaseUrl: true,
+        hasAdminKey: true,
+        keyType,
+        supabaseHost,
+        adminKeyValid: !validationError,
+        validationError: validationError ? validationError.message : null,
+      });
+    } catch (err) {
+      return json(res, 200, {
+        ok: false,
+        service: 'create-client-user',
+        hasSupabaseUrl: true,
+        hasAdminKey: true,
+        keyType,
+        supabaseHost,
+        adminKeyValid: false,
+        validationError: safeErrorMessage(err),
+      });
+    }
   }
 
   if (req.method !== 'POST') {
@@ -41,9 +88,9 @@ export default async function handler(req, res) {
   let stage = 'environment';
 
   try {
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !adminKey) {
       return json(res, 500, {
-        error: 'Server is missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.',
+        error: 'Server is missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SECRET_KEY/SUPABASE_SERVICE_ROLE_KEY.',
         stage,
       });
     }
@@ -85,7 +132,7 @@ export default async function handler(req, res) {
 
     stage = 'supabase-admin-client';
 
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
+    const admin = createClient(supabaseUrl, adminKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
@@ -149,7 +196,7 @@ export default async function handler(req, res) {
 
     if (listError) {
       return json(res, 500, {
-        error: 'Supabase Auth could not list users. Verify SUPABASE_SERVICE_ROLE_KEY: ' + listError.message,
+        error: 'Supabase Auth could not list users. Verify the server admin key belongs to this same Supabase project: ' + listError.message,
         stage,
       });
     }
@@ -228,12 +275,11 @@ export default async function handler(req, res) {
     }, { onConflict: 'id' });
 
     if (profileError) {
-      // Avoid leaving an orphan Auth user if the profile link failed immediately after creation.
       if (newlyCreated) {
         try {
           await admin.auth.admin.deleteUser(targetUser.id);
         } catch {
-          // Best effort cleanup only.
+          // Best-effort cleanup.
         }
       }
 
