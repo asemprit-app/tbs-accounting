@@ -1,79 +1,275 @@
 import { createClient } from '@supabase/supabase-js';
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method not allowed.' });
-  }
+function json(res, status, body) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  return res.status(status).json(body);
+}
 
+function safeErrorMessage(err) {
+  if (!err) return 'Unknown error.';
+  if (typeof err === 'string') return err;
+  return err.message || String(err);
+}
+
+export default async function handler(req, res) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    return res.status(500).json({ error: 'Server is missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.' });
-  }
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) return res.status(401).json({ error: 'Missing staff access token.' });
+  // Safe health check. Does not expose any secret values.
+  if (req.method === 'GET') {
+    let supabaseHost = '';
+    try {
+      supabaseHost = supabaseUrl ? new URL(supabaseUrl).hostname : '';
+    } catch {
+      supabaseHost = 'INVALID_URL';
+    }
 
-  const { email, password, clientId } = req.body || {};
-  if (!email || !password || !clientId) return res.status(400).json({ error: 'Email, password and clientId are required.' });
-  if (String(password).length < 8) return res.status(400).json({ error: 'Password must contain at least 8 characters.' });
-
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const { data: callerData, error: callerError } = await admin.auth.getUser(token);
-  if (callerError || !callerData?.user) return res.status(401).json({ error: 'Invalid staff session.' });
-
-  const { data: callerProfile, error: callerProfileError } = await admin
-    .from('profiles')
-    .select('role')
-    .eq('id', callerData.user.id)
-    .single();
-  if (callerProfileError || callerProfile?.role !== 'staff') return res.status(403).json({ error: 'Only TBS staff can create client access.' });
-
-  const { data: targetClient, error: clientError } = await admin.from('clients').select('id,name').eq('id', clientId).single();
-  if (clientError || !targetClient) return res.status(404).json({ error: 'Client Workspace not found.' });
-
-  const normalizedEmail = String(email).trim().toLowerCase();
-  let targetUser = null;
-  let mode = 'created';
-
-  const { data: listData, error: listError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (listError) return res.status(500).json({ error: listError.message });
-  targetUser = (listData?.users || []).find(u => (u.email || '').toLowerCase() === normalizedEmail) || null;
-
-  if (targetUser) {
-    const { data: existingProfile } = await admin.from('profiles').select('role,client_id').eq('id', targetUser.id).maybeSingle();
-    if (existingProfile?.role === 'staff') return res.status(409).json({ error: 'That email belongs to a staff account and cannot be converted to client access.' });
-    const { error: updateAuthError } = await admin.auth.admin.updateUserById(targetUser.id, { password, email_confirm: true });
-    if (updateAuthError) return res.status(400).json({ error: updateAuthError.message });
-    mode = 'updated';
-  } else {
-    const { data: created, error: createError } = await admin.auth.admin.createUser({
-      email: normalizedEmail,
-      password,
-      email_confirm: true,
+    return json(res, 200, {
+      ok: true,
+      service: 'create-client-user',
+      hasSupabaseUrl: Boolean(supabaseUrl),
+      hasServiceRoleKey: Boolean(serviceRoleKey),
+      supabaseHost,
     });
-    if (createError || !created?.user) return res.status(400).json({ error: createError?.message || 'Could not create user.' });
-    targetUser = created.user;
   }
 
-  const { error: profileError } = await admin.from('profiles').upsert({
-    id: targetUser.id,
-    role: 'client',
-    client_id: clientId,
-  }, { onConflict: 'id' });
-  if (profileError) return res.status(400).json({ error: 'User was created, but the profile could not be linked: ' + profileError.message });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
+    return json(res, 405, { error: 'Method not allowed.' });
+  }
 
-  return res.status(200).json({
-    ok: true,
-    mode,
-    userId: targetUser.id,
-    email: normalizedEmail,
-    clientId,
-    clientName: targetClient.name,
-  });
+  let stage = 'environment';
+
+  try {
+    if (!supabaseUrl || !serviceRoleKey) {
+      return json(res, 500, {
+        error: 'Server is missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.',
+        stage,
+      });
+    }
+
+    try {
+      new URL(supabaseUrl);
+    } catch {
+      return json(res, 500, {
+        error: 'SUPABASE_URL/VITE_SUPABASE_URL is not a valid URL.',
+        stage,
+      });
+    }
+
+    stage = 'staff-session';
+
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!token) return json(res, 401, { error: 'Missing staff access token.', stage });
+
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+
+    const { email, password, clientId } = body;
+    if (!email || !password || !clientId) {
+      return json(res, 400, { error: 'Email, password and clientId are required.', stage: 'request-body' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const simpleEmailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!simpleEmailOk) {
+      return json(res, 400, { error: 'Enter a valid client email address.', stage: 'request-body' });
+    }
+
+    if (String(password).length < 8) {
+      return json(res, 400, { error: 'Password must contain at least 8 characters.', stage: 'request-body' });
+    }
+
+    stage = 'supabase-admin-client';
+
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    stage = 'verify-staff-user';
+
+    const { data: callerData, error: callerError } = await admin.auth.getUser(token);
+    if (callerError || !callerData?.user) {
+      return json(res, 401, {
+        error: 'Invalid staff session: ' + (callerError?.message || 'user not found'),
+        stage,
+      });
+    }
+
+    stage = 'verify-staff-profile';
+
+    const { data: callerProfile, error: callerProfileError } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('id', callerData.user.id)
+      .maybeSingle();
+
+    if (callerProfileError) {
+      return json(res, 500, {
+        error: 'Could not read the staff profile: ' + callerProfileError.message,
+        stage,
+      });
+    }
+
+    if (callerProfile?.role !== 'staff') {
+      return json(res, 403, {
+        error: 'Only TBS staff can create client access.',
+        stage,
+      });
+    }
+
+    stage = 'target-client';
+
+    const { data: targetClient, error: clientError } = await admin
+      .from('clients')
+      .select('id,name')
+      .eq('id', clientId)
+      .maybeSingle();
+
+    if (clientError) {
+      return json(res, 500, {
+        error: 'Could not read the Client Workspace: ' + clientError.message,
+        stage,
+      });
+    }
+
+    if (!targetClient) {
+      return json(res, 404, { error: 'Client Workspace not found.', stage });
+    }
+
+    stage = 'find-auth-user';
+
+    const { data: listData, error: listError } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+
+    if (listError) {
+      return json(res, 500, {
+        error: 'Supabase Auth could not list users. Verify SUPABASE_SERVICE_ROLE_KEY: ' + listError.message,
+        stage,
+      });
+    }
+
+    let targetUser = (listData?.users || []).find(
+      u => (u.email || '').toLowerCase() === normalizedEmail
+    ) || null;
+
+    let mode = 'created';
+    let newlyCreated = false;
+
+    if (targetUser) {
+      stage = 'existing-profile-check';
+
+      const { data: existingProfile, error: existingProfileError } = await admin
+        .from('profiles')
+        .select('role,client_id')
+        .eq('id', targetUser.id)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return json(res, 500, {
+          error: 'Could not verify the existing user profile: ' + existingProfileError.message,
+          stage,
+        });
+      }
+
+      if (existingProfile?.role === 'staff') {
+        return json(res, 409, {
+          error: 'That email belongs to a staff account and cannot be converted to client access.',
+          stage,
+        });
+      }
+
+      stage = 'update-auth-user';
+
+      const { error: updateAuthError } = await admin.auth.admin.updateUserById(
+        targetUser.id,
+        { password, email_confirm: true }
+      );
+
+      if (updateAuthError) {
+        return json(res, 400, {
+          error: 'Supabase Auth could not update this user: ' + updateAuthError.message,
+          stage,
+        });
+      }
+
+      mode = 'updated';
+    } else {
+      stage = 'create-auth-user';
+
+      const { data: created, error: createError } = await admin.auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+      });
+
+      if (createError || !created?.user) {
+        return json(res, 400, {
+          error: 'Supabase Auth could not create the user: ' + (createError?.message || 'Unknown create-user error.'),
+          stage,
+        });
+      }
+
+      targetUser = created.user;
+      newlyCreated = true;
+    }
+
+    stage = 'link-profile';
+
+    const { error: profileError } = await admin.from('profiles').upsert({
+      id: targetUser.id,
+      role: 'client',
+      client_id: clientId,
+    }, { onConflict: 'id' });
+
+    if (profileError) {
+      // Avoid leaving an orphan Auth user if the profile link failed immediately after creation.
+      if (newlyCreated) {
+        try {
+          await admin.auth.admin.deleteUser(targetUser.id);
+        } catch {
+          // Best effort cleanup only.
+        }
+      }
+
+      return json(res, 400, {
+        error: 'The Auth user was created, but the client profile could not be linked: ' + profileError.message,
+        stage,
+      });
+    }
+
+    stage = 'verify-profile-link';
+
+    const { data: linkedProfile, error: verifyProfileError } = await admin
+      .from('profiles')
+      .select('id,role,client_id')
+      .eq('id', targetUser.id)
+      .maybeSingle();
+
+    if (verifyProfileError || !linkedProfile || linkedProfile.role !== 'client' || linkedProfile.client_id !== clientId) {
+      return json(res, 500, {
+        error: 'The user was saved, but the Client Workspace link could not be verified.',
+        stage,
+      });
+    }
+
+    return json(res, 200, {
+      ok: true,
+      mode,
+      userId: targetUser.id,
+      email: normalizedEmail,
+      clientId,
+      clientName: targetClient.name,
+    });
+  } catch (err) {
+    return json(res, 500, {
+      error: `Unexpected server error at ${stage}: ${safeErrorMessage(err)}`,
+      stage,
+    });
+  }
 }
