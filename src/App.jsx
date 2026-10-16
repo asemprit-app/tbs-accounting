@@ -1620,8 +1620,22 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ email: accessEmail.trim(), password: accessPassword, clientId: selectedClientId }),
       });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload.error || 'Could not create client access.');
+
+      const rawResponse = await res.text();
+      let payload = {};
+      try {
+        payload = rawResponse ? JSON.parse(rawResponse) : {};
+      } catch {
+        payload = {};
+      }
+
+      if (!res.ok) {
+        const detail = payload.error
+          || (rawResponse && rawResponse.length < 500 ? rawResponse : '')
+          || `Client access request failed (HTTP ${res.status}).`;
+        throw new Error(detail);
+      }
+
       setAccessMsg(payload.mode === 'updated' ? 'Client access updated successfully.' : 'Client access created successfully.');
       setAccessPassword('');
     } catch (err) {
