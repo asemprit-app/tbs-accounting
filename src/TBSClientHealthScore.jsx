@@ -1,10 +1,10 @@
 import React,{useEffect,useState} from 'react';
 import {supabase} from './supabaseClient';
+import {calculateOperationalHealth} from './tbsHealthRules.js';
 
 // Pilot score: operational checklist signals, NOT bank transaction counts.
 // Read-only. Never persist or label as verified financial health.
 const box={background:'#fff',border:'1px solid #dde3eb',borderRadius:9,padding:18,marginBottom:16};
-const completed=x=>x?.status==='DONE';
 export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
  const [state,setState]=useState({loading:true,error:'',data:null});
  useEffect(()=>{
@@ -23,21 +23,11 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
     const close=cl.data;
     const tasks=close?await supabase.from('tbs_close_tasks').select('task_key,status').eq('close_id',close.id):{data:[],error:null};
     if(tasks.error)throw tasks.error;
-    const list=tasks.data||[], byKey=Object.fromEntries(list.map(t=>[t.task_key,t]));
-    const required=['statements','reconciliation','cards','uncategorized','payroll','journal','balance','income','report'];
-    const sufficient=!!close&&required.every(k=>byKey[k]);
     const openReviews=rv.count, openRequests=rq.count;
     if(!Number.isInteger(openReviews)||!Number.isInteger(openRequests))throw Error('Open item totals could not be verified.');
-    const general=['statements','cards','payroll','journal','balance','income','report'];
-    const done=general.filter(k=>completed(byKey[k])).length;
-    const breakdown=[
-     {label:'Monthly close checklist',points:sufficient?Math.round(done/7*30):null,max:30,detail:sufficient?`${done}/7 general tasks completed (reconciliation and categorization scored separately)`:'Checklist incomplete'},
-     {label:'Reconciliation checklist',points:sufficient?(completed(byKey.reconciliation)?20:0):null,max:20,detail:'Checklist confirmation, not bank verification'},
-     {label:'Uncategorized review checklist',points:sufficient?(completed(byKey.uncategorized)?15:0):null,max:15,detail:'Checklist confirmation, not transaction count'},
-     {label:'Client requests',points:openRequests===0?15:Math.max(0,15-openRequests*5),max:15,detail:`${openRequests} open requests (all periods)`},
-     {label:'Review queue',points:openReviews===0?20:Math.max(0,20-openReviews*5),max:20,detail:`${openReviews} unresolved items (all periods)`}
-    ];
-    const score=sufficient?breakdown.reduce((sum,x)=>sum+x.points,0):null;
+    const {score,breakdown,sufficient}=calculateOperationalHealth({
+      hasClose:!!close,tasks:tasks.data||[],openRequests,openReviews
+    });
     // Actual ledger diagnostics are informational only; they do not affect the pilot score.
     const lastDay=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
     const [allTx,uncatTx,recs,recTotal]=await Promise.all([
