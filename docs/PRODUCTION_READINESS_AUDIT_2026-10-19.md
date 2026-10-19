@@ -12,6 +12,7 @@ Rama revisada: `tbs-control-center` (Preview). No aplicar este informe como cert
 - La carga principal en `src/App.jsx` pagina transacciones de 1,000 en 1,000.
 - 243 conciliaciones: 239 PASS y 4 REVIEW. Ninguna diferencia almacenada discordante con el cálculo de balances por más de $0.01, ni PASS con diferencia de $0.01 o superior.
 - 26 transacciones con GL `5590` en dos clientes no encuentran su código en el catálogo de cuentas correspondiente. Requiere validación contable; no corregir automáticamente.
+- Compilación Preview `fd320bc` READY, registros Vercel confirman 6 pruebas de código aprobadas (0 fallos) y `vite build` exitoso. No son pruebas E2E ni de aislamiento en sesiones reales.
 - Sin metadatos de archivos con prefijos fuera de solicitud, mensajes huérfanos ni tareas de cierre huérfanas en comprobaciones SQL.
 - DNS dominio Vercel verificado; despliegue Preview READY. READY no equivale a prueba de uso final.
 
@@ -23,6 +24,7 @@ Rama revisada: `tbs-control-center` (Preview). No aplicar este informe como cert
 - SQL de mitigación propuesto en `supabase/tbs_proposed_security_hardening_NOT_APPLIED.sql`. **No ejecutado**.
 
 ## Bloqueos de seguridad y calidad para publicar
+0. **CRÍTICO — escritura contable de cliente:** nueve tablas (`accounts`, `customers`, `dismissed_suggestions`, `invoices`, `journal_entries`, `products`, `reconciliations`, `rules`, `transactions`) combinan `isolated <table>` FOR ALL con `has_client_access(client_id)`; un cliente autenticado puede escribir su propio mayor vía API aunque la interfaz del portal oculte esas operaciones. Propuesta: cliente SELECT de sus filas y TBS staff ALL. SQL redactado; **NO aplicado**.
 1. **ALTO — RLS sin pruebas negativas reales:** ejecutar dos sesiones independientes (client A y client B), comprobar SELECT/INSERT/UPDATE/DELETE y Storage sin leer, cambiar ni borrar datos ajenos. Validar staff por separado.
 2. **ALTO — RPC y privilegios:** Supabase advierte 7 funciones SECURITY DEFINER ejecutables por anon y authenticated; hay 3 funciones con search_path no fijado. Revisar/aprobar la mitigación y volver a ejecutar el auditor.
 3. **ALTO — privilegios de tablas:** los roles anon y authenticated tienen GRANT ALL directo sobre todas las tablas públicas; RLS limita filas pero esos privilegios son demasiado amplios. Restringir el rol anon, mantener el acceso autenticado necesario y volver a probar.
