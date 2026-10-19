@@ -23,8 +23,14 @@ Rama revisada: `tbs-control-center` (Preview). No aplicar este informe como cert
 - GitHub Actions preview checks adaptado provisionalmente a Node 24/npm install (no hay package-lock). Los checks de Actions aún no han sido confirmados como ejecutados y exitosos.
 - SQL de mitigación propuesto en `supabase/tbs_proposed_security_hardening_NOT_APPLIED.sql`. **No ejecutado**.
 
+## Actualización: respaldo y autorización condicionada
+- Organización Supabase en plan **Free**. Documentación oficial: respaldos diarios automáticos para Pro/Team/Enterprise, no garantizados en Free. No existe evidencia verificable aún de un respaldo completo y recuperable.
+- Usuario autorizó cambiar permisos **una vez verificado respaldo y reversión**; esa condición sigue pendiente. **No aplicar DDL todavía.**
+- Simulación de seguridad con roles `client`, `staff`, `anon` y 13 tablas completada sin errores, sin operaciones de escritura. Cubre un cliente, no una segunda cuenta real independiente.
+- La propuesta SQL fue corregida para NO eliminar las políticas RESTRICTIVE existentes ni prometer lectura contable a clientes.
+
 ## Bloqueos de seguridad y calidad para publicar
-0. **CRÍTICO — escritura contable de cliente:** nueve tablas (`accounts`, `customers`, `dismissed_suggestions`, `invoices`, `journal_entries`, `products`, `reconciliations`, `rules`, `transactions`) combinan `isolated <table>` FOR ALL con `has_client_access(client_id)`; un cliente autenticado puede escribir su propio mayor vía API aunque la interfaz del portal oculte esas operaciones. Propuesta: cliente SELECT de sus filas y TBS staff ALL. SQL redactado; **NO aplicado**.
+0. **ACLARACIÓN VALIDADA — políticas financieras:** esas nueve tablas tienen, además de políticas permisivas, una política RESTRICTIVE `tbs_staff_only_*` FOR ALL. La prueba de acceso como cliente autenticado mostró **cero filas propias visibles**, por lo que no se ha confirmado permiso de escritura de clientes. Simulación como staff y anon aprobada en 13 tablas: staff ve los registros existentes y anon ninguno. Mantener las restricciones existentes hasta decidir el acceso de lectura contable del portal. Este resultado es una simulación de roles en SQL, no pruebas HTTP con dos clientes distintos.
 1. **ALTO — RLS sin pruebas negativas reales:** ejecutar dos sesiones independientes (client A y client B), comprobar SELECT/INSERT/UPDATE/DELETE y Storage sin leer, cambiar ni borrar datos ajenos. Validar staff por separado.
 2. **ALTO — RPC y privilegios:** Supabase advierte 7 funciones SECURITY DEFINER ejecutables por anon y authenticated; hay 3 funciones con search_path no fijado. Revisar/aprobar la mitigación y volver a ejecutar el auditor.
 3. **ALTO — privilegios de tablas:** los roles anon y authenticated tienen GRANT ALL directo sobre todas las tablas públicas; RLS limita filas pero esos privilegios son demasiado amplios. Restringir el rol anon, mantener el acceso autenticado necesario y volver a probar.
