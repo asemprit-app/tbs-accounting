@@ -18,3 +18,14 @@ test('Accounting diagnostics are not used to calculate pilot score',()=>{
 test('Close cannot be marked ready with incomplete tasks',()=>{
  assert.match(close,/tasks\.some\(t=>t\.status!=='DONE'\)/);
 });
+
+test('Operational score counts all unresolved reviews and open requests without a 1,000-row ceiling',()=>{
+ assert.match(score,/from\('tbs_review_queue'\)\.select\('id',\{count:'exact',head:true\}\)/);
+ assert.match(score,/from\('tbs_client_requests'\)\.select\('id',\{count:'exact',head:true\}\)/);
+ assert.match(score,/Number\.isInteger\(openReviews\)/);
+ assert.match(score,/Number\.isInteger\(openRequests\)/);
+});
+test('Financial diagnostics remain scoped by selected client and period',()=>{
+ assert.match(score,/from\('transactions'\)\.select\('id',\{count:'exact',head:true\}\)\.eq\('client_id',clientId\)\.gte\('date',period\)\.lte\('date',lastDay\)/);
+ assert.match(score,/from\('reconciliations'\)\.select\('id,status,period_end,gl'\)\.eq\('client_id',clientId\)/);
+});
