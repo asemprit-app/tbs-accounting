@@ -9,6 +9,7 @@ const closed=s=>['COMPLETED','CANCELLED'].includes(s);
 export default function TBSClientRequests({clientId,isStaff=false}){
  const [requests,setRequests]=useState([]),[selected,setSelected]=useState(null),[messages,setMessages]=useState([]);
  const [title,setTitle]=useState(''),[details,setDetails]=useState(''),[dueDate,setDueDate]=useState(''),[reply,setReply]=useState('');
+ const [files,setFiles]=useState([]),[fileToUpload,setFileToUpload]=useState(null);
  const [statusFilter,setStatusFilter]=useState('ALL'),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
  async function load(){
   if(!clientId)return;
@@ -18,6 +19,7 @@ export default function TBSClientRequests({clientId,isStaff=false}){
   setLoading(false);
  }
  useEffect(()=>{setSelected(null);setMessages([]);setError('');load()},[clientId]);
+ useEffect(()=>{if(!selected){setFiles([]);return}let active=true;supabase.from('tbs_request_files').select('*').eq('request_id',selected.id).order('created_at',{ascending:false}).then(({data,error})=>{if(active){if(error)setError(error.message);else setFiles(data||[])}});return()=>{active=false}},[selected?.id]);
  useEffect(()=>{if(!selected){setMessages([]);return}let active=true;supabase.from('tbs_request_messages').select('*').eq('request_id',selected.id).order('created_at',{ascending:true}).then(({data,error})=>{if(active){if(error)setError(error.message);else setMessages(data||[])}});return()=>{active=false}},[selected?.id]);
  async function run(fn){
   setBusy(true);setError('');setNotice('');
@@ -49,10 +51,37 @@ export default function TBSClientRequests({clientId,isStaff=false}){
    setMessages(m||[]);
   })
  }
- const visible=requests.filter(r=>statusFilter==='ALL'||(statusFilter==='OPEN'?!closed(r.status):r.status===statusFilter));
+ async function uploadFile(){
+  if(!selected||!fileToUpload||closed(selected.status))return;
+  if(fileToUpload.size>10485760){setError('Maximum file size is 10 MB.');return}
+  const extensions={ 'application/pdf':'pdf','image/jpeg':'jpg','image/png':'png','application/vnd.openxmlformats-officedocument.wordprocessingml.document':'docx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'xlsx' };
+  const ext=extensions[fileToUpload.type];
+  if(!ext){setError('Allowed files: PDF, JPG, PNG, DOCX, XLSX.');return}
+  await run(async()=>{
+   const {data:{user},error:authError}=await supabase.auth.getUser();if(authError)throw authError;
+   const path=selected.id+'/'+crypto.randomUUID()+'.'+ext;
+   const {error:uploadError}=await supabase.storage.from('tbs-request-documents').upload(path,fileToUpload,{contentType:fileToUpload.type,upsert:false});
+   if(uploadError)throw uploadError;
+   const {error:metaError}=await supabase.from('tbs_request_files').insert({request_id:selected.id,storage_path:path,original_filename:fileToUpload.name,uploaded_by:user.id});
+   if(metaError){
+    // Client cannot delete uploaded files; TBS staff must remove orphaned object if necessary.
+    throw Error('File uploaded but registration failed. Contact TBS; do not retry yet. '+metaError.message);
+   }
+   setFileToUpload(null);
+   const rows=unwrap(await supabase.from('tbs_request_files').select('*').eq('request_id',selected.id).order('created_at',{ascending:false}));
+   setFiles(rows||[]);
+  })
+ }
+ async function openFile(f){
+  setError('');
+  const {data,error}=await supabase.storage.from('tbs-request-documents').createSignedUrl(f.storage_path,60);
+  if(error){setError(error.message);return}
+  window.open(data.signedUrl,'_blank','noopener,noreferrer');
+ }
+ const visible=requests.filter(r=>statusFilter='ALL'||(statusFilter==='OPEN'?!closed(r.status):r.status===statusFilter));
  return <section style={{maxWidth:1050}}>
   <h2>{isStaff?'TBS Client Requests':'Document & Information Requests'}</h2>
-  <p style={{color:'#64748b',fontSize:13}}>Requests and messages are saved in Supabase. File uploads are not enabled yet; private Storage policies must be verified first.</p>
+  <p style={{color:'#64748b',fontSize:13}}>Requests, messages and document records are saved in Supabase. Uploads require the private Storage migration to be installed and tested first.</p>
   {error&&<div role="alert" style={{...panel,color:'#b91c1c'}}>{error}</div>}
   {notice&&<p style={{color:'#166534'}}>{notice}</p>}
   {isStaff&&<div style={panel}><h3>New client request</h3>
@@ -81,6 +110,14 @@ export default function TBSClientRequests({clientId,isStaff=false}){
     {!closed(selected.status)&&<button disabled={busy} style={btn} onClick={()=>changeStatus('COMPLETED')}>Mark completed</button>}
     {!closed(selected.status)&&<button disabled={busy} style={{...btn,background:'#9a3412'}} onClick={()=>changeStatus('CANCELLED')}>Cancel</button>}
     {closed(selected.status)&&<button disabled={busy} style={btn} onClick={()=>changeStatus('OPEN')}>Reopen</button>}
+   </div>}
+   <h4>Documents ({files.length})</h4>
+   {files.length===0&&<p style={{fontSize:13,color:'#64748b'}}>No documents attached.</p>}
+   {files.map(f=><div key={f.id} style={{padding:'7px 0',borderBottom:'1px solid #eee'}}><button type="button" style={{...btn,background:'#475569'}} onClick={()=>openFile(f)}>Open document</button> <span style={{fontSize:13,marginLeft:8}}>{f.original_filename}</span></div>)}
+   {!closed(selected.status)&&<div style={{marginTop:12,marginBottom:18}}>
+    <input aria-label="Attach document" type="file" accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx" onChange={e=>setFileToUpload(e.target.files?.[0]||null)}/>
+    <button type="button" style={{...btn,marginLeft:8}} disabled={busy||!fileToUpload} onClick={uploadFile}>Upload document</button>
+    <p style={{fontSize:12,color:'#64748b'}}>Private storage · PDF, JPG, PNG, DOCX, XLSX · 10 MB maximum. Enable Storage policies before uploading.</p>
    </div>}
    <h4>Conversation</h4>
    {!messages.length&&<p style={{fontSize:13,color:'#64748b'}}>No messages yet.</p>}
