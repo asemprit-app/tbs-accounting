@@ -523,9 +523,12 @@ async function generateCustomerStatementPdfBase64({
 }
 
 async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, from, replyTo }) {
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (error || !token) throw new Error('Your session has expired. Sign in again to send invoices.');
   const res = await fetch('/api/send-invoice', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ to, subject, text, pdfBase64, filename, from, replyTo }),
   });
   const data = await res.json().catch(() => ({}));
