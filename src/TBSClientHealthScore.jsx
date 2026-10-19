@@ -51,7 +51,8 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
       reconciliations:(recs.data||[]).length,
       passed:(recs.data||[]).filter(r=>r.status==='PASS').length,
       pending:(recs.data||[]).filter(r=>r.status!=='PASS').length,
-      limited:(recs.data||[]).length===1000
+      limited:(recs.data||[]).length===1000,
+      accounts:[...new Set((recs.data||[]).map(r=>r.gl).filter(Boolean))].length
     };
     if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period,ledger}});
    }catch(e){if(active)setState({loading:false,error:e.message||String(e),data:null})}
