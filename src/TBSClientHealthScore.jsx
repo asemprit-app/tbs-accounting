@@ -16,8 +16,8 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
    try{
     const [cl,rv,rq]=await Promise.all([
      supabase.from('tbs_monthly_closes').select('id,status').eq('client_id',clientId).eq('period_start',period).maybeSingle(),
-     supabase.from('tbs_review_queue').select('id,status').eq('client_id',clientId).limit(1000),
-     supabase.from('tbs_client_requests').select('id,status,due_date,created_at').eq('client_id',clientId).limit(1000)
+     supabase.from('tbs_review_queue').select('id',{count:'exact',head:true}).eq('client_id',clientId).neq('status','RESOLVED'),
+     supabase.from('tbs_client_requests').select('id',{count:'exact',head:true}).eq('client_id',clientId).in('status',['OPEN','CLIENT_RESPONDED','IN_REVIEW','NEEDS_CORRECTION'])
     ]);
     for(const r of [cl,rv,rq])if(r.error)throw r.error;
     const close=cl.data;
@@ -26,8 +26,8 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
     const list=tasks.data||[], byKey=Object.fromEntries(list.map(t=>[t.task_key,t]));
     const required=['statements','reconciliation','cards','uncategorized','payroll','journal','balance','income','report'];
     const sufficient=!!close&&required.every(k=>byKey[k]);
-    const openReviews=(rv.data||[]).filter(x=>x.status!=='RESOLVED').length;
-    const openRequests=(rq.data||[]).filter(x=>!['COMPLETED','CANCELLED'].includes(x.status)).length;
+    const openReviews=rv.count, openRequests=rq.count;
+    if(!Number.isInteger(openReviews)||!Number.isInteger(openRequests))throw Error('Open item totals could not be verified.');
     const general=['statements','cards','payroll','journal','balance','income','report'];
     const done=general.filter(k=>completed(byKey[k])).length;
     const breakdown=[
