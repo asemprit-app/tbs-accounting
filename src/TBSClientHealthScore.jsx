@@ -38,7 +38,21 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
      {label:'Review queue',points:openReviews===0?20:Math.max(0,20-openReviews*5),max:20,detail:`${openReviews} unresolved items (all periods)`}
     ];
     const score=sufficient?breakdown.reduce((sum,x)=>sum+x.points,0):null;
-    if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period}});
+    // Actual ledger diagnostics are informational only; they do not affect the pilot score.
+    const lastDay=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
+    const [allTx,uncatTx,recs]=await Promise.all([
+      supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay),
+      supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay).or('gl.is.null,gl.eq.'),
+      supabase.from('reconciliations').select('id,status,period_end').eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay).limit(1000)
+    ]);
+    const diagnosticsError=[allTx,uncatTx,recs].find(r=>r.error)?.error?.message||'';
+    const ledger=diagnosticsError?{error:diagnosticsError}:{
+      transactionCount:allTx.count,uncategorizedCount:uncatTx.count,
+      reconciliations:(recs.data||[]).length,
+      passed:(recs.data||[]).filter(r=>r.status==='PASS').length,
+      limited:(recs.data||[]).length===1000
+    };
+    if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period,ledger}});
    }catch(e){if(active)setState({loading:false,error:e.message||String(e),data:null})}
   }
   load();return()=>{active=false};
@@ -46,7 +60,7 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
  if(state.loading)return <div style={box}>Loading operational score…</div>;
  if(state.error)return <div style={{...box,color:'#b91c1c'}}>Health Score unavailable: {state.error}</div>;
  if(!state.data)return null;
- const {score,breakdown}=state.data;
+ const {score,breakdown,ledger}=state.data;
  const level=score===null?'Information pending':score>=80?'Satisfactory':score>=60?'Needs follow-up':'Action required';
  return <section style={box}>
   <h3 style={{marginTop:0}}>TBS Client Health Score — pilot</h3>
@@ -57,6 +71,12 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
    <div><strong>{x.label}</strong><div style={{fontSize:12,color:'#64748b'}}>{x.detail}</div></div>
    <strong style={{whiteSpace:'nowrap'}}>{x.points===null?'N/A':`${x.points}/${x.max}`}</strong>
   </div>)}
+  <div style={{borderTop:'1px solid #e2e8f0',marginTop:12,paddingTop:12}}>
+   <strong>Actual accounting data — selected month (informational only)</strong>
+   {ledger.error?<p style={{color:'#b91c1c'}}>Ledger diagnostics unavailable: {ledger.error}. No accounting values assumed.</p>:
+    <p style={{fontSize:13,color:'#475569'}}>Transactions: <strong>{ledger.transactionCount}</strong> · Uncategorized: <strong>{ledger.uncategorizedCount}</strong> · Reconciliations recorded: <strong>{ledger.reconciliations}</strong> · PASS: <strong>{ledger.passed}</strong>{ledger.limited?' · Results capped at 1,000':''}</p>}
+   <small style={{color:'#64748b'}}>A PASS status is a recorded reconciliation result, not independent bank confirmation. These figures do not affect the pilot score.</small>
+  </div>
   <small style={{color:'#64748b'}}>Requests and review items cover all periods; checklist applies to the selected month. The seven general checklist tasks, reconciliation and uncategorized review are mutually exclusive score components. All three remain checklist-based; no actual bank verification or transaction count is measured. Thresholds are pilot operational labels, not financial ratings.</small>
  </section>;
 }
