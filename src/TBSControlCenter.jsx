@@ -26,7 +26,7 @@ export default function TBSControlCenter({clientId,view='close'}){
   if(missing.length)get(await supabase.from('tbs_close_tasks').insert(missing));
  })}
  async function toggleTask(t,done){await save(async()=>{const {data:{user}}=await supabase.auth.getUser();get(await supabase.from('tbs_close_tasks').update({status:done?'DONE':'PENDING',completed_by:done?user?.id:null,completed_at:done?new Date().toISOString():null}).eq('id',t.id))})}
- async function markReady(){if(!tasks.length||tasks.some(t=>t.status!=='DONE')){setError('Complete all checklist tasks first.');return}await save(async()=>get(await supabase.from('tbs_monthly_closes').update({status:'READY_FOR_REVIEW'}).eq('id',close.id)))}
+ async function markReady(){if(!close||defaults.some(([key])=>!tasks.some(t=>t.task_key===key&&t.status==='DONE'))){setError('Complete all nine required checklist tasks first.');return}await save(async()=>get(await supabase.from('tbs_monthly_closes').update({status:'READY_FOR_REVIEW'}).eq('id',close.id).eq('client_id',clientId)))}
  async function addReview(){if(!title.trim())return;await save(async()=>{const {data:{user}}=await supabase.auth.getUser();get(await supabase.from('tbs_review_queue').insert({client_id:clientId,title:title.trim(),priority,source_type:'MANUAL',status:'OPEN',created_by:user?.id}));setTitle('')})}
  async function toggleReview(r){await save(async()=>{const {data:{user}}=await supabase.auth.getUser(),done=r.status!=='RESOLVED';get(await supabase.from('tbs_review_queue').update({status:done?'RESOLVED':'OPEN',reviewed_by:done?user?.id:null,reviewed_at:done?new Date().toISOString():null}).eq('id',r.id))})}
  if(!clientId)return <div style={panel}>Select a client first.</div>;
