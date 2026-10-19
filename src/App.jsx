@@ -3,6 +3,7 @@ import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Che
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
+import TBSClientRequests from './TBSClientRequests';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -1513,6 +1514,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
+        {tab === 'client-requests' && <TBSClientRequests clientId={selectedClientId} isStaff={isStaff} />}
         {!portalLimited && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
         {!portalLimited && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
@@ -1697,8 +1699,9 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     { id: 'services', label: 'Services', icon: DollarSign },
     { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
     { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle },
+    { id: 'client-requests', label: 'Client Requests', icon: FileText },
   ];
-  const items = portalLimited ? allItems.filter(it => it.id === 'payroll' || it.id === 'services') : allItems;
+  const items = portalLimited ? allItems.filter(it => it.id === 'payroll' || it.id === 'services' || it.id === 'client-requests') : allItems;
   return (
     <div style={{ width: 210, background: '#17365D', color: '#fff', padding: '20px 12px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontWeight: 700, fontSize: 16, padding: '0 10px 12px' }}>{businessName || 'Accounting'}</div>
