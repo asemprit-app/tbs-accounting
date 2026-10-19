@@ -43,13 +43,14 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
     const [allTx,uncatTx,recs]=await Promise.all([
       supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay),
       supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay).or('gl.is.null,gl.eq.'),
-      supabase.from('reconciliations').select('id,status,period_end').eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay).limit(1000)
+      supabase.from('reconciliations').select('id,status,period_end,gl').eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay).limit(1000)
     ]);
     const diagnosticsError=[allTx,uncatTx,recs].find(r=>r.error)?.error?.message||'';
     const ledger=diagnosticsError?{error:diagnosticsError}:{
       transactionCount:allTx.count,uncategorizedCount:uncatTx.count,
       reconciliations:(recs.data||[]).length,
       passed:(recs.data||[]).filter(r=>r.status==='PASS').length,
+      passAccounts:[...new Set((recs.data||[]).filter(r=>r.status==='PASS').map(r=>r.gl).filter(Boolean))].length,
       pending:(recs.data||[]).filter(r=>r.status!=='PASS').length,
       limited:(recs.data||[]).length===1000,
       accounts:[...new Set((recs.data||[]).map(r=>r.gl).filter(Boolean))].length
@@ -83,9 +84,9 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
   <div style={{borderTop:'1px solid #e2e8f0',marginTop:12,paddingTop:12}}>
    <strong>Actual accounting data — selected month (informational only)</strong>
    {ledger.error?<p style={{color:'#b91c1c'}}>Ledger diagnostics unavailable: {ledger.error}. No accounting values assumed.</p>:
-    <p style={{fontSize:13,color:'#475569'}}>Transactions: <strong>{ledger.transactionCount}</strong> · Uncategorized: <strong>{ledger.uncategorizedCount}</strong> · Reconciliations recorded: <strong>{ledger.reconciliations}</strong> · PASS: <strong>{ledger.passed}</strong> · Not PASS: <strong>{ledger.pending}</strong>{ledger.limited?' · Results capped at 1,000':''}</p>}
+    <p style={{fontSize:13,color:'#475569'}}>Transactions: <strong>{ledger.transactionCount}</strong> · Uncategorized: <strong>{ledger.uncategorizedCount}</strong> · Reconciliations recorded: <strong>{ledger.reconciliations}</strong> · PASS: <strong>{ledger.passed}</strong> · Not PASS: <strong>{ledger.pending}</strong> · Accounts with records: <strong>{ledger.accounts}</strong> · Accounts with PASS: <strong>{ledger.passAccounts}</strong>{ledger.limited?' · Results capped at 1,000':''}</p>}
    {!ledger.error&&ledgerAlerts.length>0&&<div style={{margin:'10px 0',padding:12,background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:6}}><strong style={{color:'#9a3412'}}>Accounting follow-up alerts</strong><ul style={{margin:'8px 0 0',paddingLeft:20}}>{ledgerAlerts.map(message=><li key={message} style={{marginBottom:5,fontSize:13}}>{message}</li>)}</ul></div>}
-   <small style={{color:'#64748b'}}>A PASS status is a recorded reconciliation result, not independent bank confirmation. These figures do not affect the pilot score.</small>
+   <small style={{color:'#64748b'}}>Account counts only reflect accounts present in reconciliation records, not all active bank accounts. A PASS status is a recorded reconciliation result, not independent bank confirmation. These figures do not affect the pilot score.</small>
   </div>
   <small style={{color:'#64748b'}}>Requests and review items cover all periods; checklist applies to the selected month. The seven general checklist tasks, reconciliation and uncategorized review are mutually exclusive score components. All three remain checklist-based; no actual bank verification or transaction count is measured. Thresholds are pilot operational labels, not financial ratings.</small>
  </section>;
