@@ -16,7 +16,7 @@ test('Accounting diagnostics are not used to calculate pilot score',()=>{
  assert.match(score,/informational only/);
 });
 test('Close cannot be marked ready with incomplete tasks',()=>{
- assert.match(close,/tasks\.some\(t=>t\.status!=='DONE'\)/);
+ assert.match(close,/defaults\.some\(\(\[key\]\)=>!tasks\.some\(t=>t\.task_key===key&&t\.status==='DONE'\)\)/);
 });
 
 test('Operational score counts all unresolved reviews and open requests without a 1,000-row ceiling',()=>{
