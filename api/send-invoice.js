@@ -13,6 +13,33 @@ export default async function handler(req, res) {
     return;
   }
 
+  res.setHeader('Cache-Control', 'no-store');
+  const authorization = req.headers?.authorization;
+  const token = typeof authorization === 'string' && /^Bearer\s+\S+$/i.test(authorization)
+    ? authorization.replace(/^Bearer\s+/i, '') : '';
+  if (!token) return res.status(401).json({ error: 'A staff session is required.' });
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(503).json({ error: 'Session verification is unavailable.' });
+  }
+  try {
+    const headers = { apikey: supabaseKey, Authorization: `Bearer ${token}` };
+    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, { headers });
+    if (!userRes.ok) return res.status(401).json({ error: 'Invalid or expired session.' });
+    const user = await userRes.json();
+    if (!user?.id) return res.status(401).json({ error: 'Invalid session.' });
+    const profileRes = await fetch(`${supabaseUrl}/rest/v1/profiles?select=role&id=eq.${encodeURIComponent(user.id)}`, { headers });
+    if (!profileRes.ok) return res.status(503).json({ error: 'Could not verify staff access.' });
+    const profiles = await profileRes.json();
+    if (!Array.isArray(profiles) || profiles.length !== 1 || profiles[0].role !== 'staff') {
+      return res.status(403).json({ error: 'Only TBS staff can send invoices.' });
+    }
+  } catch {
+    return res.status(503).json({ error: 'Session verification is unavailable.' });
+  }
+
   const { to, subject, text, pdfBase64, filename } = req.body || {};
 
   if (!to || !subject || !pdfBase64) {
@@ -61,3 +88,4 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.message || 'Unexpected server error.' });
   }
 }
+
