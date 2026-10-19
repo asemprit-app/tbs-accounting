@@ -28,15 +28,16 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
     const sufficient=!!close&&required.every(k=>byKey[k]);
     const openReviews=(rv.data||[]).filter(x=>x.status!=='RESOLVED').length;
     const openRequests=(rq.data||[]).filter(x=>!['COMPLETED','CANCELLED'].includes(x.status)).length;
-    const done=required.filter(k=>completed(byKey[k])).length;
+    const general=['statements','cards','payroll','journal','balance','income','report'];
+    const done=general.filter(k=>completed(byKey[k])).length;
     const breakdown=[
-     {label:'Monthly close checklist',points:sufficient?Math.round(done/9*30):null,max:30,detail:sufficient?`${done}/9 tasks completed`:'Checklist incomplete'},
+     {label:'Monthly close checklist',points:sufficient?Math.round(done/7*30):null,max:30,detail:sufficient?`${done}/7 general tasks completed (reconciliation and categorization scored separately)`:'Checklist incomplete'},
      {label:'Reconciliation checklist',points:sufficient?(completed(byKey.reconciliation)?20:0):null,max:20,detail:'Checklist confirmation, not bank verification'},
      {label:'Uncategorized review checklist',points:sufficient?(completed(byKey.uncategorized)?15:0):null,max:15,detail:'Checklist confirmation, not transaction count'},
      {label:'Client requests',points:openRequests===0?15:Math.max(0,15-openRequests*5),max:15,detail:`${openRequests} open requests (all periods)`},
      {label:'Review queue',points:openReviews===0?20:Math.max(0,20-openReviews*5),max:20,detail:`${openReviews} unresolved items (all periods)`}
     ];
-    const score=sufficient?breakdown.reduce((s,x)=>s+x.points,0):null;
+    const score=sufficient?breakdown.reduce((sum,x)=>sum+x.points,0):null;
     if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period}});
    }catch(e){if(active)setState({loading:false,error:e.message||String(e),data:null})}
   }
@@ -46,14 +47,16 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
  if(state.error)return <div style={{...box,color:'#b91c1c'}}>Health Score unavailable: {state.error}</div>;
  if(!state.data)return null;
  const {score,breakdown}=state.data;
+ const level=score===null?'Information pending':score>=80?'Satisfactory':score>=60?'Needs follow-up':'Action required';
  return <section style={box}>
   <h3 style={{marginTop:0}}>TBS Client Health Score — pilot</h3>
   <div style={{fontSize:32,fontWeight:700,color:score===null?'#64748b':score>=80?'#15803d':score>=60?'#a16207':'#b91c1c'}}>{score===null?'Insufficient Data':`${score}/100`}</div>
+  <div style={{fontWeight:600,marginTop:4,marginBottom:8,color:score===null?'#64748b':score>=80?'#15803d':score>=60?'#a16207':'#b91c1c'}}>{level}</div>
   <p style={{fontSize:13,color:'#475569'}}>Operational follow-up indicator, not a financial rating. Read-only preview; no snapshot saved.</p>
   {breakdown.map(x=><div key={x.label} style={{display:'flex',justifyContent:'space-between',gap:14,borderTop:'1px solid #e2e8f0',padding:'10px 0'}}>
    <div><strong>{x.label}</strong><div style={{fontSize:12,color:'#64748b'}}>{x.detail}</div></div>
    <strong style={{whiteSpace:'nowrap'}}>{x.points===null?'N/A':`${x.points}/${x.max}`}</strong>
   </div>)}
-  <small style={{color:'#64748b'}}>Requests and review items cover all periods; checklist applies to the selected month. This pilot uses checklist confirmations as proxies and does not inspect actual bank reconciliation or uncategorized transaction counts.</small>
+  <small style={{color:'#64748b'}}>Requests and review items cover all periods; checklist applies to the selected month. The seven general checklist tasks, reconciliation and uncategorized review are mutually exclusive score components. All three remain checklist-based; no actual bank verification or transaction count is measured. Thresholds are pilot operational labels, not financial ratings.</small>
  </section>;
 }
