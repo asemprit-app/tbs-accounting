@@ -42,3 +42,10 @@ Documentación: https://supabase.com/docs/guides/platform/backups
 - [ ] Prueba de acceso entre dos clientes distintos y aprobación de seguridad.
 
 **Nunca marcar como exitoso un paso no comprobado.**
+
+## Ejecución verificada el 2026-10-19 (sin datos de clientes)
+- Se creó una prueba **sintética** cifrada AES-256-GCM; se subió a la subcarpeta `03 - Verificacion y restauracion`, se descargó mediante Google Drive conectado y se verificó el SHA-256 del archivo recuperado, además de descifrar y validar el SHA-256 del contenido: **PASS**.
+- Se instaló en la misma subcarpeta `TBS_Backup_Herramienta_Piloto.zip`, con `tbs_backup.py` y `LEEME_Respaldos_TBS.txt`. Se comprobó que el ZIP descargado desde Drive tiene exactamente el mismo SHA-256 que el ZIP generado y supera la prueba de integridad ZIP.
+- `tbs_backup.py selftest`: **PASS** de cifrado, descifrado y detección de manipulación. La función `backup` está preparada para extraer PostgreSQL y descargar Storage desde una estación autorizada y confiable, con contraseñas locales; **NO fue ejecutada sobre Supabase**.
+- Esta sesión carece de acceso PostgreSQL directo, `pg_dump` y descarga de objetos de Supabase desde el entorno de ejecución. Los conectores de Supabase sí permiten consultas SQL, pero **no generan una exportación completa de PostgreSQL/crean archivos binarios cifrados en Drive**. No utilizar consultas SQL parciales como sustituto de un volcado consistente.
+- No se ha generado un archivo real `TBS-REAL-BACKUP-*.tbsbak` ni probado la restauración de Postgres. **Bloqueo de respaldo integral sin resolver.**
