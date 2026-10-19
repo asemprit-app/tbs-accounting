@@ -4,8 +4,8 @@ import {supabase} from './supabaseClient';
 // Pilot score: operational checklist signals, NOT bank transaction counts.
 // Read-only. Never persist or label as verified financial health.
 const box={background:'#fff',border:'1px solid #dde3eb',borderRadius:9,padding:18,marginBottom:16};
-const completed=x=>x?.status==='COMPLETED';
-export default function TBSClientHealthScore({clientId,month}){
+const completed=x=>x?.status==='DONE';
+export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
  const [state,setState]=useState({loading:true,error:'',data:null});
  useEffect(()=>{
   let active=true;
@@ -41,7 +41,7 @@ export default function TBSClientHealthScore({clientId,month}){
    }catch(e){if(active)setState({loading:false,error:e.message||String(e),data:null})}
   }
   load();return()=>{active=false};
- },[clientId,month]);
+ },[clientId,month,refreshKey]);
  if(state.loading)return <div style={box}>Loading operational score…</div>;
  if(state.error)return <div style={{...box,color:'#b91c1c'}}>Health Score unavailable: {state.error}</div>;
  if(!state.data)return null;
