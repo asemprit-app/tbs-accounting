@@ -50,6 +50,7 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
       transactionCount:allTx.count,uncategorizedCount:uncatTx.count,
       reconciliations:(recs.data||[]).length,
       passed:(recs.data||[]).filter(r=>r.status==='PASS').length,
+      pending:(recs.data||[]).filter(r=>r.status!=='PASS').length,
       limited:(recs.data||[]).length===1000
     };
     if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period,ledger}});
@@ -62,6 +63,13 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
  if(!state.data)return null;
  const {score,breakdown,ledger}=state.data;
  const level=score===null?'Information pending':score>=80?'Satisfactory':score>=60?'Needs follow-up':'Action required';
+ const ledgerAlerts=!ledger.error?[
+  ...(ledger.transactionCount===0?['No transactions recorded for the selected month. This is missing activity, not evidence that the books are complete.']:[]),
+  ...(ledger.uncategorizedCount>0?[`${ledger.uncategorizedCount} transaction(s) require categorization.`]:[]),
+  ...(ledger.pending>0?[`${ledger.pending} reconciliation(s) have not reached PASS status.`]:[]),
+  ...(ledger.reconciliations===0?['No reconciliation records found with an end date in this month; reconciliation coverage cannot be confirmed.']:[]),
+  ...(ledger.limited?['Reconciliation query reached its 1,000-row limit; counts may be incomplete.']:[])
+ ]:[];
  return <section style={box}>
   <h3 style={{marginTop:0}}>TBS Client Health Score — pilot</h3>
   <div style={{fontSize:32,fontWeight:700,color:score===null?'#64748b':score>=80?'#15803d':score>=60?'#a16207':'#b91c1c'}}>{score===null?'Insufficient Data':`${score}/100`}</div>
@@ -74,7 +82,8 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
   <div style={{borderTop:'1px solid #e2e8f0',marginTop:12,paddingTop:12}}>
    <strong>Actual accounting data — selected month (informational only)</strong>
    {ledger.error?<p style={{color:'#b91c1c'}}>Ledger diagnostics unavailable: {ledger.error}. No accounting values assumed.</p>:
-    <p style={{fontSize:13,color:'#475569'}}>Transactions: <strong>{ledger.transactionCount}</strong> · Uncategorized: <strong>{ledger.uncategorizedCount}</strong> · Reconciliations recorded: <strong>{ledger.reconciliations}</strong> · PASS: <strong>{ledger.passed}</strong>{ledger.limited?' · Results capped at 1,000':''}</p>}
+    <p style={{fontSize:13,color:'#475569'}}>Transactions: <strong>{ledger.transactionCount}</strong> · Uncategorized: <strong>{ledger.uncategorizedCount}</strong> · Reconciliations recorded: <strong>{ledger.reconciliations}</strong> · PASS: <strong>{ledger.passed}</strong> · Not PASS: <strong>{ledger.pending}</strong>{ledger.limited?' · Results capped at 1,000':''}</p>}
+   {!ledger.error&&ledgerAlerts.length>0&&<div style={{margin:'10px 0',padding:12,background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:6}}><strong style={{color:'#9a3412'}}>Accounting follow-up alerts</strong><ul style={{margin:'8px 0 0',paddingLeft:20}}>{ledgerAlerts.map(message=><li key={message} style={{marginBottom:5,fontSize:13}}>{message}</li>)}</ul></div>}
    <small style={{color:'#64748b'}}>A PASS status is a recorded reconciliation result, not independent bank confirmation. These figures do not affect the pilot score.</small>
   </div>
   <small style={{color:'#64748b'}}>Requests and review items cover all periods; checklist applies to the selected month. The seven general checklist tasks, reconciliation and uncategorized review are mutually exclusive score components. All three remain checklist-based; no actual bank verification or transaction count is measured. Thresholds are pilot operational labels, not financial ratings.</small>
