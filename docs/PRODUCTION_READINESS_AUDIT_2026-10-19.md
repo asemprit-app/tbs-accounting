@@ -51,3 +51,12 @@ Rama revisada: `tbs-control-center` (Preview). No aplicar este informe como cert
 - Autorización explícita para fusionar o publicar en producción después de revisión final.
 
 No se alteraron transacciones ni se aplicaron cambios de seguridad al proyecto de Supabase durante esta auditoría.
+
+## Verificaciones posteriores — Preview, 2026-10-19
+- **21 pruebas automatizadas aprobadas** y **0 fallos**, confirmado en registros de compilación Vercel del commit `e4e620953f9dfc2c4bfcb35e2b8930eb4ee57fd6`. Se añadieron pruebas funcionales de lógica pura para las nueve tareas obligatorias, estados de cierre, puntuación piloto y sus límites; son pruebas unitarias y de configuración, NO E2E de usuarios.
+- Configuración nueva `vercel.json` con `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, política de referer, API `private, no-store` y regla que responde 405 a `GET/HEAD /api/create-client-user` en Preview. La regla pasó revisión estática y compilación, **no se ha verificado la respuesta HTTP real**. El archivo JS de la API sigue incluyendo el diagnóstico GET; su actualización directa fue bloqueada.
+- Simulación SQL de RLS sin escrituras: acceso `client` a solicitudes, mensajes, metadatos de archivos y objetos del bucket privado limitado al cliente vinculado; `staff` ve registros; `anon` no ve ninguno. Había una solicitud/archivo propios y una solicitud ajena, de modo que hubo comparación sobre registros existentes. **No sustituye prueba con sesiones HTTP independientes**.
+- Las 13 tablas financieras/operacionales previamente comprobadas también aprobaron la simulación SQL para staff/client/anon; nueve tablas financieras conservan restricciones RESTRICTIVE `tbs_staff_only_*`.
+- **Costos y términos:** equipo Vercel actualmente `hobby`; Vercel restringe ese plan a uso personal no comercial (https://vercel.com/docs/limits/fair-use-guidelines). Para uso comercial de TBS será necesario otro alojamiento que permita uso comercial o un plan comercial de Vercel. No se contrató ni activó nada.
+- Supabase en plan Free sin evidencia de respaldo completo restaurable. No se aplicó DDL al proyecto. El SQL propuesto no está ejecutado.
+- Advertencia Chrome `Dangerous` no evaluada como resuelta. Requiere validación oficial de Google Safe Browsing / Search Console (https://support.google.com/webmasters/answer/6347750).
