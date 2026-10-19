@@ -538,11 +538,10 @@ async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, fr
 
 function TestInvoiceEmailButton() {
   const [busy, setBusy] = useState(false);
+  const [recipientInput, setRecipientInput] = useState('');
   const [result, setResult] = useState('');
   async function sendTest() {
-    const entered = window.prompt('Test email recipient (no invoice or accounting entry is created):', '');
-    if (entered === null) return;
-    const recipient = entered.trim();
+    const recipient = recipientInput.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
       setResult('Enter a valid email address.');
       return;
@@ -573,6 +572,7 @@ function TestInvoiceEmailButton() {
     }
   }
   return <div>
+    <input aria-label="Test email recipient" type="email" value={recipientInput} onChange={e => setRecipientInput(e.target.value)} placeholder="Test email recipient" disabled={busy} />
     <button type="button" disabled={busy} onClick={sendTest} style={iconBtn}>{busy ? 'Sending test...' : 'Send test email'}</button>
     {result && <div role="status" style={{ fontSize: 12, maxWidth: 420 }}>{result}</div>}
   </div>;
