@@ -31,5 +31,19 @@
         }
       ]
     }
+  ],
+  "routes": [
+    {
+      "src": "^/api/create-client-user/?$",
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "status": 405,
+      "headers": {
+        "Allow": "POST",
+        "Cache-Control": "private, no-store"
+      }
+    }
   ]
 }
