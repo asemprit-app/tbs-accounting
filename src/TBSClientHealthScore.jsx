@@ -40,19 +40,20 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
     const score=sufficient?breakdown.reduce((sum,x)=>sum+x.points,0):null;
     // Actual ledger diagnostics are informational only; they do not affect the pilot score.
     const lastDay=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
-    const [allTx,uncatTx,recs]=await Promise.all([
+    const [allTx,uncatTx,recs,recTotal]=await Promise.all([
       supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay),
       supabase.from('transactions').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('date',period).lte('date',lastDay).or('gl.is.null,gl.eq.'),
-      supabase.from('reconciliations').select('id,status,period_end,gl').eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay).limit(1000)
+      supabase.from('reconciliations').select('id,status,period_end,gl').eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay).limit(1000),
+      supabase.from('reconciliations').select('id',{count:'exact',head:true}).eq('client_id',clientId).gte('period_end',period).lte('period_end',lastDay)
     ]);
-    const diagnosticsError=[allTx,uncatTx,recs].find(r=>r.error)?.error?.message||'';
+    const diagnosticsError=[allTx,uncatTx,recs,recTotal].find(r=>r.error)?.error?.message||'';
     const ledger=diagnosticsError?{error:diagnosticsError}:{
       transactionCount:allTx.count,uncategorizedCount:uncatTx.count,
-      reconciliations:(recs.data||[]).length,
+      reconciliations:recTotal.count,
       passed:(recs.data||[]).filter(r=>r.status==='PASS').length,
       passAccounts:[...new Set((recs.data||[]).filter(r=>r.status==='PASS').map(r=>r.gl).filter(Boolean))].length,
       pending:(recs.data||[]).filter(r=>r.status!=='PASS').length,
-      limited:(recs.data||[]).length===1000,
+      limited:(recTotal.count||0)>(recs.data||[]).length,
       accounts:[...new Set((recs.data||[]).map(r=>r.gl).filter(Boolean))].length
     };
     if(active)setState({loading:false,error:'',data:{score,breakdown,sufficient,period,ledger}});
@@ -70,7 +71,7 @@ export default function TBSClientHealthScore({clientId,month,refreshKey=0}){
   ...(ledger.uncategorizedCount>0?[`${ledger.uncategorizedCount} transaction(s) require categorization.`]:[]),
   ...(ledger.pending>0?[`${ledger.pending} reconciliation(s) have not reached PASS status.`]:[]),
   ...(ledger.reconciliations===0?['No reconciliation records found with an end date in this month; reconciliation coverage cannot be confirmed.']:[]),
-  ...(ledger.limited?['Reconciliation query reached its 1,000-row limit; counts may be incomplete.']:[])
+  ...(ledger.limited?['Reconciliation detail reached its 1,000-row limit; PASS and account counts may be incomplete.']:[])
  ]:[];
  return <section style={box}>
   <h3 style={{marginTop:0}}>TBS Client Health Score — pilot</h3>
