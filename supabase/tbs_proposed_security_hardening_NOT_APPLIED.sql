@@ -37,6 +37,49 @@ alter function public.has_client_access(uuid) set search_path = public, pg_temp;
 alter function public.seed_chart_of_accounts(uuid) set search_path = public, pg_temp;
 alter function public.sync_chart_of_accounts_from_tbs() set search_path = public, pg_temp;
 
+
+-- CRITICAL LEAST-PRIVILEGE CORRECTION:
+-- Existing "isolated <table>" FOR ALL policies grant a matching client write access
+-- to their own general ledger even when the portal interface hides those functions.
+-- Replace them with client SELECT-only policies. Existing tbs_staff_only_* ALL
+-- policies continue to allow staff to read and write as before.
+-- Approval condition: business owner confirms clients must not edit the core ledger.
+drop policy if exists "isolated accounts" on public.accounts;
+create policy "tbs_client_readonly_accounts" on public.accounts
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated customers" on public.customers;
+create policy "tbs_client_readonly_customers" on public.customers
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated dismissed_suggestions" on public.dismissed_suggestions;
+create policy "tbs_client_readonly_dismissed_suggestions" on public.dismissed_suggestions
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated invoices" on public.invoices;
+create policy "tbs_client_readonly_invoices" on public.invoices
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated journal_entries" on public.journal_entries;
+create policy "tbs_client_readonly_journal_entries" on public.journal_entries
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated products" on public.products;
+create policy "tbs_client_readonly_products" on public.products
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated reconciliations" on public.reconciliations;
+create policy "tbs_client_readonly_reconciliations" on public.reconciliations
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated rules" on public.rules;
+create policy "tbs_client_readonly_rules" on public.rules
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
+drop policy if exists "isolated transactions" on public.transactions;
+create policy "tbs_client_readonly_transactions" on public.transactions
+  for select to authenticated using (public.tbs_is_client_for(client_id));
+
 commit;
 
 -- Verification (separate read-only query after review/approval):
