@@ -24,64 +24,9 @@ export default async function handler(req, res) {
     ? 'secret'
     : (process.env.SUPABASE_SERVICE_ROLE_KEY ? 'legacy_service_role' : 'missing');
 
-  // Safe health check. It validates the admin key without exposing it.
-  if (req.method === 'GET') {
-    let supabaseHost = '';
-    try {
-      supabaseHost = supabaseUrl ? new URL(supabaseUrl).hostname : '';
-    } catch {
-      supabaseHost = 'INVALID_URL';
-    }
-
-    if (!supabaseUrl || !adminKey || supabaseHost === 'INVALID_URL') {
-      return json(res, 200, {
-        ok: false,
-        service: 'create-client-user',
-        hasSupabaseUrl: Boolean(supabaseUrl),
-        hasAdminKey: Boolean(adminKey),
-        keyType,
-        supabaseHost,
-        adminKeyValid: false,
-      });
-    }
-
-    try {
-      const admin = createClient(supabaseUrl, adminKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-
-      // Harmless server-side call that requires a valid elevated key.
-      const { error: validationError } = await admin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1,
-      });
-
-      return json(res, 200, {
-        ok: !validationError,
-        service: 'create-client-user',
-        hasSupabaseUrl: true,
-        hasAdminKey: true,
-        keyType,
-        supabaseHost,
-        adminKeyValid: !validationError,
-        validationError: validationError ? validationError.message : null,
-      });
-    } catch (err) {
-      return json(res, 200, {
-        ok: false,
-        service: 'create-client-user',
-        hasSupabaseUrl: true,
-        hasAdminKey: true,
-        keyType,
-        supabaseHost,
-        adminKeyValid: false,
-        validationError: safeErrorMessage(err),
-      });
-    }
-  }
-
+  // Administrative configuration details must never be exposed to unauthenticated callers.
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'GET, POST');
+    res.setHeader('Allow', 'POST');
     return json(res, 405, { error: 'Method not allowed.' });
   }
 
