@@ -21,17 +21,24 @@ revoke execute on function public.tbs_current_client_id() from public, anon;
 revoke execute on function public.tbs_current_role() from public, anon;
 revoke execute on function public.tbs_is_client_for(uuid) from public, anon;
 revoke execute on function public.tbs_is_staff() from public, anon;
+-- Also remove anonymous access from two account-maintenance RPCs.
+-- Both operate as invoker and remain callable by authenticated staff.
+revoke execute on function public.seed_chart_of_accounts(uuid) from public, anon;
+revoke execute on function public.sync_chart_of_accounts_from_tbs() from public, anon;
 
 grant execute on function public.has_client_access(uuid) to authenticated;
 grant execute on function public.tbs_current_client_id() to authenticated;
 grant execute on function public.tbs_current_role() to authenticated;
 grant execute on function public.tbs_is_client_for(uuid) to authenticated;
 grant execute on function public.tbs_is_staff() to authenticated;
+grant execute on function public.seed_chart_of_accounts(uuid) to authenticated;
+grant execute on function public.sync_chart_of_accounts_from_tbs() to authenticated;
 grant execute on function public.delete_client_cascade(uuid) to authenticated;
 grant execute on function public.sync_tbs_invoice_to_client_service(
  text, uuid, date, numeric, numeric, numeric, numeric, numeric, numeric
 ) to authenticated;
 
+-- SERVICE_ROLE retains its existing explicit EXECUTE grants, confirmed in pg_proc.proacl.
 -- Fixed search_path; the public schema has no CREATE grant for anon/authenticated.
 alter function public.has_client_access(uuid) set search_path = public, pg_temp;
 alter function public.seed_chart_of_accounts(uuid) set search_path = public, pg_temp;
