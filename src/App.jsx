@@ -536,6 +536,48 @@ async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, fr
   return data;
 }
 
+function TestInvoiceEmailButton() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState('');
+  async function sendTest() {
+    const entered = window.prompt('Test email recipient (no invoice or accounting entry is created):', '');
+    if (entered === null) return;
+    const recipient = entered.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setResult('Enter a valid email address.');
+      return;
+    }
+    setBusy(true);
+    setResult('');
+    try {
+      const JsPDF = await loadJsPdf();
+      const doc = new JsPDF({ unit: 'pt', format: 'letter' });
+      doc.setFontSize(18);
+      doc.text('PRUEBA - SIN VALOR CONTABLE', 40, 65);
+      doc.setFontSize(11);
+      doc.text('TBS Accounting Engine - prueba autorizada de correo.', 40, 100);
+      doc.text('Este documento no representa una factura, venta ni cuenta por cobrar.', 40, 125);
+      const payload = await blobToBase64(doc.output('blob'));
+      const sent = await sendInvoiceViaResend({
+        to: recipient,
+        subject: 'TBS Accounting Engine - PRUEBA SIN VALOR CONTABLE',
+        text: 'Prueba autorizada del envio de correo y PDF. No representa una factura ni requiere pago.',
+        pdfBase64: payload,
+        filename: 'TBS_PRUEBA_SIN_VALOR_CONTABLE.pdf',
+      });
+      setResult('Provider accepted test email to ' + recipient + (sent.id ? ' (ID: ' + sent.id + ')' : '') + '. Receipt is not yet confirmed.');
+    } catch (err) {
+      setResult('Test email failed: ' + (err.message || 'Unknown error.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <div>
+    <button type="button" disabled={busy} onClick={sendTest} style={iconBtn}>{busy ? 'Sending test...' : 'Send test email'}</button>
+    {result && <div role="status" style={{ fontSize: 12, maxWidth: 420 }}>{result}</div>}
+  </div>;
+}
+
 const ACCOUNT_TYPE_LABELS = { Asset: 'Assets', Liability: 'Liabilities', Equity: 'Capital', Revenue: 'Income', Expense: 'Expenses' };
 const ACCOUNT_TYPE_ORDER = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
 function AccountOptions({ accounts }) {
@@ -4767,6 +4809,7 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Invoices</h2>
         <div style={{ display: 'flex', gap: 8 }}>
+          <TestInvoiceEmailButton />
           <button onClick={() => setShowSettings(s => !s)} style={iconBtn}>Invoice Settings</button>
           <button onClick={() => { if (showForm) { cancelInvoiceForm(); } else { setForm(blankInvoice()); setEditingId(null); setCopiedFromId(null); setRemovedInvoicePayments([]); setShowForm(true); } }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>
             <Plus size={15} /> New invoice
