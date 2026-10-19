@@ -78,7 +78,7 @@ export default function TBSClientRequests({clientId,isStaff=false}){
   if(error){setError(error.message);return}
   window.open(data.signedUrl,'_blank','noopener,noreferrer');
  }
- const visible=requests.filter(r=>statusFilter='ALL'||(statusFilter==='OPEN'?!closed(r.status):r.status===statusFilter));
+ const visible=requests.filter(r=>statusFilter==='ALL'||(statusFilter==='OPEN'?!closed(r.status):r.status===statusFilter));
  return <section style={{maxWidth:1050}}>
   <h2>{isStaff?'TBS Client Requests':'Document & Information Requests'}</h2>
   <p style={{color:'#64748b',fontSize:13}}>Requests, messages and document records are saved in Supabase. Uploads require the private Storage migration to be installed and tested first.</p>
