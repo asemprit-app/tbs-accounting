@@ -17,7 +17,7 @@ test('Custom check template is shared by Payroll and Services and uses client-sc
   assert.equal((app.match(/<CheckPrintModal\s+clientId=\{clientId\}/g) || []).length, 2);
   assert.match(app, /amount=\{lineNet\(line\)\}/);
   assert.match(app, /amount=\{serviceCalc\(s\)\.netPay\}/);
-  assert.match(modal, /customLayoutStorageKey/);
+  assert.match(modal, /customProfilesStorageKey/);
 });
 
 test('Custom renders exactly four separate printable values and underlines', () => {
@@ -50,7 +50,9 @@ test('Custom controls permit moving each field and its line independently in inc
   for (const field of ['payee','amount','memo']) assert.deepEqual(movedTwice[field], original[field]);
   assert.deepEqual(original, defaultCustomCheckPositions());
   assert.match(modal, /changeCustomPosition\(field, axis, e\.target\.value\)/);
-  assert.match(modal, /Save Custom calibration/);
+  assert.match(modal, /Save as new/);
+  assert.match(modal, /Update selected/);
+  assert.match(modal, /Delete selected/);
 });
 
 test('Custom positions validate corrupted saved layouts and stay on check stock', () => {
@@ -71,5 +73,5 @@ test('Custom skips MICR validation and preserves other check templates', () => {
   assert.match(modal, /amountToWords\(safeAmount\)/);
   assert.match(modal, /setCustomMemo\(e\.target\.value\)/);
   assert.match(modal, /type="date" value=\{checkDate\}/);
-  assert.match(modal, /window\.localStorage\.setItem\(customLayoutStorageKey/);
+  assert.match(modal, /window\.localStorage\.setItem\(customProfilesStorageKey/);
 });

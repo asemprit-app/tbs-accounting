@@ -6,6 +6,7 @@ import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
+import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -7694,15 +7695,19 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
   const [customMemo, setCustomMemo] = useState(memo || '');
-  // Layout is saved only in this browser, isolated by client. No payroll or bank data is stored.
+  // Named layouts stay on this browser, isolated by client; no payroll or bank data is stored.
   const customLayoutStorageKey = `tbs-check-custom-layout-v1:${clientId || businessName || 'default'}`;
-  const [customPositions, setCustomPositions] = useState(() => {
-    try {
-      return normalizeCustomCheckPositions(JSON.parse(window.localStorage.getItem(customLayoutStorageKey) || 'null'));
-    } catch {
-      return defaultCustomCheckPositions();
-    }
+  const customProfilesStorageKey = `tbs-check-custom-profiles-v1:${clientId || businessName || 'default'}`;
+  const [customProfileLibrary, setCustomProfileLibrary] = useState(() => {
+    let saved = null, previous = null;
+    try { saved = JSON.parse(window.localStorage.getItem(customProfilesStorageKey) || 'null'); } catch {}
+    try { previous = JSON.parse(window.localStorage.getItem(customLayoutStorageKey) || 'null'); } catch {}
+    return normalizeCustomCheckProfileLibrary(saved, previous);
   });
+  const [selectedCustomProfile, setSelectedCustomProfile] = useState(customProfileLibrary.selectedName);
+  const [customProfileName, setCustomProfileName] = useState('');
+  const initialCustomProfile = getNamedCustomCheckProfile(customProfileLibrary, customProfileLibrary.selectedName);
+  const [customPositions, setCustomPositions] = useState(() => initialCustomProfile?.positions || defaultCustomCheckPositions());
   const [customSaveStatus, setCustomSaveStatus] = useState('');
   const [checkNumber, setCheckNumber] = useState('');
   const [routingNumber, setRoutingNumber] = useState('');
@@ -7825,7 +7830,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setMicrOffsetY(0);
     if (isCustomPrint) {
       setCustomPositions(defaultCustomCheckPositions());
-      setCustomSaveStatus('Positions reset; save to keep these positions for future checks.');
+      setCustomSaveStatus('Reset to defaults for this print; saved named layouts are unchanged.');
     }
   }
 
@@ -7834,13 +7839,66 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setCustomSaveStatus('');
   }
 
-  function saveCustomCalibration() {
+  function currentCustomSettings() {
+    return { positions: customPositions, offsetX, offsetY, scalePct };
+  }
+
+  function persistCustomProfileLibrary(next) {
     try {
-      window.localStorage.setItem(customLayoutStorageKey, JSON.stringify(customPositions));
-      setCustomSaveStatus('Saved for this client in this browser.');
+      window.localStorage.setItem(customProfilesStorageKey, JSON.stringify(next));
+      setCustomProfileLibrary(next);
+      return true;
     } catch {
-      setCustomSaveStatus('Unable to save in this browser. Positions still apply to this print.');
+      setCustomSaveStatus('Browser storage is unavailable. Layout not saved; current print is unchanged.');
+      return false;
     }
+  }
+
+  function applyCustomSettings(profile) {
+    const settings = profile || emptyCustomCheckSettings();
+    setCustomPositions(settings.positions);
+    setOffsetX(settings.offsetX);
+    setOffsetY(settings.offsetY);
+    setScalePct(settings.scalePct);
+  }
+
+  function chooseCustomProfile(name) {
+    // Warn before switching when there are pending changes to the selected profile.
+    const saved = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
+    const current = currentCustomSettings();
+    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct };
+    if (JSON.stringify(current) !== JSON.stringify(lastSaved) &&
+        !window.confirm('Discard unsaved calibration changes and load another check layout?')) return;
+    const next = selectNamedCustomCheckProfile(customProfileLibrary, name);
+    setSelectedCustomProfile(next.selectedName);
+    setCustomProfileName('');
+    applyCustomSettings(getNamedCustomCheckProfile(next, next.selectedName));
+    if (persistCustomProfileLibrary(next)) {
+      setCustomSaveStatus(next.selectedName ? `Loaded "${next.selectedName}".` : 'New unsaved check layout.');
+    }
+  }
+
+  function saveCustomCalibration(overwrite = false) {
+    const name = overwrite ? selectedCustomProfile : customProfileName;
+    const result = saveNamedCustomCheckProfile(customProfileLibrary, name, currentCustomSettings(), overwrite);
+    if (result.error) {
+      setCustomSaveStatus(result.error);
+      return;
+    }
+    if (!persistCustomProfileLibrary(result.library)) return;
+    setSelectedCustomProfile(result.library.selectedName);
+    setCustomProfileName('');
+    setCustomSaveStatus(`Saved "${result.library.selectedName}" for this client in this browser.`);
+  }
+
+  function removeCustomCalibration() {
+    if (!selectedCustomProfile) return;
+    if (!window.confirm(`Delete the saved check layout "${selectedCustomProfile}"? This cannot be undone.`)) return;
+    const next = deleteNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
+    if (!persistCustomProfileLibrary(next)) return;
+    setSelectedCustomProfile('');
+    setCustomProfileName('');
+    setCustomSaveStatus('Saved layout deleted. The current positions are still available for this print.');
   }
 
   function digitsOnly(value) {
@@ -7901,7 +7959,23 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check template</label>
-                <select value={templateId} onChange={e => { setTemplateId(e.target.value); setMicrError(''); resetCalibration(); }} style={{ minWidth: 235 }}>
+                <select value={templateId} onChange={e => {
+                  const nextTemplate = e.target.value;
+                  if (isCustomPrint && nextTemplate !== 'custom') {
+                    const stored = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
+                    const draft = currentCustomSettings();
+                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct };
+                    if (JSON.stringify(draft) !== JSON.stringify(prior) &&
+                        !window.confirm('Discard unsaved Custom calibration changes?')) return;
+                  }
+                  setTemplateId(nextTemplate);
+                  setMicrError('');
+                  if (nextTemplate === 'custom') {
+                    applyCustomSettings(getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile));
+                  } else {
+                    setOffsetX(0); setOffsetY(0); setScalePct(100); setMicrOffsetY(0);
+                  }
+                }} style={{ minWidth: 235 }}>
                   {Object.entries(CHECK_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
                 </select>
               </div>
@@ -7933,6 +8007,32 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — four independently positioned fields</div>
             <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4, marginBottom: 9 }}>
               Prints the name, amount, memo and date, each with its own underline. All four fields can be moved independently with their lines. No business name, signature, amount in words, check number or MICR data is printed. Print on plain paper to check alignment before using real checks.
+            </div>
+            <div style={{ padding: '10px 0', borderTop: '1px solid #B7CDE3', borderBottom: '1px solid #B7CDE3', marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Saved Custom check layouts</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#516170', flex: '1 1 220px' }}>
+                  Select a check layout
+                  <select value={selectedCustomProfile} onChange={e => chooseCustomProfile(e.target.value)} style={{ width: '100%' }}>
+                    <option value="">New / Default layout</option>
+                    {customProfileLibrary.presets.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                </label>
+                <button type="button" disabled={!selectedCustomProfile} onClick={() => saveCustomCalibration(true)} style={iconBtn}>Update selected</button>
+                <button type="button" disabled={!selectedCustomProfile} onClick={removeCustomCalibration} style={iconBtn}>Delete selected</button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 9 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#516170', flex: '1 1 220px' }}>
+                  Save calibration with a new name
+                  <input value={customProfileName} onChange={e => setCustomProfileName(e.target.value)} maxLength={60}
+                    placeholder="e.g. Banco Popular - Payroll" style={{ width: '100%', boxSizing: 'border-box' }} />
+                </label>
+                <button type="button" onClick={() => saveCustomCalibration(false)} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save as new</button>
+              </div>
+              <div style={{ fontSize: 11.5, color: '#516170', marginTop: 8 }}>
+                A saved name includes all four field positions, the whole-check offsets and scale. Stored separately for each client in this browser.
+              </div>
+              {customSaveStatus && <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: '#17365D' }}>{customSaveStatus}</div>}
             </div>
             <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Memo for this check (print only; payroll/service record is unchanged)</label>
             <input style={{ width: '100%', boxSizing: 'border-box' }} value={customMemo} onChange={e => setCustomMemo(e.target.value)} maxLength={100} />
@@ -8010,15 +8110,15 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Horizontal offset (in)</label>
-                <input type="number" step="0.01" style={{ width: 105 }} value={offsetX} onChange={e => setOffsetX(e.target.value)} />
+                <input type="number" step="0.01" style={{ width: 105 }} value={offsetX} onChange={e => { setOffsetX(e.target.value); setCustomSaveStatus(''); }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Vertical offset (in)</label>
-                <input type="number" step="0.01" style={{ width: 105 }} value={offsetY} onChange={e => setOffsetY(e.target.value)} />
+                <input type="number" step="0.01" style={{ width: 105 }} value={offsetY} onChange={e => { setOffsetY(e.target.value); setCustomSaveStatus(''); }} />
               </div>
               <div>
                 <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Scale %</label>
-                <input type="number" min="80" max="120" step="1" style={{ width: 85 }} value={scalePct} onChange={e => setScalePct(e.target.value)} />
+                <input type="number" min="80" max="120" step="1" style={{ width: 85 }} value={scalePct} onChange={e => { setScalePct(e.target.value); setCustomSaveStatus(''); }} />
               </div>
               <button onClick={resetCalibration} style={iconBtn}>Reset calibration</button>
             </div>
@@ -8052,9 +8152,8 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <button type="button" onClick={saveCustomCalibration} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save Custom calibration</button>
-              <span style={{ fontSize: 11.5, color: '#516170' }}>{customSaveStatus || 'Calibration is previewed immediately; save to reuse it for this client on this browser.'}</span>
+            <div style={{ marginTop: 10, fontSize: 11.5, color: '#516170' }}>
+              Calibration is previewed immediately. To keep changes, use <strong>Update selected</strong> or <strong>Save as new</strong> above.
             </div>
           </div>}
         </div>
