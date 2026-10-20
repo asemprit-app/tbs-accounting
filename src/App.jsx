@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
+import TBSControlCenter from './TBSControlCenter';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -1557,6 +1558,8 @@ async function fetchAllRows(table, clientId, orderCol) {
           <div style={{ fontSize: 14, color: '#6B7280' }}>Loading data...</div>
         ) : (
         <>
+        {isStaff && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
+        {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
         {!portalLimited && tab === 'transactions' && (
           <TransactionsView
@@ -1737,6 +1740,10 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     { id: 'reconciliation', label: 'Reconciliation', icon: Landmark },
     { id: 'payroll', label: 'Payroll', icon: Wallet },
     { id: 'services', label: 'Services', icon: DollarSign },
+    ...(isStaff ? [
+      { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
+      { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle }
+    ] : []),
   ];
   const items = portalLimited ? allItems.filter(it => it.id === 'payroll' || it.id === 'services') : allItems;
   return (
