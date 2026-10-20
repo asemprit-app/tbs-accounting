@@ -7881,6 +7881,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
       setSelectedCustomProfile(next.selectedName);
       const loadedProfile = getNamedCustomCheckProfile(next, next.selectedName);
       setCustomPositions(loadedProfile?.positions || defaultCustomCheckPositions());
+      setSheetParts(loadedProfile?.sheetParts === 2 ? 2 : 3);
       // Loading a Custom layout must not reposition non-Custom check templates.
       if (customTemplateActiveRef.current) {
         setOffsetX(loadedProfile?.offsetX ?? 0);
@@ -7894,7 +7895,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   }, [clientId]);
 
   function currentCustomSettings() {
-    return { positions: customPositions, offsetX, offsetY, scalePct };
+    return { positions: customPositions, offsetX, offsetY, scalePct, sheetParts };
   }
 
   async function persistCustomProfileLibrary(next) {
@@ -7921,12 +7922,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setOffsetX(settings.offsetX);
     setOffsetY(settings.offsetY);
     setScalePct(settings.scalePct);
+    setSheetParts(settings.sheetParts === 2 ? 2 : 3);
   }
 
   function chooseCustomProfile(name) {
     const saved = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
     const current = currentCustomSettings();
-    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct };
+    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct, sheetParts: saved.sheetParts };
     if (JSON.stringify(current) !== JSON.stringify(lastSaved) &&
         !window.confirm('Discard unsaved calibration changes and load another check layout?')) return;
     const next = selectNamedCustomCheckProfile(customProfileLibrary, name);
@@ -8023,7 +8025,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                   if (isCustomPrint && nextTemplate !== 'custom') {
                     const stored = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
                     const draft = currentCustomSettings();
-                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct };
+                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct, sheetParts: stored.sheetParts };
                     if (JSON.stringify(draft) !== JSON.stringify(prior) &&
                         !window.confirm('Discard unsaved Custom calibration changes?')) return;
                   }
@@ -8064,10 +8066,17 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           </label>}
 
           {isCustomPrint && <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — four independently positioned fields</div>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — payment advice (2 or 3 parts)</div>
             <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4, marginBottom: 9 }}>
-              Prints the name, amount, memo and date, each with its own underline. All four fields can be moved independently with their lines. No business name, signature, amount in words, check number or MICR data is printed. Print on plain paper to check alignment before using real checks.
+              Prints the name, amount, amount in English words, memo and date on the top preprinted check. Below it prints the recorded Payroll / Services payment advice in one or two detachable sections. All five check fields can be calibrated independently. No MICR, signature, check number or preprinted business header is added to the check. Test on plain paper before using check stock.
             </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, maxWidth: 360, marginBottom: 12 }}>
+              Check stock — number of parts
+              <select value={sheetParts} onChange={e => { setSheetParts(Number(e.target.value) === 2 ? 2 : 3); setCustomSaveStatus(''); }}>
+                <option value={2}>2 parts — Check + 1 payment stub</option>
+                <option value={3}>3 parts — Check + 2 payment stubs</option>
+              </select>
+            </label>
             <div style={{ padding: '10px 0', borderTop: '1px solid #B7CDE3', borderBottom: '1px solid #B7CDE3', marginBottom: 10 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Saved Custom check layouts — client database</div>
               {!customProfilesReady && <div style={{ fontSize: 12, marginBottom: 6 }}>Loading client check layouts…</div>}
@@ -8092,7 +8101,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 <button type="button" disabled={!customProfilesReady || !!customProfilesError || customProfilesBusy} onClick={() => saveCustomCalibration(false)} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save as new</button>
               </div>
               <div style={{ fontSize: 11.5, color: '#516170', marginTop: 8 }}>
-                A saved name includes all four field positions, the whole-check offsets and scale. Stored per client in the TBS database and visible to authorized TBS staff from the Check Templates section.
+                A saved name includes all five field positions, two/three-part stock selection, the whole-check offsets and scale. Stored per client in the TBS database and visible to authorized TBS staff from the Check Templates section.
               </div>
               {customSaveStatus && <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: '#17365D' }}>{customSaveStatus}</div>}
             </div>
