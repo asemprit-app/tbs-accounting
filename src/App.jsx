@@ -7,6 +7,7 @@ import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
+import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -3757,6 +3758,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
             defaultDate={s.date}
             amount={serviceCalc(s).netPay}
             memo={`Services — ${s.date}`}
+            voucherDetail={serviceCheckVoucher(s, serviceCalc(s))}
             onClose={() => setCheckServiceId(null)}
           />
         );
@@ -7694,7 +7696,7 @@ function amountToWords(value) {
   return `${whole(n)} and ${String(cents).padStart(2, '0')}/100 Dollars`;
 }
 
-function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, memo, onClose }) {
+function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, memo, voucherDetail, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
   const [customMemo, setCustomMemo] = useState(memo || '');
@@ -7726,6 +7728,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [scalePct, setScalePct] = useState(100);
+  const [sheetParts, setSheetParts] = useState(initialCustomProfile?.sheetParts === 2 ? 2 : 3);
   const safeAmount = Number(amount) || 0;
 
   const CHECK_TEMPLATES = {
@@ -7829,6 +7832,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const pxPerInch = 96;
   const previewTranslateX = (Number(offsetX) || 0) * pxPerInch;
   const previewTranslateY = (Number(offsetY) || 0) * pxPerInch;
+  const voucherSlots = customCheckStubSlots(sheetParts);
 
   function resetCalibration() {
     setOffsetX(0);
@@ -9919,6 +9923,7 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
             defaultDate={run.payDate}
             amount={lineNet(line)}
             memo={`Payroll ${run.periodStart} to ${run.periodEnd}`}
+            voucherDetail={payrollCheckVoucher(line, run, lineTotalHours(line))}
             onClose={() => setCheckLineId(null)}
           />
         );
