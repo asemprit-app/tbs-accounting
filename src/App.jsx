@@ -7781,6 +7781,21 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       amountWidth: 128,
       signatureWidth: 245,
     },
+    custom_preprinted: {
+      label: 'Custom — Preprinted check (payee, amount, memo only)',
+      pageTop: 0.10,
+      width: 8.00,
+      height: 3.50,
+      padX: 0.10,
+      padY: 0.10,
+      businessFont: 17,
+      payeeFont: 15,
+      amountFont: 15.5,
+      wordsFont: 12.5,
+      memoFont: 11.5,
+      amountWidth: 125,
+      signatureWidth: 240,
+    },
     custom: {
       label: 'Custom / Calibrate',
       pageTop: 0.20,
@@ -7799,6 +7814,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   };
 
   const template = CHECK_TEMPLATES[templateId] || CHECK_TEMPLATES.standard_top;
+  const customPreprinted = templateId === 'custom_preprinted';
   const scale = Math.max(80, Math.min(120, Number(scalePct) || 100)) / 100;
   const pxPerInch = 96;
   const previewTranslateX = (Number(offsetX) || 0) * pxPerInch;
@@ -7816,7 +7832,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   }
 
   function validateMicrBeforePrint() {
-    const validationError = validateCheckPrintFields({ usePreprintedCheck, routingNumber, bankAccountNumber, checkNumber });
+    const validationError = validateCheckPrintFields({ usePreprintedCheck: usePreprintedCheck || customPreprinted, routingNumber, bankAccountNumber, checkNumber });
     setMicrError(validationError);
     return !validationError;
   }
@@ -7886,14 +7902,16 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             </div>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          {!customPreprinted && <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             <input type="checkbox" checked={usePreprintedCheck} onChange={e => { setUsePreprintedCheck(e.target.checked); setMicrError(''); }} style={{ marginTop: 2 }} />
             <span>Preprinted check stock — do not print the check number or bank MICR line
               <span style={{ display: 'block', fontSize: 11.5, color: '#6B7280', fontWeight: 400, marginTop: 3 }}>
                 Use when the physical check already has its number and bank information printed. No routing, account or check number required to print; payroll amounts remain unchanged.
               </span>
             </span>
-          </label>
+          </label>}
+
+          {customPreprinted && <div style={{ marginTop: 12, fontSize: 12, color: '#34536D', background: '#F0F6FA', padding: 10, borderRadius: 6 }}>Custom preprinted check: prints only payee, amount in numbers and words, and memo, with their lines. Bank, date, check number, MICR and signature are left untouched. Adjust printer calibration below.</div>}
 
           {templateId === 'checkworks_laser_top' && (
             <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
@@ -7904,7 +7922,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             </div>
           )}
 
-          {!usePreprintedCheck && <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
+          {!usePreprintedCheck && !customPreprinted && <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>MICR / Bank Information</div>
             <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 8 }}>
               These fields print on the MICR line at the bottom of the check. They are used for this print only and are not saved automatically.
@@ -8003,6 +8021,17 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
             }}
           >
+            {customPreprinted ? (
+              <div data-testid="custom-check-print-fields" style={{ position: 'relative', height: '2.42in', width: '100%', color: '#111' }}>
+                {/* Positions calibrated as starting points for an 8.5 x 3.5 preprinted top check. */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '0.82in', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 1.35in', gap: '0.18in', alignItems: 'end' }}>
+                  <div style={{ borderBottom: '1px solid #111', paddingBottom: 3, fontSize: template.payeeFont, fontWeight: 600, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{payee}</div>
+                  <div style={{ borderBottom: '1px solid #111', paddingBottom: 3, fontSize: template.amountFont, fontWeight: 600, textAlign: 'right' }}>{money(safeAmount)}</div>
+                </div>
+                <div style={{ position: 'absolute', left: 0, right: 0, top: '1.37in', borderBottom: '1px solid #111', paddingBottom: 3, fontSize: template.wordsFont }}>{amountToWords(safeAmount)}</div>
+                <div style={{ position: 'absolute', left: 0, width: '4.5in', maxWidth: '72%', top: '2.06in', borderBottom: '1px solid #111', paddingBottom: 3, fontSize: template.memoFont, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{memo}</div>
+              </div>
+            ) : <>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, marginBottom: 22, alignItems: 'flex-start' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: template.businessFont, fontWeight: 700, lineHeight: 1.15 }}>{businessName}</div>
@@ -8096,6 +8125,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             >
               {micrPreview()}
             </div>}
+            </>}
           </div>
         </div>
       </div>
