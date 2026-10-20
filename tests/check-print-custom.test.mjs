@@ -50,7 +50,7 @@ test('Custom controls permit moving each field and its line independently in inc
   for (const field of ['payee','amount','memo']) assert.deepEqual(movedTwice[field], original[field]);
   assert.deepEqual(original, defaultCustomCheckPositions());
   assert.match(modal, /changeCustomPosition\(field, axis, e\.target\.value\)/);
-  assert.match(modal, /Save Custom calibration/);
+  assert.match(modal, /Save as new/);\n  assert.match(modal, /Update selected/);\n  assert.match(modal, /Delete selected/);
 });
 
 test('Custom positions validate corrupted saved layouts and stay on check stock', () => {
