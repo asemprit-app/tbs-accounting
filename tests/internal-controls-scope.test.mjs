@@ -8,8 +8,10 @@ test('internal controls require staff guard',()=>{
  assert.match(app,/isStaff && tab === 'tbs-review'/);
  assert.match(app,/\.\.\.\(isStaff \? \[/);
 });
-test('Client Requests and Health Score stay outside initial release',()=>{
- assert.doesNotMatch(app,/TBSClientRequests|TBSClientHealthScore|client-requests/);
+test('Client Requests are included by explicit owner approval; Health Score stays out',()=>{
+ assert.match(app,/TBSClientRequests/);
+ assert.match(app,/client-requests/);
+ assert.doesNotMatch(app,/TBSClientHealthScore/);
  assert.doesNotMatch(center,/TBSClientRequests|TBSClientHealthScore/);
 });
 test('no final close or accounting certification is implied',()=>{
