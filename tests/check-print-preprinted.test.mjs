@@ -36,3 +36,18 @@ test('Print mode only affects presentation, not input monetary amounts',()=>{
   assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{lineNet\(line\)\}/);
   assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{serviceCalc\(s\).netPay\}/);
 });
+
+test('Check stock has no outer printed frame to interfere with preprinted numbers', () => {
+  const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const start = app.indexOf('function CheckPrintModal(');
+  const end = app.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start);
+  const modal = app.slice(start, end);
+  const checkBlock = modal.slice(modal.indexOf('id="check-document"'), modal.indexOf('id="check-document"') + 400);
+  assert.match(checkBlock, /border: 'none'/);
+  assert.doesNotMatch(checkBlock, /border: '1px solid #9CA3AF'/);
+  assert.match(modal, /#check-document \{\s*border: none !important;\s*outline: none !important;/);
+  // Payee, amount and monetary formatting must remain intact.
+  assert.match(modal, /\{money\(safeAmount\)\}/);
+  assert.match(modal, /\{payee\}/);
+});
