@@ -7691,6 +7691,7 @@ function amountToWords(value) {
 function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
+  const [customMemo, setCustomMemo] = useState(memo || '');
   const [checkNumber, setCheckNumber] = useState('');
   const [routingNumber, setRoutingNumber] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
@@ -7782,7 +7783,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       signatureWidth: 245,
     },
     custom: {
-      label: 'Custom / Calibrate',
+      label: 'Custom — Name, Amount & Memo Only',
       pageTop: 0.20,
       width: 8.00,
       height: 3.25,
@@ -7799,6 +7800,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   };
 
   const template = CHECK_TEMPLATES[templateId] || CHECK_TEMPLATES.standard_top;
+  const isCustomPrint = templateId === 'custom';
   const scale = Math.max(80, Math.min(120, Number(scalePct) || 100)) / 100;
   const pxPerInch = 96;
   const previewTranslateX = (Number(offsetX) || 0) * pxPerInch;
@@ -7822,7 +7824,9 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   }
 
   function printCheck() {
-    if (!validateMicrBeforePrint()) return;
+    // Custom prints only payee, numeric amount, and memo onto already-issued check stock.
+    // It never prints MICR or bank/check numbers and therefore requires none of those fields.
+    if (!isCustomPrint && !validateMicrBeforePrint()) return;
     window.print();
   }
 
@@ -7867,18 +7871,18 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check template</label>
-                <select value={templateId} onChange={e => { setTemplateId(e.target.value); resetCalibration(); }} style={{ minWidth: 235 }}>
+                <select value={templateId} onChange={e => { setTemplateId(e.target.value); setMicrError(''); resetCalibration(); }} style={{ minWidth: 235 }}>
                   {Object.entries(CHECK_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
                 </select>
               </div>
-              <div>
+              {!isCustomPrint && <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
                 <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
-              </div>
-              <div>
+              </div>}
+              {!isCustomPrint && <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check # (optional reference)</label>
                 <input style={{ width: 120 }} value={checkNumber} onChange={e => setCheckNumber(digitsOnly(e.target.value))} placeholder="Optional" />
-              </div>
+              </div>}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={printCheck} style={{ ...iconBtn, padding: '7px 12px' }}><Printer size={14} /> Print Check</button>
@@ -7886,14 +7890,23 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             </div>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          {!isCustomPrint && <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             <input type="checkbox" checked={usePreprintedCheck} onChange={e => { setUsePreprintedCheck(e.target.checked); setMicrError(''); }} style={{ marginTop: 2 }} />
             <span>Preprinted check stock — do not print the check number or bank MICR line
               <span style={{ display: 'block', fontSize: 11.5, color: '#6B7280', fontWeight: 400, marginTop: 3 }}>
                 Use when the physical check already has its number and bank information printed. No routing, account or check number required to print; payroll amounts remain unchanged.
               </span>
             </span>
-          </label>
+          </label>}
+
+          {isCustomPrint && <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — three printable fields only</div>
+            <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4, marginBottom: 9 }}>
+              Prints the payee name, numeric payment amount, and memo, each on its own underline. No business name, date, signature, amount in words, check number, or MICR data will print. Test on plain paper before using preprinted stock.
+            </div>
+            <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Memo for this check (print only; payroll/service record is unchanged)</label>
+            <input style={{ width: '100%', boxSizing: 'border-box' }} value={customMemo} onChange={e => setCustomMemo(e.target.value)} maxLength={100} />
+          </div>}
 
           {templateId === 'checkworks_laser_top' && (
             <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
@@ -7904,7 +7917,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             </div>
           )}
 
-          {!usePreprintedCheck && <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
+          {!isCustomPrint && !usePreprintedCheck && <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>MICR / Bank Information</div>
             <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 8 }}>
               These fields print on the MICR line at the bottom of the check. They are used for this print only and are not saved automatically.
@@ -8003,6 +8016,29 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
             }}
           >
+            {isCustomPrint ? (
+              <div id="custom-check-fields" style={{ height: '2.30in', paddingTop: '0.66in', boxSizing: 'border-box' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 1.45in', columnGap: '0.35in', alignItems: 'end' }}>
+                  <div id="custom-check-payee" style={{
+                    borderBottom: '1px solid #111', padding: '4px 6px',
+                    fontSize: template.payeeFont, fontWeight: 700, minWidth: 0,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                  }}>{payee}</div>
+                  <div id="custom-check-amount" style={{
+                    borderBottom: '1px solid #111', padding: '4px 6px',
+                    fontSize: template.amountFont, fontWeight: 700, textAlign: 'right',
+                    whiteSpace: 'nowrap'
+                  }}>{money(safeAmount)}</div>
+                </div>
+                <div id="custom-check-memo" style={{
+                  width: '65%', marginTop: '0.70in', borderBottom: '1px solid #111',
+                  padding: '4px 6px', fontSize: template.memoFont,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  boxSizing: 'border-box'
+                }}>{customMemo}</div>
+              </div>
+            ) : (
+              <>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 18, marginBottom: 22, alignItems: 'flex-start' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: template.businessFont, fontWeight: 700, lineHeight: 1.15 }}>{businessName}</div>
@@ -8096,6 +8132,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             >
               {micrPreview()}
             </div>}
+              </>
+            )}
           </div>
         </div>
       </div>
