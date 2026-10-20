@@ -5,7 +5,7 @@ const LEGACY_NAME = 'Previous Custom Calibration';
 export const MAX_CUSTOM_CHECK_PROFILES = 40;
 
 function cleanName(name) {
-  return String(name || '').trim().replace(/\\s+/g, ' ').slice(0, 60);
+  return String(name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
 }
 function sameName(a, b) {
   return cleanName(a).toLocaleLowerCase() === cleanName(b).toLocaleLowerCase();
@@ -42,10 +42,10 @@ export function normalizeCustomCheckProfileLibrary(saved, legacyPositions = null
     }
   }
   // The old single-position setting is imported rather than deleted or overwritten.
-  if (!presets.length && legacyPositions && typeof legacyPositions === 'object' && !Array.isArray(legacyPositions)) {
+  if (!Array.isArray(saved?.presets) && !presets.length && legacyPositions && typeof legacyPositions === 'object' && !Array.isArray(legacyPositions)) {
     presets.push({ name: LEGACY_NAME, ...normalizeCustomCheckSettings({ positions: legacyPositions }) });
   }
-  const selectedName = getNamedCustomCheckProfile({ presets }, saved?.selectedName)?.name || presets[0]?.name || '';
+  const selectedName = saved?.selectedName === '' ? '' : (getNamedCustomCheckProfile({ presets }, saved?.selectedName)?.name || presets[0]?.name || '');
   return { presets, selectedName };
 }
 export function saveNamedCustomCheckProfile(library, name, settings, overwrite = false) {
