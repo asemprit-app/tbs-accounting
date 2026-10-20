@@ -75,3 +75,23 @@ test('Custom skips MICR validation and preserves other check templates', () => {
   assert.match(modal, /type="date" value=\{checkDate\}/);
   assert.match(modal, /window\.localStorage\.setItem\(customProfilesStorageKey/);
 });
+
+
+test('Custom date and amount underlines fit displayed text; memo is three inches', () => {
+  const start = modal.indexOf('{isCustomPrint ? (');
+  const end = modal.indexOf(') : (', start);
+  const custom = modal.slice(start, end);
+  assert.match(custom, /id="custom-check-date"[\s\S]*?width: 'max-content'/);
+  assert.match(custom, /id="custom-check-amount"[\s\S]*?width: 'max-content'/);
+  assert.match(custom, /id="custom-check-memo"[\s\S]*?CUSTOM_CHECK_FIELDS\.memo\.width/);
+  const layout = readFileSync(new URL('../src/tbsCustomCheckLayout.js', import.meta.url), 'utf8');
+  assert.match(layout, /memo: \{ label: 'Memo', x: 0\.34, y: 2\.12, width: 3\.00 \}/);
+});
+
+test('Client check calibrations persist in database and admin view requires staff', () => {
+  assert.ok(modal.includes("supabase.from('tbs_check_print_profiles')"));
+  assert.ok(modal.includes(".eq('client_id', clientId)"));
+  assert.ok(modal.includes(".upsert({ client_id: clientId, library: next"));
+  assert.ok(app.includes("{isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin"));
+  assert.ok(app.includes("{ id: 'check-templates', label: 'Check Templates'"));
+});
