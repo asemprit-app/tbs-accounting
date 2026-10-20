@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
+import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import {invoiceAccrualPostings,bankCategoryNormalAmount,periodActivity} from './tbsReceivablesLedger.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -7645,6 +7646,7 @@ function amountToWords(value) {
 
 function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
+  const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
   const [checkNumber, setCheckNumber] = useState('');
   const [routingNumber, setRoutingNumber] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
@@ -7770,24 +7772,9 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   }
 
   function validateMicrBeforePrint() {
-    const routing = digitsOnly(routingNumber);
-    const account = digitsOnly(bankAccountNumber);
-    const check = digitsOnly(checkNumber);
-
-    if (!routing || routing.length !== 9) {
-      setMicrError('Routing Number must contain exactly 9 digits.');
-      return false;
-    }
-    if (!account) {
-      setMicrError('Enter the bank Account Number.');
-      return false;
-    }
-    if (!check) {
-      setMicrError('Enter the Check Number.');
-      return false;
-    }
-    setMicrError('');
-    return true;
+    const validationError = validateCheckPrintFields({ usePreprintedCheck, routingNumber, bankAccountNumber, checkNumber });
+    setMicrError(validationError);
+    return !validationError;
   }
 
   function printCheck() {
@@ -7845,8 +7832,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
                 <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check #</label>
-                <input style={{ width: 100 }} value={checkNumber} onChange={e => setCheckNumber(e.target.value)} placeholder="Optional" />
+                <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check # (optional reference)</label>
+                <input style={{ width: 120 }} value={checkNumber} onChange={e => setCheckNumber(digitsOnly(e.target.value))} placeholder="Optional" />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -7854,6 +7841,15 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               <button onClick={onClose} style={iconBtn}><X size={14} /></button>
             </div>
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            <input type="checkbox" checked={usePreprintedCheck} onChange={e => { setUsePreprintedCheck(e.target.checked); setMicrError(''); }} style={{ marginTop: 2 }} />
+            <span>Preprinted check stock — do not print the check number or bank MICR line
+              <span style={{ display: 'block', fontSize: 11.5, color: '#6B7280', fontWeight: 400, marginTop: 3 }}>
+                Use when the physical check already has its number and bank information printed. No routing, account or check number required to print; payroll amounts remain unchanged.
+              </span>
+            </span>
+          </label>
 
           {templateId === 'checkworks_laser_top' && (
             <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
@@ -7864,7 +7860,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             </div>
           )}
 
-          <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
+          {!usePreprintedCheck && <div style={{ marginTop: 12, background: '#FFFDF5', border: '1px solid #E5D59A', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>MICR / Bank Information</div>
             <div style={{ fontSize: 11.5, color: '#6B7280', marginBottom: 8 }}>
               These fields print on the MICR line at the bottom of the check. They are used for this print only and are not saved automatically.
@@ -7917,7 +7913,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             <div style={{ fontSize: 11, color: '#854F0B', marginTop: 8 }}>
               Compliance note: the line below is positioned as a MICR band, but production checks require bank-approved E-13B MICR printing, magnetic toner/ink and bank-validated placement.
             </div>
-          </div>
+          </div>}
 
           <div style={{ marginTop: 12, background: '#F7F8FA', border: '1px solid #E2E5E9', borderRadius: 6, padding: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 7 }}>Printer calibration</div>
@@ -7968,7 +7964,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
                 <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
               </div>
               <div style={{ textAlign: 'right', fontSize: 12.5, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                {checkNumber && <div style={{ marginBottom: 6 }}>Check No. <strong>{checkNumber}</strong></div>}
+                {shouldPrintCheckNumber({ usePreprintedCheck, checkNumber }) && <div style={{ marginBottom: 6 }}>Check No. <strong>{checkNumber}</strong></div>}
                 <div>Date: <strong>{checkDate}</strong></div>
               </div>
             </div>
@@ -8035,7 +8031,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               <div style={{ borderBottom: '1px solid #111', textAlign: 'center', paddingBottom: 4, fontSize: 10.5, color: '#6B7280' }}>AUTHORIZED SIGNATURE</div>
             </div>
 
-            <div
+            {shouldPrintMicrLine({ usePreprintedCheck }) && <div
               id="micr-line"
               style={{
                 position: 'absolute',
@@ -8054,7 +8050,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               title="MICR preview — verify bank-approved E-13B font/toner before production use"
             >
               {micrPreview()}
-            </div>
+            </div>}
           </div>
         </div>
       </div>
