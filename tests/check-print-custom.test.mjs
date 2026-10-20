@@ -73,5 +73,5 @@ test('Custom skips MICR validation and preserves other check templates', () => {
   assert.match(modal, /amountToWords\(safeAmount\)/);
   assert.match(modal, /setCustomMemo\(e\.target\.value\)/);
   assert.match(modal, /type="date" value=\{checkDate\}/);
-  assert.match(modal, /window\.localStorage\.setItem\(customLayoutStorageKey/);
+  assert.match(modal, /window\.localStorage\.setItem\(customProfilesStorageKey/);
 });
