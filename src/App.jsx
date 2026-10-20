@@ -7986,7 +7986,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           <div
             id="check-document"
             style={{
-              border: '1px solid #9CA3AF',
+              // Leave preprinted check numbers unobstructed. No outer box is printed or previewed.
+              border: 'none',
               width: `${template.width}in`,
               maxWidth: '100%',
               minHeight: `${template.height}in`,
@@ -8154,6 +8155,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           }
 
           #check-document {
+            border: none !important;
+            outline: none !important;
             position: absolute !important;
             left: calc(0.25in + ${Number(offsetX) || 0}in) !important;
             top: calc(${template.pageTop}in + ${Number(offsetY) || 0}in) !important;
