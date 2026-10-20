@@ -7782,7 +7782,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       signatureWidth: 245,
     },
     custom: {
-      label: 'Custom — Preprinted (Payee, Amount & Memo Only)',
+      label: 'Custom — Preprinted (Name, Amount & Memo)',
       pageTop: 0.04,
       width: 8.00,
       height: 3.45,
@@ -7814,8 +7814,8 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   };
 
   const template = CHECK_TEMPLATES[templateId] || CHECK_TEMPLATES.standard_top;
-  // Custom uses real, preprinted stock: ONLY the payee, two representations
-  // of the amount, and memo. No issuer, date, check number, MICR or signature.
+  // Custom uses real, preprinted stock: ONLY payee, numeric amount and memo,
+  // each with a line. No issuer, date, check number, MICR or signature.
   const customFieldsOnly = templateId === 'custom';
   const preprintedForPrint = customFieldsOnly || usePreprintedCheck;
   const scale = Math.max(80, Math.min(120, Number(scalePct) || 100)) / 100;
@@ -7915,7 +7915,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           </label>}
 
           {customFieldsOnly && <div style={{ marginTop: 12, fontSize: 12, color: '#365166', background: '#F4F8FC', padding: 10, borderRadius: 6 }}>
-            Custom prints only payee name, amount in numbers and words, and memo on preprinted stock. Their lines are included; use printer calibration to align the fields. Bank and check details are never printed in this mode.
+            Custom prints only the payee name, numeric amount and memo with their lines on preprinted stock. Use printer calibration to align the fields. Bank, date and check details are never printed in this mode.
           </div>}
 
           {templateId === 'checkworks_laser_top' && (
@@ -8043,13 +8043,6 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
                   fontSize: template.amountFont, fontWeight: 700, textAlign: 'right',
                   whiteSpace: 'nowrap',
                 }}>{money(safeAmount)}</div>
-                <div data-check-field="amount-words" style={{
-                  position: 'absolute', left: '0.34in', top: '1.74in',
-                  width: '7.20in', minHeight: '0.30in', boxSizing: 'border-box',
-                  borderBottom: '1px solid #111', padding: '4px 3px',
-                  fontSize: template.wordsFont, whiteSpace: 'nowrap',
-                  overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>{amountToWords(safeAmount)}</div>
                 <div data-check-field="memo" style={{
                   position: 'absolute', left: '1.00in', top: '2.63in',
                   width: '3.20in', minHeight: '0.28in', boxSizing: 'border-box',
