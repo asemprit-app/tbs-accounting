@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
+import { buildPostings, invoicePaidThrough, invoiceOpenThrough } from './ledger.mjs';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -1470,9 +1471,7 @@ async function fetchAllRows(table, clientId, orderCol) {
     const expensesYTD = txExpenseYTD + jeExpenseYTD;
     const netIncomeYTD = salesYTD - expensesYTD;
 
-    const arOpen = invoices
-      .filter(i => i.status !== 'Paid')
-      .reduce((s, i) => s + invoiceTotal(i) - (Number(i.paid) || 0), 0);
+    const arOpen = invoices.reduce((s, i) => s + invoiceOpenThrough(i, todayStr(), invoiceTotal), 0);
 
     // Bank balance uses the transaction source account when available, not only a hard-coded GL.
     const cash = transactions.reduce((s, t) => {
@@ -6088,36 +6087,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
     setCustomDateError('');
   }
 
-  // All unified accounting lines: transactions (one category each) + their source bank/card account +
-  // manual journal entry lines. A single bank transaction affects TWO accounts: the category it was
-  // coded to (Meals, Office Supplies...) AND the bank/card it moved through (sourceGL) — both need to
-  // count, or a bank/card's own balance would miss almost everything categorized to an expense.
-  const postings = useMemo(() => {
-    const list = [];
-    transactions.forEach(t => {
-      if (t.gl) {
-        const acct = accounts.find(a => a.code === t.gl);
-        // in the bank register, negative = outflow, positive = inflow.
-        // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
-        const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
-        list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction' });
-      }
-      if (t.sourceGL && t.sourceGL !== t.gl) {
-        list.push({ date: t.date, gl: t.sourceGL, amount: t.amount, source: 'Transaction' });
-      }
-    });
-    journalEntries.forEach(je => {
-      je.lines.forEach(l => {
-        if (!l.gl) return;
-        const acct = accounts.find(a => a.code === l.gl);
-        const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
-        const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
-        const amt = isDebitSide ? (debit - credit) : (credit - debit);
-        list.push({ date: je.date, gl: l.gl, amount: amt, source: 'Journal Entry' });
-      });
-    });
-    return list;
-  }, [transactions, journalEntries, accounts]);
+  const postings = useMemo(() => buildPostings(transactions, journalEntries, accounts),
+    [transactions, journalEntries, accounts]);
 
   function balanceAsOf(gl, asOfDate) {
     return postings.filter(p => p.gl === gl && p.date <= asOfDate).reduce((s, p) => s + p.amount, 0);
@@ -6154,7 +6125,11 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const liabilityRows = liabilityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
   const totalLiabilities = liabilityRows.reduce((s, r) => s + r.value, 0);
   const equityRows = equityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
-  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + netIncome; // period income is added to equity
+  // Balance-sheet balances are cumulative through the ending date.
+  const accumulatedIncome = revenueAccts.reduce((s, a) => s + balanceAsOf(a.code, to), 0)
+    + invoices.filter(inv => inv.date <= to).reduce((s, inv) => s + invoiceRevenueSubtotal(inv), 0)
+    - expenseAccts.reduce((s, a) => s + balanceAsOf(a.code, to), 0);
+  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + accumulatedIncome;
 
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
@@ -6200,14 +6175,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const cfGrossOutflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount < 0).reduce((s, p) => s + p.amount, 0);
 
   function invoicePaidAsOf(inv, asOfDate) {
-    const payments = Array.isArray(inv.payments) ? inv.payments : [];
-    if (payments.length > 0) {
-      return payments
-        .filter(p => !p.date || p.date <= asOfDate)
-        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    }
-    // Legacy invoices may only have an aggregate paid amount without payment dates.
-    return Number(inv.paid) || 0;
+    return invoicePaidThrough(inv, asOfDate);
   }
 
   const openInvoicesForExport = invoices
@@ -6273,7 +6241,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ['', 'Total Liabilities', totalLiabilities],
         ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Period Income', netIncome],
+        ['', 'Accumulated Income', accumulatedIncome],
         ['', 'Total Equity', totalEquity],
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
@@ -6719,7 +6687,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           <Row label="Total Liabilities" value={totalLiabilities} bold />
           <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
           {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
-          <Row label="Period income" value={netIncome} />
+          <Row label="Accumulated income through ending date" value={accumulatedIncome} />
           <Row label="Total Equity" value={totalEquity} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Liabilities + Equity" value={totalLiabilities + totalEquity} bold />
