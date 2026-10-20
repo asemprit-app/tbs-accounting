@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import {
+  shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields,
+} from '../src/tbsCheckPrintOptions.js';
+
+test('Preprinted checks hide check number and bank MICR line even when a reference number was typed', () => {
+  const settings = { usePreprintedCheck: true, checkNumber: '005814', routingNumber: '', bankAccountNumber: '' };
+  assert.equal(shouldPrintCheckNumber(settings), false);
+  assert.equal(shouldPrintMicrLine(settings), false);
+  assert.equal(validateCheckPrintFields(settings), '');
+});
+test('Preprinted checks can be printed without check, routing or account numbers', () => {
+  assert.equal(validateCheckPrintFields({ usePreprintedCheck: true }), '');
+  assert.equal(shouldPrintCheckNumber({ usePreprintedCheck: true }), false);
+});
+test('Blank check printing retains its existing MICR validation', () => {
+  assert.equal(shouldPrintMicrLine({ usePreprintedCheck: false }), true);
+  assert.match(validateCheckPrintFields({ usePreprintedCheck: false }), /Routing Number/);
+  assert.match(validateCheckPrintFields({ usePreprintedCheck: false, routingNumber: '123456789' }), /Account Number/);
+  assert.match(validateCheckPrintFields({ usePreprintedCheck: false, routingNumber: '123456789', bankAccountNumber: '001234567' }), /Check Number/);
+  const config = {usePreprintedCheck: false,routingNumber: '123456789',bankAccountNumber: '001234567',checkNumber: '0042'};
+  assert.equal(validateCheckPrintFields(config),'');
+  assert.equal(shouldPrintCheckNumber(config),true);
+});
+test('Check header stays absent when the check number field is blank',()=>{
+  assert.equal(shouldPrintCheckNumber({usePreprintedCheck:false,checkNumber:''}),false);
+});
+test('Print mode only affects presentation, not input monetary amounts',()=>{
+  const app = readFileSync(new URL('../src/App.jsx', import.meta.url),'utf8');
+  assert.match(app,/<input type="checkbox" checked=\{usePreprintedCheck\}/);
+  assert.match(app,/shouldPrintCheckNumber\(\{ usePreprintedCheck, checkNumber \}\)/);
+  assert.match(app,/shouldPrintMicrLine\(\{ usePreprintedCheck \}\)/);
+  assert.match(app,/validateCheckPrintFields\(\{ usePreprintedCheck, routingNumber, bankAccountNumber, checkNumber \}\)/);
+  assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{lineNet\(line\)\}/);
+  assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{serviceCalc\(s\).netPay\}/);
+});
