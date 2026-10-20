@@ -11,9 +11,9 @@ export function formatDecimal(value, empty = '0.00') {
 }
 
 export function formatPercentage(value, empty = '0.00%') {
-  return value === '' || value === null || value === undefined
-    ? empty
-    : `${formatDecimal(value, empty)}%`;
+  if (value === '' || value === null || value === undefined) return empty;
+  const number = Number(value);
+  return Number.isFinite(number) ? `${formatDecimal(number)}%` : empty;
 }
 
 export function formatDecimalInput(value) {
