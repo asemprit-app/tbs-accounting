@@ -5,6 +5,7 @@ import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
+import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -1595,7 +1596,7 @@ async function fetchAllRows(table, clientId, orderCol) {
           <ProductsView products={products} setProducts={setProducts} />
         )}
         {tab === 'services' && (
-          <ServicesView services={services} setServices={setServices} employees={employees}
+          <ServicesView clientId={selectedClientId} services={services} setServices={setServices} employees={employees}
             businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
             accounts={accounts} journalEntries={journalEntries} setJournalEntries={setJournalEntries} canPostJournal={isStaff} />
         )}
@@ -1614,7 +1615,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
         {!portalLimited && tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} businessName={businessName} />}
-        {tab === 'payroll' && <PayrollView employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
+        {tab === 'payroll' && <PayrollView clientId={selectedClientId} employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries}
           leaveRules={leaveRules} setLeaveRules={setLeaveRules}
           businessName={businessName} accounts={accounts}
@@ -3161,7 +3162,7 @@ function autoRetentionFor(s, employees) {
   return Number((gross * pct / 100).toFixed(2));
 }
 
-function ServicesView({ services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries, canPostJournal = true }) {
+function ServicesView({ clientId, services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries, canPostJournal = true }) {
   function blankService() {
     return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
   }
@@ -3746,6 +3747,7 @@ function ServicesView({ services, setServices, employees, businessName, logoData
         if (!s) return null;
         return (
           <CheckPrintModal
+            clientId={clientId}
             businessName={businessName}
             payee={s.employeeName}
             defaultDate={s.date}
@@ -7688,10 +7690,20 @@ function amountToWords(value) {
   return `${whole(n)} and ${String(cents).padStart(2, '0')}/100 Dollars`;
 }
 
-function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClose }) {
+function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, memo, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
   const [customMemo, setCustomMemo] = useState(memo || '');
+  // Layout is saved only in this browser, isolated by client. No payroll or bank data is stored.
+  const customLayoutStorageKey = `tbs-check-custom-layout-v1:${clientId || businessName || 'default'}`;
+  const [customPositions, setCustomPositions] = useState(() => {
+    try {
+      return normalizeCustomCheckPositions(JSON.parse(window.localStorage.getItem(customLayoutStorageKey) || 'null'));
+    } catch {
+      return defaultCustomCheckPositions();
+    }
+  });
+  const [customSaveStatus, setCustomSaveStatus] = useState('');
   const [checkNumber, setCheckNumber] = useState('');
   const [routingNumber, setRoutingNumber] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
@@ -7783,7 +7795,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
       signatureWidth: 245,
     },
     custom: {
-      label: 'Custom — Name, Amount & Memo Only',
+      label: 'Custom — Name, Amount, Memo & Date',
       pageTop: 0.20,
       width: 8.00,
       height: 3.25,
@@ -7811,6 +7823,24 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
     setOffsetY(0);
     setScalePct(100);
     setMicrOffsetY(0);
+    if (isCustomPrint) {
+      setCustomPositions(defaultCustomCheckPositions());
+      setCustomSaveStatus('Positions reset; save to keep these positions for future checks.');
+    }
+  }
+
+  function changeCustomPosition(field, axis, value) {
+    setCustomPositions(prev => updateCustomCheckPosition(prev, field, axis, value));
+    setCustomSaveStatus('');
+  }
+
+  function saveCustomCalibration() {
+    try {
+      window.localStorage.setItem(customLayoutStorageKey, JSON.stringify(customPositions));
+      setCustomSaveStatus('Saved for this client in this browser.');
+    } catch {
+      setCustomSaveStatus('Unable to save in this browser. Positions still apply to this print.');
+    }
   }
 
   function digitsOnly(value) {
@@ -7824,7 +7854,7 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
   }
 
   function printCheck() {
-    // Custom prints only payee, numeric amount, and memo onto already-issued check stock.
+    // Custom prints payee, numeric amount, memo and date onto preprinted check stock.
     // It never prints MICR or bank/check numbers and therefore requires none of those fields.
     if (!isCustomPrint && !validateMicrBeforePrint()) return;
     window.print();
@@ -7875,10 +7905,10 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
                   {Object.entries(CHECK_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
                 </select>
               </div>
-              {!isCustomPrint && <div>
+              <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check date</label>
                 <input type="date" value={checkDate} onChange={e => setCheckDate(e.target.value)} />
-              </div>}
+              </div>
               {!isCustomPrint && <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check # (optional reference)</label>
                 <input style={{ width: 120 }} value={checkNumber} onChange={e => setCheckNumber(digitsOnly(e.target.value))} placeholder="Optional" />
@@ -7900,9 +7930,9 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
           </label>}
 
           {isCustomPrint && <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — three printable fields only</div>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — four independently positioned fields</div>
             <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4, marginBottom: 9 }}>
-              Prints the payee name, numeric payment amount, and memo, each on its own underline. No business name, date, signature, amount in words, check number, or MICR data will print. Test on plain paper before using preprinted stock.
+              Prints the name, amount, memo and date, each with its own underline. All four fields can be moved independently with their lines. No business name, signature, amount in words, check number or MICR data is printed. Print on plain paper to check alignment before using real checks.
             </div>
             <label style={{ fontSize: 11, color: '#6B7280', display: 'block' }}>Memo for this check (print only; payroll/service record is unchanged)</label>
             <input style={{ width: '100%', boxSizing: 'border-box' }} value={customMemo} onChange={e => setCustomMemo(e.target.value)} maxLength={100} />
@@ -7993,6 +8023,40 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
               <button onClick={resetCalibration} style={iconBtn}>Reset calibration</button>
             </div>
           </div>
+          {isCustomPrint && <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Independent field calibration — Custom</div>
+            <div style={{ fontSize: 11.5, color: '#516170', marginBottom: 10 }}>
+              X moves right/left; Y moves down/up. Positions are in inches relative to the check area.
+              Every adjustment moves the value AND its underline together, without moving the other fields.
+              The printer calibration above moves the whole check.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Object.entries(CUSTOM_CHECK_FIELDS).map(([field, spec]) => (
+                <div key={field} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end', borderBottom: '1px solid #DBE5ED', paddingBottom: 7 }}>
+                  <div style={{ minWidth: 120, fontSize: 12.5, fontWeight: 600, paddingBottom: 6 }}>{spec.label}</div>
+                  {['x', 'y'].map(axis => (
+                    <label key={axis} style={{ fontSize: 11, color: '#566376', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {axis === 'x' ? 'Horizontal X (in)' : 'Vertical Y (in)'}
+                      <input
+                        type="number" min="0" max={axis === 'x' ? (8 - spec.width).toFixed(2) : '2.87'}
+                        step="0.05" value={customPositions[field][axis]}
+                        onChange={e => changeCustomPosition(field, axis, e.target.value)}
+                        style={{ width: 105 }}
+                      />
+                    </label>
+                  ))}
+                  <button type="button" onClick={() => changeCustomPosition(field, 'x', customPositions[field].x - 0.05)} style={iconBtn} title={`Move ${spec.label} left`}>←</button>
+                  <button type="button" onClick={() => changeCustomPosition(field, 'x', customPositions[field].x + 0.05)} style={iconBtn} title={`Move ${spec.label} right`}>→</button>
+                  <button type="button" onClick={() => changeCustomPosition(field, 'y', customPositions[field].y - 0.05)} style={iconBtn} title={`Move ${spec.label} up`}>↑</button>
+                  <button type="button" onClick={() => changeCustomPosition(field, 'y', customPositions[field].y + 0.05)} style={iconBtn} title={`Move ${spec.label} down`}>↓</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <button type="button" onClick={saveCustomCalibration} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save Custom calibration</button>
+              <span style={{ fontSize: 11.5, color: '#516170' }}>{customSaveStatus || 'Calibration is previewed immediately; save to reuse it for this client on this browser.'}</span>
+            </div>
+          </div>}
         </div>
 
         <div style={{ overflow: 'hidden', minHeight: 350 }}>
@@ -8017,24 +8081,30 @@ function CheckPrintModal({ businessName, payee, defaultDate, amount, memo, onClo
             }}
           >
             {isCustomPrint ? (
-              <div id="custom-check-fields" style={{ height: '2.30in', paddingTop: '0.66in', boxSizing: 'border-box' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 1.45in', columnGap: '0.35in', alignItems: 'end' }}>
-                  <div id="custom-check-payee" style={{
-                    borderBottom: '1px solid #111', padding: '4px 6px',
-                    fontSize: template.payeeFont, fontWeight: 700, minWidth: 0,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-                  }}>{payee}</div>
-                  <div id="custom-check-amount" style={{
-                    borderBottom: '1px solid #111', padding: '4px 6px',
-                    fontSize: template.amountFont, fontWeight: 700, textAlign: 'right',
-                    whiteSpace: 'nowrap'
-                  }}>{money(safeAmount)}</div>
-                </div>
+              <div id="custom-check-fields" style={{ position: 'absolute', inset: 0 }}>
+                <div id="custom-check-date" style={{
+                  position: 'absolute', left: `${customPositions.date.x}in`, top: `${customPositions.date.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.date.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 6px', fontSize: template.payeeFont, textAlign: 'right',
+                  boxSizing: 'border-box', whiteSpace: 'nowrap'
+                }}>{formatCustomCheckDate(checkDate)}</div>
+                <div id="custom-check-payee" style={{
+                  position: 'absolute', left: `${customPositions.payee.x}in`, top: `${customPositions.payee.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.payee.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 6px', fontSize: template.payeeFont, fontWeight: 700,
+                  boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                }}>{payee}</div>
+                <div id="custom-check-amount" style={{
+                  position: 'absolute', left: `${customPositions.amount.x}in`, top: `${customPositions.amount.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.amount.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 6px', fontSize: template.amountFont, fontWeight: 700,
+                  boxSizing: 'border-box', textAlign: 'right', whiteSpace: 'nowrap'
+                }}>{money(safeAmount)}</div>
                 <div id="custom-check-memo" style={{
-                  width: '65%', marginTop: '0.70in', borderBottom: '1px solid #111',
-                  padding: '4px 6px', fontSize: template.memoFont,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  boxSizing: 'border-box'
+                  position: 'absolute', left: `${customPositions.memo.x}in`, top: `${customPositions.memo.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.memo.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 6px', fontSize: template.memoFont, boxSizing: 'border-box',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
                 }}>{customMemo}</div>
               </div>
             ) : (
@@ -8902,7 +8972,7 @@ function LeaveBalanceReportModal({ rows, businessName, asOf, onClose }) {
   );
 }
 
-function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveRules, setLeaveRules, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail, canPostJournal = true }) {
+function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, leaveEntries, setLeaveEntries, leaveRules, setLeaveRules, businessName, accounts, journalEntries, setJournalEntries, logoDataUri, sendingEmail, replyToEmail, canPostJournal = true }) {
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
@@ -8995,7 +9065,7 @@ function PayrollView({ employees, setEmployees, payrollRuns, setPayrollRuns, pay
           employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
       )}
       {subTab === 'runs' && openRunId && (
-        <PayrollRunDetail runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
+        <PayrollRunDetail clientId={clientId} runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
           employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
@@ -9419,7 +9489,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
   );
 }
 
-function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
@@ -9686,6 +9756,7 @@ function PayrollRunDetail({ runId, payrollRuns, setPayrollRuns, payrollLines, se
         if (!line) return null;
         return (
           <CheckPrintModal
+            clientId={clientId}
             businessName={businessName}
             payee={emp?.name || 'Employee'}
             defaultDate={run.payDate}
