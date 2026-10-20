@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
+import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
@@ -1565,6 +1566,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'client-requests' && <TBSClientRequests clientId={selectedClientId} isStaff={isStaff} />}
         {isStaff && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
         {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
+        {isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin clients={clients} selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
         {!portalLimited && tab === 'transactions' && (
           <TransactionsView
@@ -1747,7 +1749,8 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     { id: 'services', label: 'Services', icon: DollarSign },
     ...(isStaff ? [
       { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
-      { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle }
+      { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle },
+      { id: 'check-templates', label: 'Check Templates', icon: Printer }
     ] : []),
     { id: 'client-requests', label: 'Client Requests', icon: FileText },
   ];
@@ -7709,6 +7712,9 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const initialCustomProfile = getNamedCustomCheckProfile(customProfileLibrary, customProfileLibrary.selectedName);
   const [customPositions, setCustomPositions] = useState(() => initialCustomProfile?.positions || defaultCustomCheckPositions());
   const [customSaveStatus, setCustomSaveStatus] = useState('');
+  const [customProfilesReady, setCustomProfilesReady] = useState(false);
+  const [customProfilesBusy, setCustomProfilesBusy] = useState(false);
+  const [customProfilesError, setCustomProfilesError] = useState('');
   const [checkNumber, setCheckNumber] = useState('');
   const [routingNumber, setRoutingNumber] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
@@ -7843,15 +7849,66 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     return { positions: customPositions, offsetX, offsetY, scalePct };
   }
 
-  function persistCustomProfileLibrary(next) {
-    try {
-      window.localStorage.setItem(customProfilesStorageKey, JSON.stringify(next));
+  // The shared database is the source of truth. Client RLS restricts access by client_id;
+  // staff can view all profiles from TBS Administration.
+  useEffect(() => {
+    let active = true;
+    async function loadClientProfiles() {
+      setCustomProfilesReady(false);
+      setCustomProfilesError('');
+      const { data, error } = await supabase.from('tbs_check_print_profiles')
+        .select('library').eq('client_id', clientId).maybeSingle();
+      if (!active) return;
+      if (error) {
+        setCustomProfilesError('Unable to load saved check layouts: ' + error.message);
+        setCustomProfilesReady(true);
+        return;
+      }
+      let next = data?.library ? normalizeCustomCheckProfileLibrary(data.library) : customProfileLibrary;
+      // Move old browser-only calibration to this client's database record once.
+      if (!data && next.presets.length) {
+        const { error: importError } = await supabase.from('tbs_check_print_profiles')
+          .upsert({ client_id: clientId, library: next, updated_at: new Date().toISOString() }, { onConflict: 'client_id' });
+        if (!active) return;
+        if (importError) {
+          setCustomProfilesError('Unable to transfer existing layouts: ' + importError.message);
+          setCustomProfilesReady(true);
+          return;
+        }
+      }
       setCustomProfileLibrary(next);
-      return true;
-    } catch {
-      setCustomSaveStatus('Browser storage is unavailable. Layout not saved; current print is unchanged.');
+      setSelectedCustomProfile(next.selectedName);
+      const loadedProfile = getNamedCustomCheckProfile(next, next.selectedName);
+      setCustomPositions(loadedProfile?.positions || defaultCustomCheckPositions());
+      setOffsetX(loadedProfile?.offsetX ?? 0);
+      setOffsetY(loadedProfile?.offsetY ?? 0);
+      setScalePct(loadedProfile?.scalePct ?? 100);
+      setCustomProfilesReady(true);
+    }
+    loadClientProfiles();
+    return () => { active = false; };
+  }, [clientId]);
+
+  function currentCustomSettings() {
+    return { positions: customPositions, offsetX, offsetY, scalePct };
+  }
+
+  async function persistCustomProfileLibrary(next) {
+    if (!customProfilesReady || customProfilesError) {
+      setCustomSaveStatus('Layouts are unavailable. Check the database connection before saving.');
       return false;
     }
+    setCustomProfilesBusy(true);
+    const { error } = await supabase.from('tbs_check_print_profiles')
+      .upsert({ client_id: clientId, library: next, updated_at: new Date().toISOString() }, { onConflict: 'client_id' });
+    setCustomProfilesBusy(false);
+    if (error) {
+      setCustomSaveStatus('Could not save check layout: ' + error.message);
+      return false;
+    }
+    setCustomProfileLibrary(next);
+    try { window.localStorage.setItem(customProfilesStorageKey, JSON.stringify(next)); } catch {}
+    return true;
   }
 
   function applyCustomSettings(profile) {
@@ -7863,7 +7920,6 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   }
 
   function chooseCustomProfile(name) {
-    // Warn before switching when there are pending changes to the selected profile.
     const saved = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
     const current = currentCustomSettings();
     const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct };
@@ -7873,32 +7929,31 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setSelectedCustomProfile(next.selectedName);
     setCustomProfileName('');
     applyCustomSettings(getNamedCustomCheckProfile(next, next.selectedName));
-    if (persistCustomProfileLibrary(next)) {
-      setCustomSaveStatus(next.selectedName ? `Loaded "${next.selectedName}".` : 'New unsaved check layout.');
-    }
+    setCustomSaveStatus(next.selectedName ? `Loaded "${next.selectedName}".` : 'New unsaved check layout.');
   }
 
-  function saveCustomCalibration(overwrite = false) {
+  async function saveCustomCalibration(overwrite = false) {
+    if (customProfilesBusy) return;
     const name = overwrite ? selectedCustomProfile : customProfileName;
     const result = saveNamedCustomCheckProfile(customProfileLibrary, name, currentCustomSettings(), overwrite);
     if (result.error) {
       setCustomSaveStatus(result.error);
       return;
     }
-    if (!persistCustomProfileLibrary(result.library)) return;
+    if (!await persistCustomProfileLibrary(result.library)) return;
     setSelectedCustomProfile(result.library.selectedName);
     setCustomProfileName('');
-    setCustomSaveStatus(`Saved "${result.library.selectedName}" for this client in this browser.`);
+    setCustomSaveStatus(`Saved "${result.library.selectedName}" for this client in TBS Accounting Engine.`);
   }
 
-  function removeCustomCalibration() {
-    if (!selectedCustomProfile) return;
+  async function removeCustomCalibration() {
+    if (!selectedCustomProfile || customProfilesBusy) return;
     if (!window.confirm(`Delete the saved check layout "${selectedCustomProfile}"? This cannot be undone.`)) return;
     const next = deleteNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
-    if (!persistCustomProfileLibrary(next)) return;
+    if (!await persistCustomProfileLibrary(next)) return;
     setSelectedCustomProfile('');
     setCustomProfileName('');
-    setCustomSaveStatus('Saved layout deleted. The current positions are still available for this print.');
+    setCustomSaveStatus('Saved layout deleted for this client. The current positions remain available for this print.');
   }
 
   function digitsOnly(value) {
@@ -8009,17 +8064,19 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               Prints the name, amount, memo and date, each with its own underline. All four fields can be moved independently with their lines. No business name, signature, amount in words, check number or MICR data is printed. Print on plain paper to check alignment before using real checks.
             </div>
             <div style={{ padding: '10px 0', borderTop: '1px solid #B7CDE3', borderBottom: '1px solid #B7CDE3', marginBottom: 10 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Saved Custom check layouts</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Saved Custom check layouts — client database</div>
+              {!customProfilesReady && <div style={{ fontSize: 12, marginBottom: 6 }}>Loading client check layouts…</div>}
+              {customProfilesError && <div role="alert" style={{ color: '#B00020', fontSize: 12, marginBottom: 8 }}>{customProfilesError}</div>}
               <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#516170', flex: '1 1 220px' }}>
                   Select a check layout
-                  <select value={selectedCustomProfile} onChange={e => chooseCustomProfile(e.target.value)} style={{ width: '100%' }}>
+                  <select value={selectedCustomProfile} disabled={!customProfilesReady || !!customProfilesError || customProfilesBusy} onChange={e => chooseCustomProfile(e.target.value)} style={{ width: '100%' }}>
                     <option value="">New / Default layout</option>
                     {customProfileLibrary.presets.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                   </select>
                 </label>
-                <button type="button" disabled={!selectedCustomProfile} onClick={() => saveCustomCalibration(true)} style={iconBtn}>Update selected</button>
-                <button type="button" disabled={!selectedCustomProfile} onClick={removeCustomCalibration} style={iconBtn}>Delete selected</button>
+                <button type="button" disabled={!selectedCustomProfile || !customProfilesReady || !!customProfilesError || customProfilesBusy} onClick={() => saveCustomCalibration(true)} style={iconBtn}>Update selected</button>
+                <button type="button" disabled={!selectedCustomProfile || !customProfilesReady || !!customProfilesError || customProfilesBusy} onClick={removeCustomCalibration} style={iconBtn}>Delete selected</button>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 9 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11.5, color: '#516170', flex: '1 1 220px' }}>
@@ -8027,10 +8084,10 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                   <input value={customProfileName} onChange={e => setCustomProfileName(e.target.value)} maxLength={60}
                     placeholder="e.g. Banco Popular - Payroll" style={{ width: '100%', boxSizing: 'border-box' }} />
                 </label>
-                <button type="button" onClick={() => saveCustomCalibration(false)} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save as new</button>
+                <button type="button" disabled={!customProfilesReady || !!customProfilesError || customProfilesBusy} onClick={() => saveCustomCalibration(false)} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save as new</button>
               </div>
               <div style={{ fontSize: 11.5, color: '#516170', marginTop: 8 }}>
-                A saved name includes all four field positions, the whole-check offsets and scale. Stored separately for each client in this browser.
+                A saved name includes all four field positions, the whole-check offsets and scale. Stored per client in the TBS database and visible to authorized TBS staff from the Check Templates section.
               </div>
               {customSaveStatus && <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: '#17365D' }}>{customSaveStatus}</div>}
             </div>
@@ -8183,8 +8240,8 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               <div id="custom-check-fields" style={{ position: 'absolute', inset: 0 }}>
                 <div id="custom-check-date" style={{
                   position: 'absolute', left: `${customPositions.date.x}in`, top: `${customPositions.date.y}in`,
-                  width: `${CUSTOM_CHECK_FIELDS.date.width}in`, borderBottom: '1px solid #111',
-                  padding: '4px 6px', fontSize: template.payeeFont, textAlign: 'right',
+                  width: 'max-content', maxWidth: `${CUSTOM_CHECK_FIELDS.date.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 1px', fontSize: template.payeeFont, textAlign: 'right',
                   boxSizing: 'border-box', whiteSpace: 'nowrap'
                 }}>{formatCustomCheckDate(checkDate)}</div>
                 <div id="custom-check-payee" style={{
@@ -8195,8 +8252,8 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 }}>{payee}</div>
                 <div id="custom-check-amount" style={{
                   position: 'absolute', left: `${customPositions.amount.x}in`, top: `${customPositions.amount.y}in`,
-                  width: `${CUSTOM_CHECK_FIELDS.amount.width}in`, borderBottom: '1px solid #111',
-                  padding: '4px 6px', fontSize: template.amountFont, fontWeight: 700,
+                  width: 'max-content', maxWidth: `${CUSTOM_CHECK_FIELDS.amount.width}in`, borderBottom: '1px solid #111',
+                  padding: '4px 1px', fontSize: template.amountFont, fontWeight: 700,
                   boxSizing: 'border-box', textAlign: 'right', whiteSpace: 'nowrap'
                 }}>{money(safeAmount)}</div>
                 <div id="custom-check-memo" style={{
