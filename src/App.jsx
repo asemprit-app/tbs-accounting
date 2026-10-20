@@ -7716,9 +7716,9 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [micrOffsetY, setMicrOffsetY] = useState(0);
   const [micrError, setMicrError] = useState('');
   const [templateId, setTemplateId] = useState('standard_top');
-  const [offsetX, setOffsetX] = useState(initialCustomProfile?.offsetX ?? 0);
-  const [offsetY, setOffsetY] = useState(initialCustomProfile?.offsetY ?? 0);
-  const [scalePct, setScalePct] = useState(initialCustomProfile?.scalePct ?? 100);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const [scalePct, setScalePct] = useState(100);
   const safeAmount = Number(amount) || 0;
 
   const CHECK_TEMPLATES = {
@@ -7866,9 +7866,9 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     // Warn before switching when there are pending changes to the selected profile.
     const saved = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
     const current = currentCustomSettings();
-    if (saved && JSON.stringify({ positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct }) !== JSON.stringify(current)) {
-      if (!window.confirm('Discard unsaved calibration changes and load another check layout?')) return;
-    }
+    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct };
+    if (JSON.stringify(current) !== JSON.stringify(lastSaved) &&
+        !window.confirm('Discard unsaved calibration changes and load another check layout?')) return;
     const next = selectNamedCustomCheckProfile(customProfileLibrary, name);
     setSelectedCustomProfile(next.selectedName);
     setCustomProfileName('');
@@ -7959,7 +7959,23 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Check template</label>
-                <select value={templateId} onChange={e => { setTemplateId(e.target.value); setMicrError(''); resetCalibration(); }} style={{ minWidth: 235 }}>
+                <select value={templateId} onChange={e => {
+                  const nextTemplate = e.target.value;
+                  if (isCustomPrint && nextTemplate !== 'custom') {
+                    const stored = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
+                    const draft = currentCustomSettings();
+                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct };
+                    if (JSON.stringify(draft) !== JSON.stringify(prior) &&
+                        !window.confirm('Discard unsaved Custom calibration changes?')) return;
+                  }
+                  setTemplateId(nextTemplate);
+                  setMicrError('');
+                  if (nextTemplate === 'custom') {
+                    applyCustomSettings(getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile));
+                  } else {
+                    setOffsetX(0); setOffsetY(0); setScalePct(100); setMicrOffsetY(0);
+                  }
+                }} style={{ minWidth: 235 }}>
                   {Object.entries(CHECK_TEMPLATES).map(([id, t]) => <option key={id} value={id}>{t.label}</option>)}
                 </select>
               </div>
