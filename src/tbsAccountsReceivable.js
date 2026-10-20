@@ -2,7 +2,7 @@
 // transaction, invoice or journal-entry records are modified by these helpers.
 export function findTradeReceivableCode(accounts = []) {
   const assets = accounts.filter(a => a?.type === 'Asset');
-  const normalized = name => String(name || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+  const normalized = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const exact = assets.find(a => ['accounts receivable', 'account receivable', 'trade accounts receivable', 'a/r'].includes(normalized(a.name)));
   if (exact) return exact.code;
   // Only the trade A/R account. Reimbursable Expenses Receivable is a separate account.
