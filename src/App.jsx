@@ -8229,7 +8229,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           </div>}
         </div>
 
-        <div style={{ overflow: 'hidden', minHeight: 350 }}>
+        <div id="check-sheet-preview" style={{
+          overflow: 'hidden', position: 'relative',
+          minHeight: isCustomPrint ? '11in' : 350,
+          width: isCustomPrint ? '8.5in' : 'auto',
+          maxWidth: '100%', margin: '0 auto',
+          background: '#fff',
+        }}>
           <div
             id="check-document"
             style={{
@@ -8238,13 +8244,15 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               width: `${template.width}in`,
               maxWidth: '100%',
               minHeight: `${template.height}in`,
-              margin: '0 auto',
+              margin: isCustomPrint ? 0 : '0 auto',
+              left: isCustomPrint ? '0.25in' : undefined,
+              top: isCustomPrint ? `${template.pageTop}in` : undefined,
               padding: `${template.padY}in ${template.padX}in`,
               background: '#fff',
               fontFamily: 'Georgia, serif',
               boxSizing: 'border-box',
               overflow: 'hidden',
-              position: 'relative',
+              position: isCustomPrint ? 'absolute' : 'relative',
               paddingBottom: '0.55in',
               transformOrigin: 'top left',
               transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
@@ -8270,6 +8278,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                   padding: '4px 1px', fontSize: template.amountFont, fontWeight: 700,
                   boxSizing: 'border-box', textAlign: 'right', whiteSpace: 'nowrap'
                 }}>{money(safeAmount)}</div>
+                <div id="custom-check-words" style={{
+                  position: 'absolute', left: `${customPositions.words.x}in`, top: `${customPositions.words.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.words.width}in`, borderBottom: '1px solid #111',
+                  padding: '3px 5px', fontSize: template.wordsFont, lineHeight: 1.15,
+                  boxSizing: 'border-box', overflow: 'hidden', maxHeight: '0.44in',
+                  whiteSpace: 'normal', overflowWrap: 'break-word'
+                }}>{amountToWords(safeAmount)}</div>
                 <div id="custom-check-memo" style={{
                   position: 'absolute', left: `${customPositions.memo.x}in`, top: `${customPositions.memo.y}in`,
                   width: `${CUSTOM_CHECK_FIELDS.memo.width}in`, borderBottom: '1px solid #111',
@@ -8375,6 +8390,55 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               </>
             )}
           </div>
+          {isCustomPrint && <div id="custom-voucher-stubs" style={{
+            position: 'absolute', inset: 0, width: '8.5in', height: '11in',
+            transformOrigin: 'top left',
+            transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
+            pointerEvents: 'none'
+          }}>
+            {voucherSlots.map((slot, index) => (
+              <div key={index} className="custom-payment-stub" style={{
+                position: 'absolute', top: `${slot.top}in`, left: '0.27in',
+                width: '7.96in', height: `${slot.height}in`,
+                padding: '0.43in 0.36in 0.10in', boxSizing: 'border-box',
+                fontFamily: 'Arial, sans-serif', fontSize: 11,
+                color: '#111', overflow: 'hidden'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
+                  <strong style={{ fontSize: 12 }}>PAYMENT ADVICE — {voucherDetail?.kind || 'Payment'}</strong>
+                  <span style={{ fontSize: 10 }}>{slot.label}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 3 }}>
+                  <div><strong>Payee: </strong>{payee}</div>
+                  <div><strong>Payment Date: </strong>{formatCustomCheckDate(checkDate)}</div>
+                </div>
+                {(voucherDetail?.period || voucherDetail?.reference || voucherDetail?.info) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 5, fontSize: 10.5 }}>
+                    {voucherDetail.period && <span><strong>{voucherDetail.kind === 'Payroll' ? 'Pay Period' : 'Service Date'}: </strong>{voucherDetail.period}</span>}
+                    {voucherDetail.reference && <span>{voucherDetail.reference}</span>}
+                    {voucherDetail.info && <span>{voucherDetail.info}</span>}
+                  </div>
+                )}
+                <table style={{ borderCollapse: 'collapse', width: '100%', maxWidth: '6.7in', fontSize: 10.5 }}>
+                  <tbody>
+                    {(voucherDetail?.rows || []).map((item, itemIndex) => (
+                      <tr key={itemIndex}>
+                        <td style={{ padding: '2px 8px 2px 0', borderBottom: '1px solid #E5E7EB' }}>{item.label}</td>
+                        <td style={{ padding: '2px 0', borderBottom: '1px solid #E5E7EB', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {Number(item.amount) < 0 ? `-${money(Math.abs(Number(item.amount)))}` : money(Number(item.amount) || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '5px 8px 0 0', fontWeight: 700 }}>NET PAYMENT</td>
+                      <td style={{ padding: '5px 0 0', textAlign: 'right', fontWeight: 700 }}>{money(safeAmount)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {customMemo && <div style={{ fontSize: 10, marginTop: 6, overflowWrap: 'anywhere' }}><strong>Memo: </strong>{customMemo}</div>}
+              </div>
+            ))}
+          </div>}
         </div>
       </div>
 
@@ -8430,6 +8494,27 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           #check-document,
           #check-document * {
             visibility: visible !important;
+          }
+
+          #check-sheet-preview {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 8.5in !important;
+            height: 11in !important;
+            margin: 0 !important;
+            overflow: visible !important;
+          }
+
+          #custom-voucher-stubs {
+            position: absolute !important;
+            top: calc(${Number(offsetY) || 0}in) !important;
+            left: calc(${Number(offsetX) || 0}in) !important;
+            width: 8.5in !important;
+            height: 11in !important;
+            transform: scale(${scale}) !important;
+            transform-origin: top left !important;
+            pointer-events: none !important;
           }
 
           #check-document {
