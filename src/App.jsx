@@ -8,6 +8,7 @@ import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
 import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
+import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
@@ -1506,8 +1507,8 @@ async function fetchAllRows(table, clientId, orderCol) {
     const netIncomeYTD = salesYTD - expensesYTD;
 
     const arOpen = invoices
-      .filter(i => i.status !== 'Paid')
-      .reduce((s, i) => s + invoiceTotal(i) - (Number(i.paid) || 0), 0);
+      .filter(i => i.date <= todayStr())
+      .reduce((s, i) => s + Math.max(0, invoiceTotal(i) - invoicePaidAsOfDate(i, todayStr())), 0);
 
     // Bank balance uses the transaction source account when available, not only a hard-coded GL.
     const cash = transactions.reduce((s, t) => {
@@ -6139,20 +6140,30 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   // manual journal entry lines. A single bank transaction affects TWO accounts: the category it was
   // coded to (Meals, Office Supplies...) AND the bank/card it moved through (sourceGL) — both need to
   // count, or a bank/card's own balance would miss almost everything categorized to an expense.
+  const tradeReceivableGL = findTradeReceivableCode(accounts);
   const postings = useMemo(() => {
     const list = [];
+    const linkedIds = linkedInvoiceTransactionIds(invoices);
     transactions.forEach(t => {
-      if (t.gl) {
+      if (t.gl === tradeReceivableGL && tradeReceivableGL) {
+        // A positive bank deposit is a CREDIT to A/R, not a debit.
+        // Linked invoice payments already provide the credit via the invoice ledger.
+        const amount = arBankCategoryPosting(t, tradeReceivableGL, linkedIds);
+        if (amount !== null) list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction', description: t.description });
+      } else if (t.gl) {
         const acct = accounts.find(a => a.code === t.gl);
         // in the bank register, negative = outflow, positive = inflow.
-        // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
-        const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
-        list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction' });
+        const amount = acct?.type === 'Expense' ? -Number(t.amount) : Number(t.amount);
+        list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction', description: t.description });
       }
+      // Bank/cash account movement remains positive for a deposit, exactly once.
       if (t.sourceGL && t.sourceGL !== t.gl) {
-        list.push({ date: t.date, gl: t.sourceGL, amount: t.amount, source: 'Transaction' });
+        list.push({ date: t.date, gl: t.sourceGL, amount: Number(t.amount) || 0, source: 'Transaction', description: t.description });
       }
     });
+    // Issued invoices debit A/R. Payments credit A/R, including those allocated
+    // to several invoices from a SINGLE bank deposit. Do not manufacture bank rows.
+    list.push(...invoiceReceivableEntries(invoices, invoiceTotal, tradeReceivableGL));
     journalEntries.forEach(je => {
       je.lines.forEach(l => {
         if (!l.gl) return;
@@ -6160,11 +6171,11 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
         const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
         const amt = isDebitSide ? (debit - credit) : (credit - debit);
-        list.push({ date: je.date, gl: l.gl, amount: amt, source: 'Journal Entry' });
+        list.push({ date: je.date, gl: l.gl, amount: amt, source: 'Journal Entry', description: `Journal Entry — ${je.memo || l.desc || 'no memo'}` });
       });
     });
     return list;
-  }, [transactions, journalEntries, accounts]);
+  }, [transactions, journalEntries, accounts, invoices, invoiceTotal, tradeReceivableGL]);
 
   function balanceAsOf(gl, asOfDate) {
     return postings.filter(p => p.gl === gl && p.date <= asOfDate).reduce((s, p) => s + p.amount, 0);
@@ -6247,14 +6258,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const cfGrossOutflow = postings.filter(p => cashAccts.some(a => a.code === p.gl) && p.date >= from && p.date <= to && p.amount < 0).reduce((s, p) => s + p.amount, 0);
 
   function invoicePaidAsOf(inv, asOfDate) {
-    const payments = Array.isArray(inv.payments) ? inv.payments : [];
-    if (payments.length > 0) {
-      return payments
-        .filter(p => !p.date || p.date <= asOfDate)
-        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    }
-    // Legacy invoices may only have an aggregate paid amount without payment dates.
-    return Number(inv.paid) || 0;
+    return invoicePaidAsOfDate(inv, asOfDate);
   }
 
   const openInvoicesForExport = invoices
@@ -7009,6 +7013,15 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
             if (mode === 'period' && (inv.date < from || inv.date > to)) return;
             if (mode === 'asOf' && inv.date > to) return;
             items.push({ id: inv.id, date: inv.date, description: `Invoice ${inv.number} — ${inv.client}`, amount: invoiceRevenueSubtotal(inv), type: 'Invoice' });
+          });
+        } else if (gl === tradeReceivableGL && tradeReceivableGL) {
+          // Show the exact same A/R invoice/deposit/JE movements used in Balance Sheet.
+          postings.forEach((p, index) => {
+            if (p.gl !== gl) return;
+            if (mode === 'period' && (p.date < from || p.date > to)) return;
+            if (mode === 'asOf' && p.date > to) return;
+            items.push({ id: `ar-${index}`, date: p.date, description: p.description || p.source,
+              amount: p.amount, type: p.source });
           });
         } else {
         transactions.forEach(t => {
