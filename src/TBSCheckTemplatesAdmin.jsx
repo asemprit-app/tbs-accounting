@@ -40,7 +40,7 @@ export default function TBSCheckTemplatesAdmin({ clients, selectedClientId, onSw
           <tbody>
             {clients.map(client => {
               const row = byClient.get(client.id);
-              const names = normalizeCustomCheckProfileLibrary(row?.library).presets.map(p => p.name);
+              const names = normalizeCustomCheckProfileLibrary(row?.library).presets.map(p => `${p.name} (${p.sheetParts}-part)`);
               return <tr key={client.id} style={{ borderTop: '1px solid #E2E5E9' }}>
                 <td style={{ padding: 12, fontWeight: client.id === selectedClientId ? 700 : 400 }}>{client.name}</td>
                 <td style={{ padding: 12 }}>{names.length ? names.join(' · ') : 'No saved formats'}</td>

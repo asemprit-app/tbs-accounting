@@ -20,34 +20,35 @@ test('Custom check template is shared by Payroll and Services and uses client-sc
   assert.match(modal, /customProfilesStorageKey/);
 });
 
-test('Custom renders exactly four separate printable values and underlines', () => {
+test('Custom renders five distinct printed values including English amount-in-words', () => {
   const start = modal.indexOf('{isCustomPrint ? (');
   const end = modal.indexOf(') : (', start);
   assert.ok(start > 0 && end > start);
   const custom = modal.slice(start, end);
-  for (const field of ['date','payee','amount','memo']) {
+  for (const field of ['date','payee','amount','words','memo']) {
     assert.match(custom, new RegExp('id="custom-check-' + field + '"'));
     assert.match(custom, new RegExp('customPositions\\.' + field + '\\.x'));
     assert.match(custom, new RegExp('customPositions\\.' + field + '\\.y'));
   }
-  assert.equal((custom.match(/borderBottom: '1px solid #111'/g) || []).length, 4);
+  assert.equal((custom.match(/borderBottom: '1px solid #111'/g) || []).length, 5);
   assert.match(custom, /formatCustomCheckDate\(checkDate\)/);
   assert.match(custom, /\{payee\}/);
   assert.match(custom, /\{money\(safeAmount\)\}/);
   assert.match(custom, /\{customMemo\}/);
-  for (const excluded of ['businessName','checkNumber','routingNumber','bankAccountNumber','amountToWords','micrPreview','AUTHORIZED SIGNATURE']) {
+  assert.match(custom, /amountToWords\(safeAmount\)/);
+  for (const excluded of ['businessName','checkNumber','routingNumber','bankAccountNumber','micrPreview','AUTHORIZED SIGNATURE']) {
     assert.ok(!custom.includes(excluded), excluded + ' must not be printed by Custom');
   }
 });
 
 test('Custom controls permit moving each field and its line independently in inches', () => {
-  assert.deepEqual(Object.keys(CUSTOM_CHECK_FIELDS).sort(), ['amount','date','memo','payee']);
+  assert.deepEqual(Object.keys(CUSTOM_CHECK_FIELDS).sort(), ['amount','date','memo','payee','words']);
   const original = defaultCustomCheckPositions();
   const moved = updateCustomCheckPosition(original, 'date', 'x', 5.25);
   const movedTwice = updateCustomCheckPosition(moved, 'date', 'y', 0.42);
   assert.equal(movedTwice.date.x, 5.25);
   assert.equal(movedTwice.date.y, 0.42);
-  for (const field of ['payee','amount','memo']) assert.deepEqual(movedTwice[field], original[field]);
+  for (const field of ['payee','amount','memo','words']) assert.deepEqual(movedTwice[field], original[field]);
   assert.deepEqual(original, defaultCustomCheckPositions());
   assert.match(modal, /changeCustomPosition\(field, axis, e\.target\.value\)/);
   assert.match(modal, /Save as new/);
@@ -94,4 +95,18 @@ test('Client check calibrations persist in database and admin view requires staf
   assert.ok(modal.includes(".upsert({ client_id: clientId, library: next"));
   assert.ok(app.includes("{isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin"));
   assert.ok(app.includes("{ id: 'check-templates', label: 'Check Templates'"));
+});
+
+test('Custom allows choosing two or three sheets and prints stubs beneath check', () => {
+  assert.match(modal, /<option value=\{2\}>2 parts — Check \+ 1 payment stub<\/option>/);
+  assert.match(modal, /<option value=\{3\}>3 parts — Check \+ 2 payment stubs<\/option>/);
+  assert.match(modal, /id="custom-voucher-stubs"/);
+  assert.match(modal, /voucherSlots\.map\(\(slot, index\)/);
+  assert.match(modal, /NET PAYMENT/);
+  assert.match(modal, /voucherDetail\?\.rows/);
+  assert.match(modal, /#custom-voucher-stubs/);
+  assert.match(modal, /currentCustomSettings\(\)/);
+  assert.match(modal, /sheetParts: saved\.sheetParts/);
+  assert.match(app, /voucherDetail=\{payrollCheckVoucher\(line, run, lineTotalHours\(line\)\)\}/);
+  assert.match(app, /voucherDetail=\{serviceCheckVoucher\(s, serviceCalc\(s\)\)\}/);
 });

@@ -24,10 +24,11 @@ export function normalizeCustomCheckSettings(settings) {
     offsetX: safeOffset(settings?.offsetX),
     offsetY: safeOffset(settings?.offsetY),
     scalePct: safeScale(settings?.scalePct),
+    sheetParts: settings?.sheetParts === 2 ? 2 : 3,
   };
 }
 export function emptyCustomCheckSettings() {
-  return { positions: defaultCustomCheckPositions(), offsetX: 0, offsetY: 0, scalePct: 100 };
+  return { positions: defaultCustomCheckPositions(), offsetX: 0, offsetY: 0, scalePct: 100, sheetParts: 3 };
 }
 export function getNamedCustomCheckProfile(library, name) {
   return library?.presets?.find(p => sameName(p.name, name)) || null;

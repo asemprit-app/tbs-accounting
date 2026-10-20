@@ -7,6 +7,7 @@ import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
+import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -3757,6 +3758,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
             defaultDate={s.date}
             amount={serviceCalc(s).netPay}
             memo={`Services — ${s.date}`}
+            voucherDetail={serviceCheckVoucher(s, serviceCalc(s))}
             onClose={() => setCheckServiceId(null)}
           />
         );
@@ -7694,7 +7696,7 @@ function amountToWords(value) {
   return `${whole(n)} and ${String(cents).padStart(2, '0')}/100 Dollars`;
 }
 
-function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, memo, onClose }) {
+function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, memo, voucherDetail, onClose }) {
   const [checkDate, setCheckDate] = useState(defaultDate || todayStr());
   const [usePreprintedCheck, setUsePreprintedCheck] = useState(false);
   const [customMemo, setCustomMemo] = useState(memo || '');
@@ -7726,6 +7728,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [scalePct, setScalePct] = useState(100);
+  const [sheetParts, setSheetParts] = useState(initialCustomProfile?.sheetParts === 2 ? 2 : 3);
   const safeAmount = Number(amount) || 0;
 
   const CHECK_TEMPLATES = {
@@ -7829,6 +7832,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const pxPerInch = 96;
   const previewTranslateX = (Number(offsetX) || 0) * pxPerInch;
   const previewTranslateY = (Number(offsetY) || 0) * pxPerInch;
+  const voucherSlots = customCheckStubSlots(sheetParts);
 
   function resetCalibration() {
     setOffsetX(0);
@@ -7877,6 +7881,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
       setSelectedCustomProfile(next.selectedName);
       const loadedProfile = getNamedCustomCheckProfile(next, next.selectedName);
       setCustomPositions(loadedProfile?.positions || defaultCustomCheckPositions());
+      setSheetParts(loadedProfile?.sheetParts === 2 ? 2 : 3);
       // Loading a Custom layout must not reposition non-Custom check templates.
       if (customTemplateActiveRef.current) {
         setOffsetX(loadedProfile?.offsetX ?? 0);
@@ -7890,7 +7895,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   }, [clientId]);
 
   function currentCustomSettings() {
-    return { positions: customPositions, offsetX, offsetY, scalePct };
+    return { positions: customPositions, offsetX, offsetY, scalePct, sheetParts };
   }
 
   async function persistCustomProfileLibrary(next) {
@@ -7917,12 +7922,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setOffsetX(settings.offsetX);
     setOffsetY(settings.offsetY);
     setScalePct(settings.scalePct);
+    setSheetParts(settings.sheetParts === 2 ? 2 : 3);
   }
 
   function chooseCustomProfile(name) {
     const saved = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
     const current = currentCustomSettings();
-    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct };
+    const lastSaved = saved && { positions: saved.positions, offsetX: saved.offsetX, offsetY: saved.offsetY, scalePct: saved.scalePct, sheetParts: saved.sheetParts };
     if (JSON.stringify(current) !== JSON.stringify(lastSaved) &&
         !window.confirm('Discard unsaved calibration changes and load another check layout?')) return;
     const next = selectNamedCustomCheckProfile(customProfileLibrary, name);
@@ -8019,7 +8025,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                   if (isCustomPrint && nextTemplate !== 'custom') {
                     const stored = getNamedCustomCheckProfile(customProfileLibrary, selectedCustomProfile);
                     const draft = currentCustomSettings();
-                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct };
+                    const prior = stored && { positions: stored.positions, offsetX: stored.offsetX, offsetY: stored.offsetY, scalePct: stored.scalePct, sheetParts: stored.sheetParts };
                     if (JSON.stringify(draft) !== JSON.stringify(prior) &&
                         !window.confirm('Discard unsaved Custom calibration changes?')) return;
                   }
@@ -8060,10 +8066,17 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           </label>}
 
           {isCustomPrint && <div style={{ marginTop: 12, background: '#F4F8FC', border: '1px solid #B7CDE3', borderRadius: 6, padding: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — four independently positioned fields</div>
+            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 5 }}>Custom check — payment advice (2 or 3 parts)</div>
             <div style={{ fontSize: 11.5, color: '#516170', lineHeight: 1.4, marginBottom: 9 }}>
-              Prints the name, amount, memo and date, each with its own underline. All four fields can be moved independently with their lines. No business name, signature, amount in words, check number or MICR data is printed. Print on plain paper to check alignment before using real checks.
+              Prints the name, amount, amount in English words, memo and date on the top preprinted check. Below it prints the recorded Payroll / Services payment advice in one or two detachable sections. All five check fields can be calibrated independently. No MICR, signature, check number or preprinted business header is added to the check. Test on plain paper before using check stock.
             </div>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, maxWidth: 360, marginBottom: 12 }}>
+              Check stock — number of parts
+              <select value={sheetParts} onChange={e => { setSheetParts(Number(e.target.value) === 2 ? 2 : 3); setCustomSaveStatus(''); }}>
+                <option value={2}>2 parts — Check + 1 payment stub</option>
+                <option value={3}>3 parts — Check + 2 payment stubs</option>
+              </select>
+            </label>
             <div style={{ padding: '10px 0', borderTop: '1px solid #B7CDE3', borderBottom: '1px solid #B7CDE3', marginBottom: 10 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Saved Custom check layouts — client database</div>
               {!customProfilesReady && <div style={{ fontSize: 12, marginBottom: 6 }}>Loading client check layouts…</div>}
@@ -8088,7 +8101,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 <button type="button" disabled={!customProfilesReady || !!customProfilesError || customProfilesBusy} onClick={() => saveCustomCalibration(false)} style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>Save as new</button>
               </div>
               <div style={{ fontSize: 11.5, color: '#516170', marginTop: 8 }}>
-                A saved name includes all four field positions, the whole-check offsets and scale. Stored per client in the TBS database and visible to authorized TBS staff from the Check Templates section.
+                A saved name includes all five field positions, two/three-part stock selection, the whole-check offsets and scale. Stored per client in the TBS database and visible to authorized TBS staff from the Check Templates section.
               </div>
               {customSaveStatus && <div role="status" style={{ fontSize: 11.5, marginTop: 7, color: '#17365D' }}>{customSaveStatus}</div>}
             </div>
@@ -8216,7 +8229,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           </div>}
         </div>
 
-        <div style={{ overflow: 'hidden', minHeight: 350 }}>
+        <div id="check-sheet-preview" style={{
+          overflow: 'hidden', position: 'relative',
+          minHeight: isCustomPrint ? '11in' : 350,
+          width: isCustomPrint ? '8.5in' : 'auto',
+          maxWidth: '100%', margin: '0 auto',
+          background: '#fff',
+        }}>
           <div
             id="check-document"
             style={{
@@ -8225,13 +8244,15 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               width: `${template.width}in`,
               maxWidth: '100%',
               minHeight: `${template.height}in`,
-              margin: '0 auto',
+              margin: isCustomPrint ? 0 : '0 auto',
+              left: isCustomPrint ? '0.25in' : undefined,
+              top: isCustomPrint ? `${template.pageTop}in` : undefined,
               padding: `${template.padY}in ${template.padX}in`,
               background: '#fff',
               fontFamily: 'Georgia, serif',
               boxSizing: 'border-box',
               overflow: 'hidden',
-              position: 'relative',
+              position: isCustomPrint ? 'absolute' : 'relative',
               paddingBottom: '0.55in',
               transformOrigin: 'top left',
               transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
@@ -8257,6 +8278,13 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                   padding: '4px 1px', fontSize: template.amountFont, fontWeight: 700,
                   boxSizing: 'border-box', textAlign: 'right', whiteSpace: 'nowrap'
                 }}>{money(safeAmount)}</div>
+                <div id="custom-check-words" style={{
+                  position: 'absolute', left: `${customPositions.words.x}in`, top: `${customPositions.words.y}in`,
+                  width: `${CUSTOM_CHECK_FIELDS.words.width}in`, borderBottom: '1px solid #111',
+                  padding: '3px 5px', fontSize: template.wordsFont, lineHeight: 1.15,
+                  boxSizing: 'border-box', overflow: 'hidden', maxHeight: '0.44in',
+                  whiteSpace: 'normal', overflowWrap: 'break-word'
+                }}>{amountToWords(safeAmount)}</div>
                 <div id="custom-check-memo" style={{
                   position: 'absolute', left: `${customPositions.memo.x}in`, top: `${customPositions.memo.y}in`,
                   width: `${CUSTOM_CHECK_FIELDS.memo.width}in`, borderBottom: '1px solid #111',
@@ -8362,6 +8390,55 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               </>
             )}
           </div>
+          {isCustomPrint && <div id="custom-voucher-stubs" style={{
+            position: 'absolute', inset: 0, width: '8.5in', height: '11in',
+            transformOrigin: 'top left',
+            transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
+            pointerEvents: 'none'
+          }}>
+            {voucherSlots.map((slot, index) => (
+              <div key={index} className="custom-payment-stub" style={{
+                position: 'absolute', top: `${slot.top}in`, left: '0.27in',
+                width: '7.96in', height: `${slot.height}in`,
+                padding: '0.43in 0.36in 0.10in', boxSizing: 'border-box',
+                fontFamily: 'Arial, sans-serif', fontSize: 11,
+                color: '#111', overflow: 'hidden'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
+                  <strong style={{ fontSize: 12 }}>PAYMENT ADVICE — {voucherDetail?.kind || 'Payment'}</strong>
+                  <span style={{ fontSize: 10 }}>{slot.label}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 3 }}>
+                  <div><strong>Payee: </strong>{payee}</div>
+                  <div><strong>Payment Date: </strong>{formatCustomCheckDate(checkDate)}</div>
+                </div>
+                {(voucherDetail?.period || voucherDetail?.reference || voucherDetail?.info) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 5, fontSize: 10.5 }}>
+                    {voucherDetail.period && <span><strong>{voucherDetail.kind === 'Payroll' ? 'Pay Period' : 'Service Date'}: </strong>{voucherDetail.period}</span>}
+                    {voucherDetail.reference && <span>{voucherDetail.reference}</span>}
+                    {voucherDetail.info && <span>{voucherDetail.info}</span>}
+                  </div>
+                )}
+                <table style={{ borderCollapse: 'collapse', width: '100%', maxWidth: '6.7in', fontSize: 10.5 }}>
+                  <tbody>
+                    {(voucherDetail?.rows || []).map((item, itemIndex) => (
+                      <tr key={itemIndex}>
+                        <td style={{ padding: '2px 8px 2px 0', borderBottom: '1px solid #E5E7EB' }}>{item.label}</td>
+                        <td style={{ padding: '2px 0', borderBottom: '1px solid #E5E7EB', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {Number(item.amount) < 0 ? `-${money(Math.abs(Number(item.amount)))}` : money(Number(item.amount) || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ padding: '5px 8px 0 0', fontWeight: 700 }}>NET PAYMENT</td>
+                      <td style={{ padding: '5px 0 0', textAlign: 'right', fontWeight: 700 }}>{money(safeAmount)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {customMemo && <div style={{ fontSize: 10, marginTop: 6, overflowWrap: 'anywhere' }}><strong>Memo: </strong>{customMemo}</div>}
+              </div>
+            ))}
+          </div>}
         </div>
       </div>
 
@@ -8417,6 +8494,27 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           #check-document,
           #check-document * {
             visibility: visible !important;
+          }
+
+          #check-sheet-preview {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 8.5in !important;
+            height: 11in !important;
+            margin: 0 !important;
+            overflow: visible !important;
+          }
+
+          #custom-voucher-stubs {
+            position: absolute !important;
+            top: calc(${Number(offsetY) || 0}in) !important;
+            left: calc(${Number(offsetX) || 0}in) !important;
+            width: 8.5in !important;
+            height: 11in !important;
+            transform: scale(${scale}) !important;
+            transform-origin: top left !important;
+            pointer-events: none !important;
           }
 
           #check-document {
@@ -9919,6 +10017,7 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
             defaultDate={run.payDate}
             amount={lineNet(line)}
             memo={`Payroll ${run.periodStart} to ${run.periodEnd}`}
+            voucherDetail={payrollCheckVoucher(line, run, lineTotalHours(line))}
             onClose={() => setCheckLineId(null)}
           />
         );
