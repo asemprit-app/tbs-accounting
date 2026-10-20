@@ -17,7 +17,7 @@ test('Custom check template is shared by Payroll and Services and uses client-sc
   assert.equal((app.match(/<CheckPrintModal\s+clientId=\{clientId\}/g) || []).length, 2);
   assert.match(app, /amount=\{lineNet\(line\)\}/);
   assert.match(app, /amount=\{serviceCalc\(s\)\.netPay\}/);
-  assert.match(modal, /customLayoutStorageKey/);
+  assert.match(modal, /customProfilesStorageKey/);
 });
 
 test('Custom renders exactly four separate printable values and underlines', () => {
