@@ -7722,6 +7722,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [micrOffsetY, setMicrOffsetY] = useState(0);
   const [micrError, setMicrError] = useState('');
   const [templateId, setTemplateId] = useState('standard_top');
+  const customTemplateActiveRef = useRef(false);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [scalePct, setScalePct] = useState(100);
@@ -7845,10 +7846,6 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     setCustomSaveStatus('');
   }
 
-  function currentCustomSettings() {
-    return { positions: customPositions, offsetX, offsetY, scalePct };
-  }
-
   // The shared database is the source of truth. Client RLS restricts access by client_id;
   // staff can view all profiles from TBS Administration.
   useEffect(() => {
@@ -7880,9 +7877,12 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
       setSelectedCustomProfile(next.selectedName);
       const loadedProfile = getNamedCustomCheckProfile(next, next.selectedName);
       setCustomPositions(loadedProfile?.positions || defaultCustomCheckPositions());
-      setOffsetX(loadedProfile?.offsetX ?? 0);
-      setOffsetY(loadedProfile?.offsetY ?? 0);
-      setScalePct(loadedProfile?.scalePct ?? 100);
+      // Loading a Custom layout must not reposition non-Custom check templates.
+      if (customTemplateActiveRef.current) {
+        setOffsetX(loadedProfile?.offsetX ?? 0);
+        setOffsetY(loadedProfile?.offsetY ?? 0);
+        setScalePct(loadedProfile?.scalePct ?? 100);
+      }
       setCustomProfilesReady(true);
     }
     loadClientProfiles();
@@ -8023,6 +8023,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                     if (JSON.stringify(draft) !== JSON.stringify(prior) &&
                         !window.confirm('Discard unsaved Custom calibration changes?')) return;
                   }
+                  customTemplateActiveRef.current = nextTemplate === 'custom';
                   setTemplateId(nextTemplate);
                   setMicrError('');
                   if (nextTemplate === 'custom') {
