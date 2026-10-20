@@ -32,7 +32,7 @@ test('Print mode only affects presentation, not input monetary amounts',()=>{
   assert.match(app,/<input type="checkbox" checked=\{usePreprintedCheck\}/);
   assert.match(app,/shouldPrintCheckNumber\(\{ usePreprintedCheck, checkNumber \}\)/);
   assert.match(app,/shouldPrintMicrLine\(\{ usePreprintedCheck \}\)/);
-  assert.match(app,/validateCheckPrintFields\(\{ usePreprintedCheck, routingNumber, bankAccountNumber, checkNumber \}\)/);
+  assert.match(app,/validateCheckPrintFields\(\{ usePreprintedCheck: preprintedForPrint, routingNumber, bankAccountNumber, checkNumber \}\)/);
   assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{lineNet\(line\)\}/);
   assert.match(app,/<CheckPrintModal[\s\S]*?amount=\{serviceCalc\(s\).netPay\}/);
 });
