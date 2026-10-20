@@ -16,15 +16,15 @@ test('Custom is selectable without removing the older full-check calibration tem
  assert.match(modal,/const customFieldsOnly = templateId === 'custom'/);
 });
 
-test('Only beneficiary, numeric amount, amount in words, and memo are overlaid on preprinted checks',()=>{
+test('Only beneficiary, numeric amount, and memo are overlaid on preprinted checks',()=>{
  assert.ok(customStart>=0&&customEnd>customStart,'isolated Custom JSX branch');
  const fields=[...overlay.matchAll(/data-check-field="([^"]+)"/g)].map(m=>m[1]);
- assert.deepEqual(fields,['payee','amount','amount-words','memo']);
+ assert.deepEqual(fields,['payee','amount','memo']);
  assert.match(overlay,/\{payee\}/);
  assert.match(overlay,/\{money\(safeAmount\)\}/);
- assert.match(overlay,/\{amountToWords\(safeAmount\)\}/);
+ assert.doesNotMatch(overlay,/amountToWords/);
  assert.match(overlay,/\{memo\}/);
- assert.equal((overlay.match(/borderBottom: '1px solid #111'/g)||[]).length,4);
+ assert.equal((overlay.match(/borderBottom: '1px solid #111'/g)||[]).length,3);
  for(const forbidden of ['businessName','checkDate','checkNumber','routingNumber','bankAccountNumber','micrPreview','signature','PAY TO THE','DOLLARS','MEMO','checkNumber']){
   assert.equal(overlay.includes(forbidden),false,'Custom must not print '+forbidden);
  }
