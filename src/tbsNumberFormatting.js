@@ -15,3 +15,11 @@ export function formatPercentage(value, empty = '0.00%') {
     ? empty
     : `${formatDecimal(value, empty)}%`;
 }
+
+export function formatDecimalInput(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? number.toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : String(value);
+}
