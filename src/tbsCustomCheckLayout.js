@@ -4,7 +4,7 @@ export const CUSTOM_CHECK_FIELDS = Object.freeze({
   date: { label: 'Date', x: 6.05, y: 0.20, width: 1.48 },
   payee: { label: 'Name / Payee', x: 0.34, y: 1.03, width: 4.95 },
   amount: { label: 'Amount', x: 6.05, y: 1.03, width: 1.48 },
-  memo: { label: 'Memo', x: 0.34, y: 2.12, width: 5.05 },
+  memo: { label: 'Memo', x: 0.34, y: 2.12, width: 3.00 },
 });
 
 export function defaultCustomCheckPositions() {
