@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Cart
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
+import {invoiceAccrualPostings,bankCategoryNormalAmount,periodActivity} from './tbsReceivablesLedger.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
 
@@ -6061,7 +6062,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         const acct = accounts.find(a => a.code === t.gl);
         // in the bank register, negative = outflow, positive = inflow.
         // so a categorized expense shows as an expense increase (positive), the sign is only flipped there.
-        const amount = acct?.type === 'Expense' ? -t.amount : t.amount;
+        const amount = bankCategoryNormalAmount(t,acct);
         list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction' });
       }
       if (t.sourceGL && t.sourceGL !== t.gl) {
@@ -6078,14 +6079,17 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         list.push({ date: je.date, gl: l.gl, amount: amt, source: 'Journal Entry' });
       });
     });
+    // Virtual double-entry for invoicing. This is a financial statement projection,
+    // not a persisted journal entry; no customer or financial record is changed.
+    invoices.forEach(inv => list.push(...invoiceAccrualPostings(inv,accounts)));
     return list;
-  }, [transactions, journalEntries, accounts]);
+  }, [transactions, journalEntries, accounts, invoices]);
 
   function balanceAsOf(gl, asOfDate) {
     return postings.filter(p => p.gl === gl && p.date <= asOfDate).reduce((s, p) => s + p.amount, 0);
   }
-  function activityInPeriod(gl, fromD, toD) {
-    return postings.filter(p => p.gl === gl && p.date >= fromD && p.date <= toD).reduce((s, p) => s + p.amount, 0);
+  function activityInPeriod(gl, fromD, toD, excludeInvoiceAccrual = false) {
+    return periodActivity(postings,gl,fromD,toD,{excludeInvoiceAccrual});
   }
 
   const revenueAccts = accounts.filter(a => a.type === 'Revenue');
@@ -6100,7 +6104,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const invoiceRevenueInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceRevenueSubtotal(inv), 0);
   const invoiceReimbursableInPeriod = invoices.filter(inv => inv.date >= from && inv.date <= to).reduce((s, inv) => s + invoiceReimbursableSubtotal(inv), 0);
 
-  const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const revenueRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to, true) }));
   const totalRevenue = revenueRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
   const expenseRows = expenseAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
   const cogsRows = expenseRows.filter(r => r.isCogs);
@@ -6134,7 +6138,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const payrollLiabilityAccts = liabilityAccts.filter(isPayrollLiability);
   const otherAssetAccts = assetAccts.filter(a => !cashAccts.includes(a) && !/receivable/i.test(a.name));
 
-  const cfSalesRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to) }));
+  const cfSalesRows = revenueAccts.map(a => ({ ...a, value: activityInPeriod(a.code, from, to, true) }));
   const cfTotalSales = cfSalesRows.reduce((s, r) => s + r.value, 0) + invoiceRevenueInPeriod;
   const cfPurchaseRows = [
     ...expenseAccts.filter(a => !/wages|s&w|payroll/i.test(a.name)).map(a => ({ ...a, value: -activityInPeriod(a.code, from, to) })),
