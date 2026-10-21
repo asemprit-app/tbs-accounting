@@ -9,6 +9,7 @@ import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields }
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
 import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
 import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
+import { journalEntryBalance } from './tbsJournalBalance.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
@@ -7411,13 +7412,15 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
   function addLine() { setForm(f => ({ ...f, lines: [...f.lines, { gl: '', debit: '', credit: '', desc: '' }] })); }
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
-  const totalDebit = form.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
-  const totalCredit = form.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
-  const balanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
+  const { totalDebit, totalCredit, remaining, missingSide, balanced } = journalEntryBalance(form.lines);
 
   function saveJE() {
     if (form.lines.some(l => !l.gl)) { setError('Each line needs an account.'); return; }
-    if (!balanced) { setError("The entry doesn't balance: Debit and Credit must be equal and greater than zero."); return; }
+    if (!balanced) {
+      const nextAction = missingSide === 'credit' ? 'Add to Credit' : missingSide === 'debit' ? 'Add to Debit' : 'Enter amounts on both sides';
+      setError(`The entry does not balance. ${nextAction}${missingSide ? ` — ${money(remaining)} remaining.` : '.'}`);
+      return;
+    }
     setError('');
     if (editingId) {
       setJournalEntries(prev => prev.map(j => j.id === editingId ? { ...form, id: editingId } : j));
@@ -7527,6 +7530,27 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
               <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Memo</label>
               <input style={{ width: '100%' }} placeholder="Description general del asiento" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
             </div>
+          </div>
+
+          <div role="status" aria-live="polite" style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 10, flexWrap: 'wrap', border: '1px solid #D7E0EB', borderRadius: 6,
+            padding: '10px 12px', marginBottom: 12, fontSize: 13,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ color: balanced ? '#0F6E56' : '#9B3A25', fontSize: 14 }}>
+                {balanced ? '✓ Journal entry balanced' : `Remaining to balance: ${money(remaining)}`}
+              </strong>
+              <span style={{ color: '#536174' }}>
+                {balanced ? 'Debits and credits are equal.'
+                  : missingSide === 'credit' ? `Add ${money(remaining)} to Credit.`
+                  : missingSide === 'debit' ? `Add ${money(remaining)} to Debit.`
+                  : 'Enter a Debit and a Credit to start.'}
+              </span>
+            </div>
+            <span style={{ color: '#536174', fontVariantNumeric: 'tabular-nums' }}>
+              Debit {money(totalDebit)} · Credit {money(totalCredit)}
+            </span>
           </div>
 
           {form.lines.map((l, i) => (
