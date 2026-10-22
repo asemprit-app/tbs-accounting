@@ -12,6 +12,7 @@ import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from '
 import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
 import { journalEntryBalance } from './tbsJournalBalance.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
+import { normalizeReceiptEmail, isValidReceiptEmail, resolveReceiptEmail } from './tbsServiceReceiptEmail.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -574,6 +575,20 @@ async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, fr
   return data;
 }
 
+async function sendServiceReceipt({ serviceId, pdfBase64 }) {
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (error || !token) throw new Error('Your session has expired. Sign in again to email this receipt.');
+  const response = await fetch('/api/send-service-receipt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ serviceId, pdfBase64 }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Payment receipt email request failed.');
+  return data;
+}
+
 function TestInvoiceEmailButton() {
   const [busy, setBusy] = useState(false);
   const [recipientInput, setRecipientInput] = useState('');
@@ -1094,7 +1109,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             tips: Number(row.tips) || 0,
           })));
           setServicesRaw((svc.data || []).map(row => ({
-            ...row, employeeName: row.employee_name, date: row.service_date,
+            ...row, employeeName: row.employee_name, date: row.service_date, email: row.email || '',
             resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
             ivuPct: Number(row.ivu_pct) || 0,
             ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
@@ -1184,7 +1199,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         })));
         setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
         setServicesRaw((svc.data || []).map(row => ({
-          ...row, employeeName: row.employee_name, date: row.service_date,
+          ...row, employeeName: row.employee_name, date: row.service_date, email: row.email || '',
           resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
           ivuPct: Number(row.ivu_pct) || 0,
           ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
@@ -1354,7 +1369,7 @@ async function fetchAllRows(table, clientId, orderCol) {
     setServicesRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       const toDb = arr => arr.map(s => ({
-        id: s.id, employee_name: s.employeeName, service_date: s.date,
+        id: s.id, employee_name: s.employeeName, service_date: s.date, email: normalizeReceiptEmail(s.email),
         resource_type: s.resourceType || 'service_provider',
         ivu_pct: Number(s.ivuPct) || 0,
         ivu_amount_override: s.ivuAmountOverride === '' || s.ivuAmountOverride === null || s.ivuAmountOverride === undefined ? null : Number(s.ivuAmountOverride),
@@ -3200,7 +3215,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ clientId, services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries, canPostJournal = true }) {
   function blankService() {
-    return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
+    return { resourceType: 'service_provider', employeeName: '', email: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -3225,13 +3240,14 @@ function ServicesView({ clientId, services, setServices, employees, businessName
 
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
+    if (!isValidReceiptEmail(form.email)) { setError('Enter a valid email for the payment receipt.'); return; }
     const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
     if (hasManualGross && Number(form.grossOverride) < 0) { setError('Gross cannot be negative.'); return; }
     if (form.hours !== '' && Number(form.hours) < 0) { setError('Hours cannot be negative.'); return; }
     if (form.payRate !== '' && Number(form.payRate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
-      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(),
+      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(), email: normalizeReceiptEmail(form.email),
       invoiceNumber: (form.invoiceNumber || '').trim(), date: form.date,
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
@@ -3256,6 +3272,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
     setForm({
       resourceType: s.resourceType || 'service_provider',
       employeeName: s.employeeName || '',
+      email: s.email || '',
       invoiceNumber: s.invoiceNumber || '',
       date: s.date || todayStr(),
       hours: Number(s.hours) || 0,
@@ -3275,8 +3292,10 @@ function ServicesView({ clientId, services, setServices, employees, businessName
   }
 
   function saveEdit(id) {
+    if (!isValidReceiptEmail(editDraft.email)) { setError('Enter a valid email for the payment receipt.'); return; }
+    setError('');
     setServices(prev => prev.map(s => s.id === id ? {
-      ...s, ...editDraft,
+      ...s, ...editDraft, email: normalizeReceiptEmail(editDraft.email),
       invoiceNumber: (editDraft.invoiceNumber || '').trim(),
       hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
       tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
@@ -3522,7 +3541,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
               value={form.resourceType || 'service_provider'}
               onChange={e => setForm(f => {
                 const resourceType = e.target.value;
-                const next = { ...f, resourceType, employeeName: '', ivuPct: resourceType === 'employee' ? 0 : (f.ivuPct || 0) };
+                const next = { ...f, resourceType, employeeName: '', email: '', ivuPct: resourceType === 'employee' ? 0 : (f.ivuPct || 0) };
                 return { ...next, retentionAmount: resourceType === 'employee' ? autoRetentionFor(next, employees) : f.retentionAmount };
               })}
             >
@@ -3538,7 +3557,8 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 const emp = (f.resourceType || 'service_provider') === 'employee'
                   ? employees.find(x => x.name === e.target.value)
                   : null;
-                const next = { ...f, employeeName: e.target.value, payRate: emp ? emp.rate : f.payRate };
+                const prior = services.slice().reverse().find(s => (s.employeeName || '').trim().toLowerCase() === e.target.value.trim().toLowerCase() && s.email);
+                const next = { ...f, employeeName: e.target.value, email: emp?.email || prior?.email || '', payRate: emp ? emp.rate : f.payRate };
                 return { ...next, retentionAmount: autoRetentionFor(next, employees) };
               })} />
             <datalist id="services-resource-list">
@@ -3546,6 +3566,12 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 ? employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.name} label="Employee" />)
                 : serviceProviderNames.map(n => <option key={n} value={n} label="Service Provider / Contractor" />)}
             </datalist>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Receipt email (optional)</label>
+            <input type="email" autoComplete="email" style={{ width: 210 }}
+              value={form.email || ''} placeholder="provider@example.com"
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Invoice # (optional)</label>
@@ -3640,12 +3666,17 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 <tr key={s.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   {editingId === s.id ? (
                     <>
-                      <td style={{ padding: '4px' }}><input style={{ width: 130 }} value={editDraft.employeeName}
-                        onChange={e => setEditDraft(d => {
-                          const emp = (d.resourceType || 'service_provider') === 'employee' ? employees.find(x => x.name === e.target.value) : null;
-                          const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
-                          return { ...next, retentionAmount: autoRetentionFor(next, employees) };
-                        })} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <input style={{ width: 130 }} value={editDraft.employeeName}
+                          onChange={e => setEditDraft(d => {
+                            const emp = (d.resourceType || 'service_provider') === 'employee' ? employees.find(x => x.name === e.target.value) : null;
+                            const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
+                            return { ...next, retentionAmount: autoRetentionFor(next, employees) };
+                          })} />
+                        <input type="email" aria-label="Receipt email" style={{ width: 180, display: 'block', marginTop: 4 }}
+                          value={editDraft.email || ''} placeholder="Receipt email"
+                          onChange={e => setEditDraft(d => ({ ...d, email: e.target.value }))} />
+                      </td>
                       <td style={{ padding: '4px' }}>
                         <select value={editDraft.resourceType || 'service_provider'} onChange={e => setEditDraft(d => {
                           const next = { ...d, resourceType: e.target.value };
@@ -3698,6 +3729,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                     <>
                       <td style={{ padding: '4px' }}>
                         {s.employeeName}
+                        {s.email && <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>{s.email}</div>}
                         {s.sourceInvoiceId && <div style={{ fontSize: 10.5, color: '#0F6E56', marginTop: 2 }}>↔ TBS invoice sync</div>}
                       </td>
                       <td style={{ padding: '4px' }}>
@@ -3963,7 +3995,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <button onClick={handleSend} disabled={sending || rows.length === 0} style={{ background: rows.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !rows.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
-          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+          {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
         <div id="invoice-content-only">
@@ -4040,22 +4072,22 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
 function ServiceReceiptModal({ service, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
   const c = serviceCalc(service);
   const emp = employees.find(e => e.name === service.employeeName);
+  const recipientEmail = resolveReceiptEmail(service, emp);
   const showHours = Number(service.hours) > 0;
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
 
   async function handleSend() {
-    const email = emp?.email || '';
-    if (!email) { setSendMsg('No email on file for this person — add one in the Employees tab first.'); return; }
+    if (!recipientEmail || !isValidReceiptEmail(recipientEmail)) {
+      setSendMsg('Add a valid Receipt email to this entry in Services (Edit), then retry.');
+      return;
+    }
     setSending(true);
     setSendMsg('');
     try {
       const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_${service.employeeName}_${service.date}.pdf`);
-      const text = `Hi ${service.employeeName},\n\nAttached is your payment receipt for ${service.date}.\n\nNet Pay: ${money(c.netPay)}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
-      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
-      const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: email, subject: `Payment Receipt — ${service.date}`, text, pdfBase64, filename: `Receipt_${service.employeeName}_${service.date}.pdf`, from, replyTo });
-      setSendMsg(`Sent to ${email}.`);
+      const result = await sendServiceReceipt({ serviceId: service.id, pdfBase64 });
+      setSendMsg(`Accepted for delivery to ${result.to}.`);
     } catch (err) {
       setSendMsg('Could not send: ' + err.message);
     } finally {
@@ -4069,7 +4101,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt — {service.employeeName}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 180 }}>{sendMsg}</span>}
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 180 }}>{sendMsg}</span>}
             <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Receipt'}
             </button>
@@ -5353,7 +5385,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Invoice {inv.number}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 220 }}>{sendMsg}</span>}
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 220 }}>{sendMsg}</span>}
             <button onClick={handleSendInvoice} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Invoice'}
             </button>
@@ -10155,7 +10187,7 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
             <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Pay Stub'}
             </button>
@@ -10460,7 +10492,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <button onClick={handleSend} disabled={sending || lines.length === 0} style={{ background: lines.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !lines.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
-          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+          {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
         <div id="invoice-content-only">
