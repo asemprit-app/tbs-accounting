@@ -1,3 +1,4 @@
+import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -6213,7 +6214,8 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const liabilityRows = liabilityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
   const totalLiabilities = liabilityRows.reduce((s, r) => s + r.value, 0);
   const equityRows = equityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
-  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + netIncome; // period income is added to equity
+  const accumulatedIncome = incomeThroughDate(postings, accounts, invoices, invoiceRevenueSubtotal, to);
+  const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + accumulatedIncome;
 
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
@@ -6325,7 +6327,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ['', 'Total Liabilities', totalLiabilities],
         ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Period Income', netIncome],
+        ['', 'Accumulated Income', accumulatedIncome],
         ['', 'Total Equity', totalEquity],
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
@@ -6771,7 +6773,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           <Row label="Total Liabilities" value={totalLiabilities} bold />
           <div style={{ fontSize: 12, color: '#6B7280', margin: '10px 0 8px' }}>Equity</div>
           {equityRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
-          <Row label="Period income" value={netIncome} />
+          <Row label="Accumulated income through ending date" value={accumulatedIncome} />
           <Row label="Total Equity" value={totalEquity} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Liabilities + Equity" value={totalLiabilities + totalEquity} bold />
