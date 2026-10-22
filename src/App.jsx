@@ -9395,6 +9395,7 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
   const [bulkRunId, setBulkRunId] = useState(null);
+  const [bulkCheckRunId, setBulkCheckRunId] = useState(null);
 
   function postPayrollToJournal(run) {
     const lines = payrollLines.filter(l => l.payrollRunId === run.id);
@@ -9481,11 +9482,11 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
       />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onBulkRun={setBulkRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
+          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onBulkRun={setBulkRunId} onBulkChecks={setBulkCheckRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail clientId={clientId} runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onBulk={() => setBulkRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onBulk={() => setBulkRunId(openRunId)} onBulkChecks={() => setBulkCheckRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
@@ -9497,6 +9498,21 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
           lines={payrollLines.filter(l => l.payrollRunId === bulkRunId)} employees={employees}
           businessName={businessName} logoDataUri={logoDataUri} onClose={() => setBulkRunId(null)} />
       )}
+      {bulkCheckRunId && (() => {
+        const run = payrollRuns.find(r => r.id === bulkCheckRunId);
+        if (!run) return null;
+        const memo = `Payroll ${run.periodStart} to ${run.periodEnd}`;
+        const checks = payrollLines.filter(l => l.payrollRunId === run.id).map(l => {
+          const emp = employees.find(e => e.id === l.employeeId);
+          return { id: l.id, payee: emp?.name || 'Employee', amount: lineNet(l), memo,
+            voucherDetail: payrollCheckVoucher(l, run, lineTotalHours(l)) };
+        });
+        return <CheckPrintModal
+          clientId={clientId} businessName={businessName}
+          payee={checks[0]?.payee || 'Employee'} defaultDate={run.payDate}
+          amount={checks[0]?.amount || 0} memo={memo}
+          bulkChecks={checks} onClose={() => setBulkCheckRunId(null)} />;
+      })()}
     </div>
   );
 }
@@ -9610,7 +9626,7 @@ function EmployeesTab({ employees, setEmployees }) {
   );
 }
 
-function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onBulkRun, onPost }) {
+function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onBulkRun, onBulkChecks, onPost }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
@@ -9893,6 +9909,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
                     <button onClick={() => copyPayrollRun(r)} style={iconBtn}>Copy</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
                     <button onClick={() => onBulkRun(r.id)} style={iconBtn}>Bulk Pay Stubs</button>
+                    <button onClick={() => onBulkChecks(r.id)} style={iconBtn}>Bulk Print Checks</button>
                     {r.status === 'DRAFT'
                       ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
                       : <button onClick={() => reopenRun(r.id)} style={iconBtn}>Reopen</button>}
@@ -9914,7 +9931,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
   );
 }
 
-function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onBulk, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onBulk, onBulkChecks, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
@@ -10056,6 +10073,7 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
           <button onClick={onBulk} style={iconBtn}>Bulk Pay Stubs</button>
+          <button onClick={onBulkChecks} style={iconBtn}>Bulk Print Checks</button>
           {onPost && (run.postedJeId
             ? <span style={{ fontSize: 13, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted to Journal Entries</span>
             : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>)}
