@@ -31,10 +31,11 @@ export default async function handler(req,res){
     }
     const profile=await findOne(`profiles?select=role,client_id&id=eq.${encodeURIComponent(user.id)}&limit=1`);
     if(!profile||!['staff','client'].includes(profile.role))return reply(res,403,{error:'Not authorized to send payroll.'});
-    const line=await findOne(`payroll_lines?select=id,employee_id,payroll_run_id& id=eq.${encodeURIComponent(lineId)}&limit=1`.replace('& ','&'));
+    const line=await findOne(`payroll_lines?select=id,employee_id,payroll_run_id,client_id&id=eq.${encodeURIComponent(lineId)}&limit=1`);
     if(!line)return reply(res,404,{error:'Payroll line not found.'});
     const run=await findOne(`payroll_runs?select=id,client_id,pay_date,period_start,period_end,status&id=eq.${encodeURIComponent(line.payroll_run_id)}&limit=1`);
     if(!run)return reply(res,404,{error:'Payroll run not found.'});
+    if(line.client_id!==run.client_id)return reply(res,403,{error:'Payroll line belongs to a different client.'});
     if(profile.role==='client'&&profile.client_id!==run.client_id)return reply(res,403,{error:'Not authorized for this client.'});
     if(run.status!=='FINAL')return reply(res,409,{error:'Finalize the payroll run before emailing pay stubs.'});
     const employee=await findOne(`employees?select=id,name,email,client_id&id=eq.${encodeURIComponent(line.employee_id)}&client_id=eq.${encodeURIComponent(run.client_id)}&limit=1`);
