@@ -12,6 +12,8 @@ import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from '
 import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
 import { journalEntryBalance } from './tbsJournalBalance.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
+import { normalizeReceiptEmail, isValidReceiptEmail, resolveReceiptEmail } from './tbsServiceReceiptEmail.js';
+import { bulkPayrollSelection, bulkMissingRecipients } from './tbsBulkPayroll.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -574,6 +576,34 @@ async function sendInvoiceViaResend({ to, subject, text, pdfBase64, filename, fr
   return data;
 }
 
+async function sendServiceReceipt({ serviceId, pdfBase64 }) {
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (error || !token) throw new Error('Your session has expired. Sign in again to email this receipt.');
+  const response = await fetch('/api/send-service-receipt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ serviceId, pdfBase64 }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Payment receipt email request failed.');
+  return data;
+}
+
+async function sendPayrollStub({ lineId, pdfBase64 }) {
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (error || !token) throw new Error('Your session has expired. Sign in again before sending.');
+  const response = await fetch('/api/send-paystub', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ lineId, pdfBase64 }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Could not send pay stub.');
+  return result;
+}
+
 function TestInvoiceEmailButton() {
   const [busy, setBusy] = useState(false);
   const [recipientInput, setRecipientInput] = useState('');
@@ -1094,7 +1124,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             tips: Number(row.tips) || 0,
           })));
           setServicesRaw((svc.data || []).map(row => ({
-            ...row, employeeName: row.employee_name, date: row.service_date,
+            ...row, employeeName: row.employee_name, date: row.service_date, email: row.email || '',
             resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
             ivuPct: Number(row.ivu_pct) || 0,
             ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
@@ -1184,7 +1214,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         })));
         setProductsRaw((prod.data || []).map(row => ({ ...row, price: Number(row.price), active: row.active !== false })));
         setServicesRaw((svc.data || []).map(row => ({
-          ...row, employeeName: row.employee_name, date: row.service_date,
+          ...row, employeeName: row.employee_name, date: row.service_date, email: row.email || '',
           resourceType: row.resource_type || ((emp.data || []).some(e => (e.name || '').trim().toLowerCase() === (row.employee_name || '').trim().toLowerCase()) ? 'employee' : 'service_provider'),
           ivuPct: Number(row.ivu_pct) || 0,
           ivuAmountOverride: row.ivu_amount_override === null || row.ivu_amount_override === undefined ? '' : Number(row.ivu_amount_override),
@@ -1354,7 +1384,7 @@ async function fetchAllRows(table, clientId, orderCol) {
     setServicesRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       const toDb = arr => arr.map(s => ({
-        id: s.id, employee_name: s.employeeName, service_date: s.date,
+        id: s.id, employee_name: s.employeeName, service_date: s.date, email: normalizeReceiptEmail(s.email),
         resource_type: s.resourceType || 'service_provider',
         ivu_pct: Number(s.ivuPct) || 0,
         ivu_amount_override: s.ivuAmountOverride === '' || s.ivuAmountOverride === null || s.ivuAmountOverride === undefined ? null : Number(s.ivuAmountOverride),
@@ -3200,7 +3230,7 @@ function autoRetentionFor(s, employees) {
 
 function ServicesView({ clientId, services, setServices, employees, businessName, logoDataUri, sendingEmail, replyToEmail, accounts, journalEntries, setJournalEntries, canPostJournal = true }) {
   function blankService() {
-    return { resourceType: 'service_provider', employeeName: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
+    return { resourceType: 'service_provider', employeeName: '', email: '', invoiceNumber: '', date: todayStr(), hours: '', payRate: '', tipsRaw: '', tipsRetentionPct: '', grossOverride: '', retentionAmount: '', ivuPct: 0, ivuAmountOverride: '', reimbursement: '', sourceInvoiceId: '', sourceClientId: '', sourceInvoiceTotal: 0 };
   }
   const [form, setForm] = useState(blankService());
   const [error, setError] = useState('');
@@ -3225,13 +3255,14 @@ function ServicesView({ clientId, services, setServices, employees, businessName
 
   function addService() {
     if (!form.employeeName.trim()) { setError('Enter the employee/worker name.'); return; }
+    if (!isValidReceiptEmail(form.email)) { setError('Enter a valid email for the payment receipt.'); return; }
     const hasManualGross = form.grossOverride !== '' && form.grossOverride !== null && form.grossOverride !== undefined;
     if (hasManualGross && Number(form.grossOverride) < 0) { setError('Gross cannot be negative.'); return; }
     if (form.hours !== '' && Number(form.hours) < 0) { setError('Hours cannot be negative.'); return; }
     if (form.payRate !== '' && Number(form.payRate) < 0) { setError('Pay rate cannot be negative.'); return; }
     setError('');
     setServices(prev => [...prev, {
-      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(),
+      id: uid(), resourceType: form.resourceType || 'service_provider', employeeName: form.employeeName.trim(), email: normalizeReceiptEmail(form.email),
       invoiceNumber: (form.invoiceNumber || '').trim(), date: form.date,
       hours: Number(form.hours) || 0, payRate: Number(form.payRate) || 0,
       tipsRaw: Number(form.tipsRaw) || 0, tipsRetentionPct: Number(form.tipsRetentionPct) || 0,
@@ -3256,6 +3287,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
     setForm({
       resourceType: s.resourceType || 'service_provider',
       employeeName: s.employeeName || '',
+      email: s.email || '',
       invoiceNumber: s.invoiceNumber || '',
       date: s.date || todayStr(),
       hours: Number(s.hours) || 0,
@@ -3275,8 +3307,10 @@ function ServicesView({ clientId, services, setServices, employees, businessName
   }
 
   function saveEdit(id) {
+    if (!isValidReceiptEmail(editDraft.email)) { setError('Enter a valid email for the payment receipt.'); return; }
+    setError('');
     setServices(prev => prev.map(s => s.id === id ? {
-      ...s, ...editDraft,
+      ...s, ...editDraft, email: normalizeReceiptEmail(editDraft.email),
       invoiceNumber: (editDraft.invoiceNumber || '').trim(),
       hours: Number(editDraft.hours) || 0, payRate: Number(editDraft.payRate) || 0,
       tipsRaw: Number(editDraft.tipsRaw) || 0, tipsRetentionPct: Number(editDraft.tipsRetentionPct) || 0,
@@ -3522,7 +3556,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
               value={form.resourceType || 'service_provider'}
               onChange={e => setForm(f => {
                 const resourceType = e.target.value;
-                const next = { ...f, resourceType, employeeName: '', ivuPct: resourceType === 'employee' ? 0 : (f.ivuPct || 0) };
+                const next = { ...f, resourceType, employeeName: '', email: '', ivuPct: resourceType === 'employee' ? 0 : (f.ivuPct || 0) };
                 return { ...next, retentionAmount: resourceType === 'employee' ? autoRetentionFor(next, employees) : f.retentionAmount };
               })}
             >
@@ -3538,7 +3572,8 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 const emp = (f.resourceType || 'service_provider') === 'employee'
                   ? employees.find(x => x.name === e.target.value)
                   : null;
-                const next = { ...f, employeeName: e.target.value, payRate: emp ? emp.rate : f.payRate };
+                const prior = services.slice().reverse().find(s => (s.employeeName || '').trim().toLowerCase() === e.target.value.trim().toLowerCase() && s.email);
+                const next = { ...f, employeeName: e.target.value, email: emp?.email || prior?.email || '', payRate: emp ? emp.rate : f.payRate };
                 return { ...next, retentionAmount: autoRetentionFor(next, employees) };
               })} />
             <datalist id="services-resource-list">
@@ -3546,6 +3581,12 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 ? employees.filter(e => e.active !== false).map(e => <option key={e.id} value={e.name} label="Employee" />)
                 : serviceProviderNames.map(n => <option key={n} value={n} label="Service Provider / Contractor" />)}
             </datalist>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Receipt email (optional)</label>
+            <input type="email" autoComplete="email" style={{ width: 210 }}
+              value={form.email || ''} placeholder="provider@example.com"
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
           </div>
           <div>
             <label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Invoice # (optional)</label>
@@ -3640,12 +3681,17 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                 <tr key={s.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
                   {editingId === s.id ? (
                     <>
-                      <td style={{ padding: '4px' }}><input style={{ width: 130 }} value={editDraft.employeeName}
-                        onChange={e => setEditDraft(d => {
-                          const emp = (d.resourceType || 'service_provider') === 'employee' ? employees.find(x => x.name === e.target.value) : null;
-                          const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
-                          return { ...next, retentionAmount: autoRetentionFor(next, employees) };
-                        })} /></td>
+                      <td style={{ padding: '4px' }}>
+                        <input style={{ width: 130 }} value={editDraft.employeeName}
+                          onChange={e => setEditDraft(d => {
+                            const emp = (d.resourceType || 'service_provider') === 'employee' ? employees.find(x => x.name === e.target.value) : null;
+                            const next = { ...d, employeeName: e.target.value, payRate: emp ? emp.rate : d.payRate };
+                            return { ...next, retentionAmount: autoRetentionFor(next, employees) };
+                          })} />
+                        <input type="email" aria-label="Receipt email" style={{ width: 180, display: 'block', marginTop: 4 }}
+                          value={editDraft.email || ''} placeholder="Receipt email"
+                          onChange={e => setEditDraft(d => ({ ...d, email: e.target.value }))} />
+                      </td>
                       <td style={{ padding: '4px' }}>
                         <select value={editDraft.resourceType || 'service_provider'} onChange={e => setEditDraft(d => {
                           const next = { ...d, resourceType: e.target.value };
@@ -3698,6 +3744,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
                     <>
                       <td style={{ padding: '4px' }}>
                         {s.employeeName}
+                        {s.email && <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>{s.email}</div>}
                         {s.sourceInvoiceId && <div style={{ fontSize: 10.5, color: '#0F6E56', marginTop: 2 }}>↔ TBS invoice sync</div>}
                       </td>
                       <td style={{ padding: '4px' }}>
@@ -3963,7 +4010,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <button onClick={handleSend} disabled={sending || rows.length === 0} style={{ background: rows.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !rows.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
-          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+          {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
         <div id="invoice-content-only">
@@ -4040,22 +4087,22 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
 function ServiceReceiptModal({ service, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
   const c = serviceCalc(service);
   const emp = employees.find(e => e.name === service.employeeName);
+  const recipientEmail = resolveReceiptEmail(service, emp);
   const showHours = Number(service.hours) > 0;
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
 
   async function handleSend() {
-    const email = emp?.email || '';
-    if (!email) { setSendMsg('No email on file for this person — add one in the Employees tab first.'); return; }
+    if (!recipientEmail || !isValidReceiptEmail(recipientEmail)) {
+      setSendMsg('Add a valid Receipt email to this entry in Services (Edit), then retry.');
+      return;
+    }
     setSending(true);
     setSendMsg('');
     try {
       const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_${service.employeeName}_${service.date}.pdf`);
-      const text = `Hi ${service.employeeName},\n\nAttached is your payment receipt for ${service.date}.\n\nNet Pay: ${money(c.netPay)}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
-      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
-      const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: email, subject: `Payment Receipt — ${service.date}`, text, pdfBase64, filename: `Receipt_${service.employeeName}_${service.date}.pdf`, from, replyTo });
-      setSendMsg(`Sent to ${email}.`);
+      const result = await sendServiceReceipt({ serviceId: service.id, pdfBase64 });
+      setSendMsg(`Accepted for delivery to ${result.to}.`);
     } catch (err) {
       setSendMsg('Could not send: ' + err.message);
     } finally {
@@ -4069,7 +4116,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt — {service.employeeName}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 180 }}>{sendMsg}</span>}
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 180 }}>{sendMsg}</span>}
             <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Receipt'}
             </button>
@@ -5353,7 +5400,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }} className="print-hide">
           <div style={{ fontWeight: 700, fontSize: 18 }}>Invoice {inv.number}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 220 }}>{sendMsg}</span>}
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 220 }}>{sendMsg}</span>}
             <button onClick={handleSendInvoice} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Invoice'}
             </button>
@@ -9298,6 +9345,7 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
+  const [bulkRunId, setBulkRunId] = useState(null);
 
   function postPayrollToJournal(run) {
     const lines = payrollLines.filter(l => l.payrollRunId === run.id);
@@ -9384,16 +9432,21 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
       />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
+          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onBulkRun={setBulkRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail clientId={clientId} runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onBulk={() => setBulkRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
           businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPrintRunId(null)} />
+      )}
+      {bulkRunId && (
+        <BulkPayrollStubsModal run={payrollRuns.find(r => r.id === bulkRunId)}
+          lines={payrollLines.filter(l => l.payrollRunId === bulkRunId)} employees={employees}
+          businessName={businessName} logoDataUri={logoDataUri} onClose={() => setBulkRunId(null)} />
       )}
     </div>
   );
@@ -9508,7 +9561,7 @@ function EmployeesTab({ employees, setEmployees }) {
   );
 }
 
-function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onPost }) {
+function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onBulkRun, onPost }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
@@ -9790,6 +9843,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
                     <button onClick={() => onOpenRun(r.id)} style={iconBtn}>Open</button>
                     <button onClick={() => copyPayrollRun(r)} style={iconBtn}>Copy</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
+                    <button onClick={() => onBulkRun(r.id)} style={iconBtn}>Bulk Pay Stubs</button>
                     {r.status === 'DRAFT'
                       ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
                       : <button onClick={() => reopenRun(r.id)} style={iconBtn}>Reopen</button>}
@@ -9811,7 +9865,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
   );
 }
 
-function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onBulk, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
@@ -9952,6 +10006,7 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
+          <button onClick={onBulk} style={iconBtn}>Bulk Pay Stubs</button>
           {onPost && (run.postedJeId
             ? <span style={{ fontSize: 13, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted to Journal Entries</span>
             : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>)}
@@ -10093,12 +10148,9 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
   );
 }
 
-function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
-  const emp = employees.find(e => e.id === line.employeeId);
+function payrollStubHourRows(line, emp) {
   const rate = Number(emp?.rate) || 0;
-  const [sending, setSending] = useState(false);
-  const [sendMsg, setSendMsg] = useState('');
-  const hourRows = emp?.payType === 'hourly' ? [
+  return emp?.payType === 'hourly' ? [
     ['Regular', line.regularHours, rate, 1],
     ['Vacation', line.vacationHours, rate, 1],
     ['Sick', line.sickHours, rate, 1],
@@ -10106,66 +10158,13 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
     ['Overtime (1.5x)', line.overtimeHours, rate * OT_MULTIPLIER, OT_MULTIPLIER],
     ['Double-OT (2x)', line.doubleOvertimeHours, rate * DOUBLE_OT_MULTIPLIER, DOUBLE_OT_MULTIPLIER],
   ].filter(([, hrs]) => Number(hrs) > 0) : [];
+}
 
-  async function handleSendPayStub() {
-    const email = emp?.email || '';
-    if (!email) { setSendMsg('No email on file for this employee — add one in the Employees tab first.'); return; }
-    setSending(true);
-    setSendMsg('');
-    try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
-      const text = `Hi ${emp.name},\n\nAttached is your pay stub for the period ${run.periodStart} to ${run.periodEnd} (pay date ${run.payDate}).\n\nNet Pay: ${money(lineNet(line))}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
-      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
-      const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: email, subject: `Pay Stub — ${run.payDate}`, text, pdfBase64, filename: `PayStub_${emp.name}_${run.payDate}.pdf`, from, replyTo });
-      setSendMsg(`Sent to ${email}.`);
-    } catch (err) {
-      setSendMsg('Could not send: ' + err.message);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  function exportCSV() {
-    let csv = 'Employee,Pay Date,Period Start,Period End\n';
-    csv += `"${emp?.name || ''}",${run.payDate},${run.periodStart},${run.periodEnd}\n\n`;
-    csv += 'Hour Type,Hours,Rate,Amount\n';
-    hourRows.forEach(([label, hrs, effRate]) => {
-      csv += `${label},${hrs},${effRate.toFixed(2)},${(Number(hrs) * effRate).toFixed(2)}\n`;
-    });
-    csv += `\nGross,,,${line.gross.toFixed(2)}\n`;
-    csv += `Federal Tax,,,${(-line.federalIncomeTax).toFixed(2)}\n`;
-    csv += `PR Tax,,,${(-line.prIncomeTax).toFixed(2)}\n`;
-    csv += `Social Security,,,${(-line.socialSecurity).toFixed(2)}\n`;
-    csv += `Medicare,,,${(-line.medicare).toFixed(2)}\n`;
-    csv += `SINOT,,,${(-line.sinot).toFixed(2)}\n`;
-    csv += `Other Deductions,,,${(-line.otherDeductions).toFixed(2)}\n`;
-    csv += `Reimbursement,,,${line.reimbursement.toFixed(2)}\n`;
-    csv += `Net Pay,,,${lineNet(line).toFixed(2)}\n`;
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `PayStub_${(emp?.name || 'employee').replace(/[^a-z0-9]+/gi, '_')}_${run.payDate}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
+function PayStubContent({ line, run, emp, businessName, logoDataUri, contentId = 'invoice-content-only' }) {
+  const hourRows = payrollStubHourRows(line, emp);
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
-            <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
-              {sending ? 'Sending…' : 'Send Pay Stub'}
-            </button>
-            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
-            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
-          </div>
-        </div>
+    <div id={contentId} style={{ background: '#fff', width: '100%' }}>
 
-        <div id="invoice-content-only">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>{logoDataUri && <img src={logoDataUri} alt={businessName} style={{ height: 56 }} />}</div>
             <div style={{ textAlign: 'right' }}>
@@ -10241,7 +10240,189 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
           <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #1F2933', marginTop: 14, paddingTop: 10, fontWeight: 700, fontSize: 15 }}>
             <span>Net Pay</span><span>{money(lineNet(line))}</span>
           </div>
+    </div>
+  );
+}
+
+
+function BulkPayrollStubsModal({ run, lines, employees, businessName, logoDataUri, onClose }) {
+  const [selectedIds, setSelectedIds] = useState(() => lines.map(l => l.id));
+  const [sending, setSending] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [results, setResults] = useState([]);
+  const selectedLines = bulkPayrollSelection(lines, selectedIds);
+  const missing = bulkMissingRecipients(selectedLines, employees);
+  const missingIds = new Set(missing.map(l => l.id));
+  const readyToEmail = selectedLines.filter(l => !missingIds.has(l.id));
+
+  function toggleLine(id, checked) {
+    setSelectedIds(prev => checked ? [...prev.filter(x => x !== id), id] : prev.filter(x => x !== id));
+    setProgress('');
+    setResults([]);
+  }
+
+  function printBulk() {
+    if (!selectedLines.length) { setProgress('Select at least one employee.'); return; }
+    window.print();
+  }
+
+  async function emailBulk() {
+    if (run?.status !== 'FINAL') { setProgress('Finalize the payroll run before emailing pay stubs.'); return; }
+    if (!readyToEmail.length) { setProgress('Selected employees have no valid email address. Update Employees first.'); return; }
+    if (!window.confirm(`Send ${readyToEmail.length} individual pay stubs for ${run.payDate}? Each email will include only that employee's PDF. ${missing.length ? missing.length + ' employees without email will be skipped.' : ''}`)) return;
+    setSending(true);
+    setResults([]);
+    const outcome = [];
+    for (let i = 0; i < readyToEmail.length; i++) {
+      const line = readyToEmail[i];
+      const employee = employees.find(e => e.id === line.employeeId);
+      setProgress(`Sending ${i + 1} of ${readyToEmail.length} — ${employee?.name || 'employee'}`);
+      try {
+        const pdfBase64 = await generatePdfBase64FromElement(`bulk-paystub-${line.id}`, `PayStub_${run.payDate}.pdf`);
+        const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
+        outcome.push({ id: line.id, name: employee?.name || '(unknown)', ok: true, detail: `Accepted: ${result.to}` });
+      } catch (error) {
+        outcome.push({ id: line.id, name: employee?.name || '(unknown)', ok: false, detail: error.message || 'Email failed.' });
+      }
+      setResults([...outcome]);
+    }
+    setProgress(`Completed: ${outcome.filter(x => x.ok).length} accepted, ${outcome.filter(x => !x.ok).length} failed, ${missing.length} without email skipped. Email acceptance does not confirm delivery.`);
+    setSending(false);
+  }
+
+  if (!run) return null;
+  return (
+    <div className="no-print-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div id="bulk-paystubs-print" style={{ background: '#fff', borderRadius: 8, padding: 22, width: 860, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div className="print-hide" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Bulk Pay Stubs — {run.payDate}</div>
+            <div style={{ fontSize: 12, color: '#6B7280' }}>Payroll: {run.periodStart} → {run.periodEnd} · {run.status}</div>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button type="button" disabled={sending || !selectedLines.length} onClick={printBulk} style={iconBtn}><Printer size={14} /> Print selected ({selectedLines.length})</button>
+            <button type="button" disabled={sending || run.status !== 'FINAL' || !readyToEmail.length} onClick={emailBulk}
+              style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>{sending ? 'Sending…' : `Email selected (${readyToEmail.length})`}</button>
+            <button type="button" disabled={sending} onClick={onClose} style={iconBtn}><X size={14} /> Close</button>
+          </div>
         </div>
+        <div className="print-hide" style={{ background: '#F7F8FA', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, marginBottom: 8, color: '#475569' }}>
+            Select employees. Each pay stub is printed on a separate page and emailed individually.
+            {run.status !== 'FINAL' && <strong style={{ color: '#A16207' }}> This run is DRAFT; email is disabled until Final.</strong>}
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 8 }}>
+            <label style={{ fontSize: 13 }}><input type="checkbox" disabled={sending} checked={lines.length > 0 && selectedLines.length === lines.length}
+              onChange={e => { setSelectedIds(e.target.checked ? lines.map(l => l.id) : []); setResults([]); setProgress(''); }} /> Select all ({lines.length})</label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6 }}>
+            {lines.map(l => {
+              const emp = employees.find(e => e.id === l.employeeId);
+              const hasEmail = !bulkMissingRecipients([l], employees).length;
+              return (
+                <label key={l.id} style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                  <input type="checkbox" disabled={sending} checked={selectedIds.includes(l.id)} onChange={e => toggleLine(l.id, e.target.checked)} />
+                  <span>{emp?.name || '(employee removed)'}
+                    <span style={{ display: 'block', color: hasEmail ? '#64748B' : '#B45309', fontSize: 11 }}>
+                      {hasEmail ? emp.email : 'Missing email — print only'}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        {(progress || results.length > 0) && <div className="print-hide" role="status" style={{ fontSize: 12, marginBottom: 12 }}>
+          {progress && <div style={{ fontWeight: 600 }}>{progress}</div>}
+          {results.filter(r => !r.ok).map(r => <div key={r.id} style={{ color: '#B00020' }}>{r.name}: {r.detail}</div>)}
+        </div>}
+        <div style={{ padding: 0 }}>
+          {selectedLines.map((line, index) => (
+            <div className="bulk-pay-stub-sheet" key={line.id} style={{ width: '100%', maxWidth: 710, margin: '0 auto 18px', padding: '18px 22px', border: '1px solid #E2E5E9', boxSizing: 'border-box', background: '#fff', breakInside: 'avoid', pageBreakInside: 'avoid', pageBreakAfter: index === selectedLines.length - 1 ? 'auto' : 'always' }}>
+              <PayStubContent line={line} run={run} emp={employees.find(e => e.id === line.employeeId)} businessName={businessName}
+                logoDataUri={logoDataUri} contentId={`bulk-paystub-${line.id}`} />
+            </div>
+          ))}
+          {!selectedLines.length && <div className="print-hide" style={{ color: '#6B7280', fontSize: 13 }}>Select employees to preview their pay stubs.</div>}
+        </div>
+      </div>
+      <style>{`@media print {
+        @page { size: letter portrait; margin: 0.45in; }
+        .no-print-overlay { position: static !important; background: #fff !important; display: block !important; }
+        .print-hide { display: none !important; }
+        body * { visibility: hidden !important; }
+        #bulk-paystubs-print, #bulk-paystubs-print * { visibility: visible !important; }
+        #bulk-paystubs-print { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; padding: 0 !important; }
+        .bulk-pay-stub-sheet { width: 100% !important; max-width: none !important; border: 0 !important; padding: 0 !important; margin: 0 !important; break-inside: avoid !important; page-break-inside: avoid !important; }
+        .bulk-pay-stub-sheet:not(:last-child) { break-after: page !important; page-break-after: always !important; }
+        .bulk-pay-stub-sheet:last-child { break-after: auto !important; page-break-after: auto !important; }
+      }`}</style>
+    </div>
+  );
+}
+
+function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
+  const emp = employees.find(e => e.id === line.employeeId);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
+  const hourRows = payrollStubHourRows(line, emp);
+
+  async function handleSendPayStub() {
+    const email = emp?.email || '';
+    if (!email) { setSendMsg('No email on file for this employee — add one in the Employees tab first.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
+      const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
+      setSendMsg(`Accepted for delivery to ${result.to}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function exportCSV() {
+    let csv = 'Employee,Pay Date,Period Start,Period End\n';
+    csv += `"${emp?.name || ''}",${run.payDate},${run.periodStart},${run.periodEnd}\n\n`;
+    csv += 'Hour Type,Hours,Rate,Amount\n';
+    hourRows.forEach(([label, hrs, effRate]) => {
+      csv += `${label},${hrs},${effRate.toFixed(2)},${(Number(hrs) * effRate).toFixed(2)}\n`;
+    });
+    csv += `\nGross,,,${line.gross.toFixed(2)}\n`;
+    csv += `Federal Tax,,,${(-line.federalIncomeTax).toFixed(2)}\n`;
+    csv += `PR Tax,,,${(-line.prIncomeTax).toFixed(2)}\n`;
+    csv += `Social Security,,,${(-line.socialSecurity).toFixed(2)}\n`;
+    csv += `Medicare,,,${(-line.medicare).toFixed(2)}\n`;
+    csv += `SINOT,,,${(-line.sinot).toFixed(2)}\n`;
+    csv += `Other Deductions,,,${(-line.otherDeductions).toFixed(2)}\n`;
+    csv += `Reimbursement,,,${line.reimbursement.toFixed(2)}\n`;
+    csv += `Net Pay,,,${lineNet(line).toFixed(2)}\n`;
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `PayStub_${(emp?.name || 'employee').replace(/[^a-z0-9]+/gi, '_')}_${run.payDate}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
+            <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+              {sending ? 'Sending…' : 'Send Pay Stub'}
+            </button>
+            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
+        </div>
+
+        <PayStubContent line={line} run={run} emp={emp} businessName={businessName} logoDataUri={logoDataUri} />
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
@@ -10460,7 +10641,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <button onClick={handleSend} disabled={sending || lines.length === 0} style={{ background: lines.length ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending || !lines.length ? 'default' : 'pointer', fontSize: 13 }}>
             {sending ? 'Sending…' : 'Send Register'}
           </button>
-          {sendMsg && <span style={{ fontSize: 12, color: sendMsg.startsWith('Sent') ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
+          {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
         <div id="invoice-content-only">
