@@ -10244,6 +10244,123 @@ function PayStubContent({ line, run, emp, businessName, logoDataUri, contentId =
   );
 }
 
+
+function BulkPayrollStubsModal({ run, lines, employees, businessName, logoDataUri, onClose }) {
+  const [selectedIds, setSelectedIds] = useState(() => lines.map(l => l.id));
+  const [sending, setSending] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [results, setResults] = useState([]);
+  const selectedLines = bulkPayrollSelection(lines, selectedIds);
+  const missing = bulkMissingRecipients(selectedLines, employees);
+  const missingIds = new Set(missing.map(l => l.id));
+  const readyToEmail = selectedLines.filter(l => !missingIds.has(l.id));
+
+  function toggleLine(id, checked) {
+    setSelectedIds(prev => checked ? [...prev.filter(x => x !== id), id] : prev.filter(x => x !== id));
+    setProgress('');
+    setResults([]);
+  }
+
+  function printBulk() {
+    if (!selectedLines.length) { setProgress('Select at least one employee.'); return; }
+    window.print();
+  }
+
+  async function emailBulk() {
+    if (run?.status !== 'FINAL') { setProgress('Finalize the payroll run before emailing pay stubs.'); return; }
+    if (!readyToEmail.length) { setProgress('Selected employees have no valid email address. Update Employees first.'); return; }
+    if (!window.confirm(`Send ${readyToEmail.length} individual pay stubs for ${run.payDate}? Each email will include only that employee's PDF. ${missing.length ? missing.length + ' employees without email will be skipped.' : ''}`)) return;
+    setSending(true);
+    setResults([]);
+    const outcome = [];
+    for (let i = 0; i < readyToEmail.length; i++) {
+      const line = readyToEmail[i];
+      const employee = employees.find(e => e.id === line.employeeId);
+      setProgress(`Sending ${i + 1} of ${readyToEmail.length} — ${employee?.name || 'employee'}`);
+      try {
+        const pdfBase64 = await generatePdfBase64FromElement(`bulk-paystub-${line.id}`, `PayStub_${run.payDate}.pdf`);
+        const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
+        outcome.push({ id: line.id, name: employee?.name || '(unknown)', ok: true, detail: `Accepted: ${result.to}` });
+      } catch (error) {
+        outcome.push({ id: line.id, name: employee?.name || '(unknown)', ok: false, detail: error.message || 'Email failed.' });
+      }
+      setResults([...outcome]);
+    }
+    setProgress(`Completed: ${outcome.filter(x => x.ok).length} accepted, ${outcome.filter(x => !x.ok).length} failed, ${missing.length} without email skipped. Email acceptance does not confirm delivery.`);
+    setSending(false);
+  }
+
+  if (!run) return null;
+  return (
+    <div className="no-print-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div id="bulk-paystubs-print" style={{ background: '#fff', borderRadius: 8, padding: 22, width: 860, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div className="print-hide" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Bulk Pay Stubs — ${run.payDate}</div>
+            <div style={{ fontSize: 12, color: '#6B7280' }}>Payroll: {run.periodStart} → {run.periodEnd} · {run.status}</div>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button type="button" disabled={sending || !selectedLines.length} onClick={printBulk} style={iconBtn}><Printer size={14} /> Print selected ({selectedLines.length})</button>
+            <button type="button" disabled={sending || run.status !== 'FINAL' || !readyToEmail.length} onClick={emailBulk}
+              style={{ ...iconBtn, background: '#17365D', color: '#fff' }}>{sending ? 'Sending…' : `Email selected (${readyToEmail.length})`}</button>
+            <button type="button" disabled={sending} onClick={onClose} style={iconBtn}><X size={14} /> Close</button>
+          </div>
+        </div>
+        <div className="print-hide" style={{ background: '#F7F8FA', padding: 10, borderRadius: 6, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, marginBottom: 8, color: '#475569' }}>
+            Select employees. Each pay stub is printed on a separate page and emailed individually.
+            {run.status !== 'FINAL' && <strong style={{ color: '#A16207' }}> This run is DRAFT; email is disabled until Final.</strong>}
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 8 }}>
+            <label style={{ fontSize: 13 }}><input type="checkbox" disabled={sending} checked={lines.length > 0 && selectedLines.length === lines.length}
+              onChange={e => { setSelectedIds(e.target.checked ? lines.map(l => l.id) : []); setResults([]); setProgress(''); }} /> Select all ({lines.length})</label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6 }}>
+            {lines.map(l => {
+              const emp = employees.find(e => e.id === l.employeeId);
+              const hasEmail = !bulkMissingRecipients([l], employees).length;
+              return (
+                <label key={l.id} style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                  <input type="checkbox" disabled={sending} checked={selectedIds.includes(l.id)} onChange={e => toggleLine(l.id, e.target.checked)} />
+                  <span>{emp?.name || '(employee removed)'}
+                    <span style={{ display: 'block', color: hasEmail ? '#64748B' : '#B45309', fontSize: 11 }}>
+                      {hasEmail ? emp.email : 'Missing email — print only'}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        {(progress || results.length > 0) && <div className="print-hide" role="status" style={{ fontSize: 12, marginBottom: 12 }}>
+          {progress && <div style={{ fontWeight: 600 }}>{progress}</div>}
+          {results.filter(r => !r.ok).map(r => <div key={r.id} style={{ color: '#B00020' }}>{r.name}: {r.detail}</div>)}
+        </div>}
+        <div style={{ padding: 0 }}>
+          {selectedLines.map((line, index) => (
+            <div className="bulk-pay-stub-sheet" key={line.id} style={{ width: '100%', maxWidth: 710, margin: '0 auto 18px', padding: '18px 22px', border: '1px solid #E2E5E9', boxSizing: 'border-box', background: '#fff', breakInside: 'avoid', pageBreakInside: 'avoid', pageBreakAfter: index === selectedLines.length - 1 ? 'auto' : 'always' }}>
+              <PayStubContent line={line} run={run} emp={employees.find(e => e.id === line.employeeId)} businessName={businessName}
+                logoDataUri={logoDataUri} contentId={`bulk-paystub-${line.id}`} />
+            </div>
+          ))}
+          {!selectedLines.length && <div className="print-hide" style={{ color: '#6B7280', fontSize: 13 }}>Select employees to preview their pay stubs.</div>}
+        </div>
+      </div>
+      <style>{`@media print {
+        @page { size: letter portrait; margin: 0.45in; }
+        .no-print-overlay { position: static !important; background: #fff !important; display: block !important; }
+        .print-hide { display: none !important; }
+        body * { visibility: hidden !important; }
+        #bulk-paystubs-print, #bulk-paystubs-print * { visibility: visible !important; }
+        #bulk-paystubs-print { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; padding: 0 !important; }
+        .bulk-pay-stub-sheet { width: 100% !important; max-width: none !important; border: 0 !important; padding: 0 !important; margin: 0 !important; break-inside: avoid !important; page-break-inside: avoid !important; }
+        .bulk-pay-stub-sheet:not(:last-child) { break-after: page !important; page-break-after: always !important; }
+        .bulk-pay-stub-sheet:last-child { break-after: auto !important; page-break-after: auto !important; }
+      }`}</style>
+    </div>
+  );
+}
+
 function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
   const emp = employees.find(e => e.id === line.employeeId);
   const [sending, setSending] = useState(false);
