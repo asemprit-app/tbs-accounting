@@ -7849,6 +7849,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
   const [scalePct, setScalePct] = useState(100);
   const [sheetParts, setSheetParts] = useState(initialCustomProfile?.sheetParts === 2 ? 2 : 3);
   const printPages = payrollCheckPrintSheets(selectedChecks, templateId);
+  const checkNumberConfigured = shouldPrintCheckNumber({ usePreprintedCheck, checkNumber });
 
   const CHECK_TEMPLATES = {
     standard_top: {
@@ -8391,7 +8392,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 return (
                   <React.Fragment key={check.id}>
           <div
-            className="check-document" id={isBulk ? undefined : "check-document"}
+            id="check-document" className="check-document"
             style={{
               // Leave preprinted check numbers unobstructed. No outer box is printed or previewed.
               border: 'none',
@@ -8455,7 +8456,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
                 <div style={{ fontSize: 10.5, color: '#6B7280', marginTop: 2 }}>Payroll / Services Check</div>
               </div>
               <div style={{ textAlign: 'right', fontSize: 12.5, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                {shouldPrintCheckNumber({ usePreprintedCheck, checkNumber: currentCheckNumber }) && <div style={{ marginBottom: 6 }}>Check No. <strong>{currentCheckNumber}</strong></div>}
+                {checkNumberConfigured && <div style={{ marginBottom: 6 }}>Check No. <strong>{currentCheckNumber}</strong></div>}
                 <div>Date: <strong>{checkDate}</strong></div>
               </div>
             </div>
@@ -8545,7 +8546,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
               </>
             )}
           </div>
-          {isCustomPrint && <div className="custom-voucher-stubs" id={isBulk ? undefined : "custom-voucher-stubs"} style={{
+          {isCustomPrint && <div id="custom-voucher-stubs" className="custom-voucher-stubs" style={{
             position: 'absolute', inset: 0, width: '8.5in', height: '11in',
             transformOrigin: 'top left',
             transform: `translate(${previewTranslateX}px, ${previewTranslateY}px) scale(${scale})`,
@@ -8669,6 +8670,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           }
           .check-sheet-preview:last-child { break-after: auto !important; page-break-after: auto !important; }
 
+          #custom-voucher-stubs { position: absolute !important; }
           .custom-voucher-stubs {
             position: absolute !important;
             top: calc(${Number(offsetY) || 0}in) !important;
@@ -8680,6 +8682,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             pointer-events: none !important;
           }
 
+          #check-document { border: none !important; outline: none !important; }
           .check-document {
             border: none !important;
             outline: none !important;
@@ -9507,11 +9510,11 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
           return { id: l.id, payee: emp?.name || 'Employee', amount: lineNet(l), memo,
             voucherDetail: payrollCheckVoucher(l, run, lineTotalHours(l)) };
         });
-        return <CheckPrintModal
-          clientId={clientId} businessName={businessName}
-          payee={checks[0]?.payee || 'Employee'} defaultDate={run.payDate}
-          amount={checks[0]?.amount || 0} memo={memo}
-          bulkChecks={checks} onClose={() => setBulkCheckRunId(null)} />;
+        return React.createElement(CheckPrintModal, {
+          clientId, businessName, payee: checks[0]?.payee || 'Employee',
+          defaultDate: run.payDate, amount: checks[0]?.amount || 0, memo,
+          bulkChecks: checks, onClose: () => setBulkCheckRunId(null)
+        });
       })()}
     </div>
   );
