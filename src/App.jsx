@@ -10296,7 +10296,7 @@ function BulkPayrollStubsModal({ run, lines, employees, businessName, logoDataUr
       <div id="bulk-paystubs-print" style={{ background: '#fff', borderRadius: 8, padding: 22, width: 860, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
         <div className="print-hide" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Bulk Pay Stubs — ${run.payDate}</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Bulk Pay Stubs — {run.payDate}</div>
             <div style={{ fontSize: 12, color: '#6B7280' }}>Payroll: {run.periodStart} → {run.periodEnd} · {run.status}</div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
