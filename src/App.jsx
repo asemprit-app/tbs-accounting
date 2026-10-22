@@ -13,6 +13,7 @@ import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries,
 import { journalEntryBalance } from './tbsJournalBalance.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
 import { normalizeReceiptEmail, isValidReceiptEmail, resolveReceiptEmail } from './tbsServiceReceiptEmail.js';
+import { bulkPayrollSelection, bulkMissingRecipients } from './tbsBulkPayroll.js';
 import { emptyCustomCheckSettings, getNamedCustomCheckProfile, normalizeCustomCheckProfileLibrary, saveNamedCustomCheckProfile, selectNamedCustomCheckProfile, deleteNamedCustomCheckProfile } from './tbsCustomCheckProfiles.js';
 
 const MONTHS_ES = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -587,6 +588,20 @@ async function sendServiceReceipt({ serviceId, pdfBase64 }) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Payment receipt email request failed.');
   return data;
+}
+
+async function sendPayrollStub({ lineId, pdfBase64 }) {
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (error || !token) throw new Error('Your session has expired. Sign in again before sending.');
+  const response = await fetch('/api/send-paystub', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ lineId, pdfBase64 }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Could not send pay stub.');
+  return result;
 }
 
 function TestInvoiceEmailButton() {
@@ -9330,6 +9345,7 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
   const [subTab, setSubTab] = useState('runs'); // 'employees' | 'runs'
   const [openRunId, setOpenRunId] = useState(null);
   const [printRunId, setPrintRunId] = useState(null);
+  const [bulkRunId, setBulkRunId] = useState(null);
 
   function postPayrollToJournal(run) {
     const lines = payrollLines.filter(l => l.payrollRunId === run.id);
@@ -9416,16 +9432,21 @@ function PayrollView({ clientId, employees, setEmployees, payrollRuns, setPayrol
       />}
       {subTab === 'runs' && !openRunId && (
         <PayrollRunsList payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
+          employees={employees} onOpenRun={setOpenRunId} onPrintRun={setPrintRunId} onBulkRun={setBulkRunId} onPost={canPostJournal ? postPayrollToJournal : null} />
       )}
       {subTab === 'runs' && openRunId && (
         <PayrollRunDetail clientId={clientId} runId={openRunId} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns} payrollLines={payrollLines} setPayrollLines={setPayrollLines}
-          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
+          employees={employees} onBack={() => setOpenRunId(null)} onPrint={() => setPrintRunId(openRunId)} onBulk={() => setBulkRunId(openRunId)} onPost={canPostJournal ? postPayrollToJournal : null}
           businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail} />
       )}
       {printRunId && (
         <PayrollRegisterModal runId={printRunId} payrollRuns={payrollRuns} payrollLines={payrollLines} employees={employees}
           businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setPrintRunId(null)} />
+      )}
+      {bulkRunId && (
+        <BulkPayrollStubsModal run={payrollRuns.find(r => r.id === bulkRunId)}
+          lines={payrollLines.filter(l => l.payrollRunId === bulkRunId)} employees={employees}
+          businessName={businessName} logoDataUri={logoDataUri} onClose={() => setBulkRunId(null)} />
       )}
     </div>
   );
@@ -9540,7 +9561,7 @@ function EmployeesTab({ employees, setEmployees }) {
   );
 }
 
-function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onPost }) {
+function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onOpenRun, onPrintRun, onBulkRun, onPost }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ periodStart: todayStr(), periodEnd: todayStr(), payDate: todayStr() });
   const [error, setError] = useState('');
@@ -9822,6 +9843,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
                     <button onClick={() => onOpenRun(r.id)} style={iconBtn}>Open</button>
                     <button onClick={() => copyPayrollRun(r)} style={iconBtn}>Copy</button>
                     <button onClick={() => onPrintRun(r.id)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Register</button>
+                    <button onClick={() => onBulkRun(r.id)} style={iconBtn}>Bulk Pay Stubs</button>
                     {r.status === 'DRAFT'
                       ? <button onClick={() => finalizeRun(r.id)} style={{ ...iconBtn, background: '#0F6E56', color: '#fff', border: 'none' }}>Mark as Final</button>
                       : <button onClick={() => reopenRun(r.id)} style={iconBtn}>Reopen</button>}
@@ -9843,7 +9865,7 @@ function PayrollRunsList({ payrollRuns, setPayrollRuns, payrollLines, setPayroll
   );
 }
 
-function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
+function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrollLines, setPayrollLines, employees, onBack, onPrint, onBulk, onPost, businessName, logoDataUri, sendingEmail, replyToEmail }) {
   const run = payrollRuns.find(r => r.id === runId);
   const [ssWageBase, setSsWageBase] = useState(SS_WAGE_BASE_DEFAULT);
   const [hoursPopoverId, setHoursPopoverId] = useState(null);
@@ -9984,6 +10006,7 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={onPrint} style={{ display: 'flex', alignItems: 'center', gap: 6, ...iconBtn }}><Printer size={14} /> Payroll Register</button>
+          <button onClick={onBulk} style={iconBtn}>Bulk Pay Stubs</button>
           {onPost && (run.postedJeId
             ? <span style={{ fontSize: 13, color: '#0F6E56', alignSelf: 'center' }}>✓ Posted to Journal Entries</span>
             : <button onClick={() => onPost(run)} style={iconBtn}>Post to Journal Entries</button>)}
@@ -10125,12 +10148,9 @@ function PayrollRunDetail({ clientId, runId, payrollRuns, setPayrollRuns, payrol
   );
 }
 
-function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
-  const emp = employees.find(e => e.id === line.employeeId);
+function payrollStubHourRows(line, emp) {
   const rate = Number(emp?.rate) || 0;
-  const [sending, setSending] = useState(false);
-  const [sendMsg, setSendMsg] = useState('');
-  const hourRows = emp?.payType === 'hourly' ? [
+  return emp?.payType === 'hourly' ? [
     ['Regular', line.regularHours, rate, 1],
     ['Vacation', line.vacationHours, rate, 1],
     ['Sick', line.sickHours, rate, 1],
@@ -10138,66 +10158,13 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
     ['Overtime (1.5x)', line.overtimeHours, rate * OT_MULTIPLIER, OT_MULTIPLIER],
     ['Double-OT (2x)', line.doubleOvertimeHours, rate * DOUBLE_OT_MULTIPLIER, DOUBLE_OT_MULTIPLIER],
   ].filter(([, hrs]) => Number(hrs) > 0) : [];
+}
 
-  async function handleSendPayStub() {
-    const email = emp?.email || '';
-    if (!email) { setSendMsg('No email on file for this employee — add one in the Employees tab first.'); return; }
-    setSending(true);
-    setSendMsg('');
-    try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
-      const text = `Hi ${emp.name},\n\nAttached is your pay stub for the period ${run.periodStart} to ${run.periodEnd} (pay date ${run.payDate}).\n\nNet Pay: ${money(lineNet(line))}\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
-      const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
-      const replyTo = replyToEmail || undefined;
-      await sendInvoiceViaResend({ to: email, subject: `Pay Stub — ${run.payDate}`, text, pdfBase64, filename: `PayStub_${emp.name}_${run.payDate}.pdf`, from, replyTo });
-      setSendMsg(`Sent to ${email}.`);
-    } catch (err) {
-      setSendMsg('Could not send: ' + err.message);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  function exportCSV() {
-    let csv = 'Employee,Pay Date,Period Start,Period End\n';
-    csv += `"${emp?.name || ''}",${run.payDate},${run.periodStart},${run.periodEnd}\n\n`;
-    csv += 'Hour Type,Hours,Rate,Amount\n';
-    hourRows.forEach(([label, hrs, effRate]) => {
-      csv += `${label},${hrs},${effRate.toFixed(2)},${(Number(hrs) * effRate).toFixed(2)}\n`;
-    });
-    csv += `\nGross,,,${line.gross.toFixed(2)}\n`;
-    csv += `Federal Tax,,,${(-line.federalIncomeTax).toFixed(2)}\n`;
-    csv += `PR Tax,,,${(-line.prIncomeTax).toFixed(2)}\n`;
-    csv += `Social Security,,,${(-line.socialSecurity).toFixed(2)}\n`;
-    csv += `Medicare,,,${(-line.medicare).toFixed(2)}\n`;
-    csv += `SINOT,,,${(-line.sinot).toFixed(2)}\n`;
-    csv += `Other Deductions,,,${(-line.otherDeductions).toFixed(2)}\n`;
-    csv += `Reimbursement,,,${line.reimbursement.toFixed(2)}\n`;
-    csv += `Net Pay,,,${lineNet(line).toFixed(2)}\n`;
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `PayStub_${(emp?.name || 'employee').replace(/[^a-z0-9]+/gi, '_')}_${run.payDate}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
-
+function PayStubContent({ line, run, emp, businessName, logoDataUri, contentId = 'invoice-content-only' }) {
+  const hourRows = payrollStubHourRows(line, emp);
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-      <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
-          <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
-            <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
-              {sending ? 'Sending…' : 'Send Pay Stub'}
-            </button>
-            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
-            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
-          </div>
-        </div>
+    <div id={contentId} style={{ background: '#fff', width: '100%' }}>
 
-        <div id="invoice-content-only">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>{logoDataUri && <img src={logoDataUri} alt={businessName} style={{ height: 56 }} />}</div>
             <div style={{ textAlign: 'right' }}>
@@ -10273,7 +10240,72 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
           <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #1F2933', marginTop: 14, paddingTop: 10, fontWeight: 700, fontSize: 15 }}>
             <span>Net Pay</span><span>{money(lineNet(line))}</span>
           </div>
+    </div>
+  );
+}
+
+function PayStubModal({ line, run, employees, businessName, logoDataUri, sendingEmail, replyToEmail, onClose }) {
+  const emp = employees.find(e => e.id === line.employeeId);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState('');
+  const hourRows = payrollStubHourRows(line, emp);
+
+  async function handleSendPayStub() {
+    const email = emp?.email || '';
+    if (!email) { setSendMsg('No email on file for this employee — add one in the Employees tab first.'); return; }
+    setSending(true);
+    setSendMsg('');
+    try {
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
+      const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
+      setSendMsg(`Accepted for delivery to ${result.to}.`);
+    } catch (err) {
+      setSendMsg('Could not send: ' + err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function exportCSV() {
+    let csv = 'Employee,Pay Date,Period Start,Period End\n';
+    csv += `"${emp?.name || ''}",${run.payDate},${run.periodStart},${run.periodEnd}\n\n`;
+    csv += 'Hour Type,Hours,Rate,Amount\n';
+    hourRows.forEach(([label, hrs, effRate]) => {
+      csv += `${label},${hrs},${effRate.toFixed(2)},${(Number(hrs) * effRate).toFixed(2)}\n`;
+    });
+    csv += `\nGross,,,${line.gross.toFixed(2)}\n`;
+    csv += `Federal Tax,,,${(-line.federalIncomeTax).toFixed(2)}\n`;
+    csv += `PR Tax,,,${(-line.prIncomeTax).toFixed(2)}\n`;
+    csv += `Social Security,,,${(-line.socialSecurity).toFixed(2)}\n`;
+    csv += `Medicare,,,${(-line.medicare).toFixed(2)}\n`;
+    csv += `SINOT,,,${(-line.sinot).toFixed(2)}\n`;
+    csv += `Other Deductions,,,${(-line.otherDeductions).toFixed(2)}\n`;
+    csv += `Reimbursement,,,${line.reimbursement.toFixed(2)}\n`;
+    csv += `Net Pay,,,${lineNet(line).toFixed(2)}\n`;
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `PayStub_${(emp?.name || 'employee').replace(/[^a-z0-9]+/gi, '_')}_${run.payDate}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
+      <div style={{ background: '#fff', width: 560, maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: 32 }} id="invoice-print-area">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }} className="print-hide">
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Pay Stub — {emp?.name}</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020', maxWidth: 200 }}>{sendMsg}</span>}
+            <button onClick={handleSendPayStub} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
+              {sending ? 'Sending…' : 'Send Pay Stub'}
+            </button>
+            <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
+            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={onClose} style={iconBtn}><X size={14} /></button>
+          </div>
         </div>
+
+        <PayStubContent line={line} run={run} emp={emp} businessName={businessName} logoDataUri={logoDataUri} />
       </div>
       <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
