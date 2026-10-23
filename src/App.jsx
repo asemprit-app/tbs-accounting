@@ -1,4 +1,5 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
+import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -8114,8 +8115,9 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
     return `⑆${routing}⑆   ${account}⑈   ${check}`;
   }
 
-  return (
+  return createPortal(
     <div
+      id="tbs-check-print-root"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -8615,11 +8617,15 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             padding: 0 !important;
             width: 8.5in !important;
             height: auto !important;
+            min-height: 0 !important;
+            display: block !important;
             background: #fff !important;
           }
 
-          body * {
-            visibility: hidden !important;
+          /* Hidden application rows still paginate. Remove the app from print
+             layout; the check modal is a direct body portal. */
+          body > :not(#tbs-check-print-root) {
+            display: none !important;
           }
 
           .no-print-overlay {
@@ -8636,7 +8642,7 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
 
           #check-print-area {
             visibility: visible !important;
-            position: absolute !important;
+            position: static !important;
             left: 0 !important;
             top: 0 !important;
             width: 8.5in !important;
@@ -8663,6 +8669,11 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
             top: 0 !important;
             width: 8.5in !important;
             height: 11in !important;
+            min-height: 11in !important;
+            max-height: 11in !important;
+            padding: 0 !important;
+            border: 0 !important;
+            box-sizing: border-box !important;
             margin: 0 !important;
             overflow: hidden !important;
             break-after: page !important;
@@ -8706,7 +8717,8 @@ function CheckPrintModal({ businessName, clientId, payee, defaultDate, amount, m
           }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }
 
