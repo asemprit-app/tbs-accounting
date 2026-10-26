@@ -2105,6 +2105,13 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     return set;
   }, [reconciliations]);
 
+  const pendingReconciliationIds = useMemo(() => {
+    const set = new Set();
+    (reconciliations || []).filter(r => r.status !== 'PASS').forEach(r =>
+      (r.verifiedIds || []).forEach(id => set.add(id)));
+    return set;
+  }, [reconciliations]);
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (filters.dateFrom && t.date < filters.dateFrom) return false;
@@ -2122,7 +2129,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
       if (filters.sign === 'negative' && t.amount >= 0) return false;
       if (filters.reconciled) {
         const isReconciled = reconciledIds.has(t.id);
-        const isPending = (pendingReviewIds || []).includes(t.id);
+        const isPending = pendingReconciliationIds.has(t.id) || (pendingReviewIds || []).includes(t.id);
         if (filters.reconciled === 'reconciled' && !isReconciled) return false;
         if (filters.reconciled === 'pending' && !isPending) return false;
         if (filters.reconciled === 'none' && (isReconciled || isPending)) return false;
@@ -2130,7 +2137,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
       if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
       return true;
     });
-  }, [transactions, filters, search, reconciledIds, pendingReviewIds]);
+  }, [transactions, filters, search, reconciledIds, pendingReconciliationIds, pendingReviewIds]);
   const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || filters.sign || search.trim();
 
   const quickPeriods = useMemo(() => {
@@ -3012,8 +3019,8 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
                 <td style={{ padding: '6px 4px' }}>
                   {reconciledIds.has(t.id)
                     ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 13 }}>✓ Reconciled</span>
-                    : (pendingReviewIds || []).includes(t.id)
-                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 13 }}>Marked (pending)</span>
+                    : (pendingReconciliationIds.has(t.id) || (pendingReviewIds || []).includes(t.id))
+                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 13 }}>Pending Review</span>
                       : <span style={{ color: '#6B7280', fontSize: 13 }}>—</span>}
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
@@ -4623,6 +4630,14 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     const paid = Number((
       legacyPaid + updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
     ).toFixed(2));
+
+    // Reassigning the payment's bank account or moving a bank payment into a
+    // completed period invalidates that period's reconciliation.
+    const oldPaymentTx = transactions.find(t => t.id === transactionId);
+    if (!confirmTransactionImpact(oldPaymentTx, {
+      ...(oldPaymentTx || {}), id: transactionId, date: payDate,
+      amount: Number(amt.toFixed(2)), sourceGL: paySourceGL,
+    })) return;
 
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
