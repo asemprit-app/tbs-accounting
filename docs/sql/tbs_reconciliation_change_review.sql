@@ -7,8 +7,17 @@ returns trigger language plpgsql security definer set search_path = ''
 as $$
 declare
   p_client uuid;
+  p_old_gl text;
+  p_new_gl text;
+  p_old_date date;
+  p_new_date date;
 begin
-  p_client := case when TG_OP = 'DELETE' then OLD.client_id else NEW.client_id end;
+  if TG_OP <> 'INSERT' then
+    p_old_gl := OLD.source_gl; p_old_date := OLD.date; p_client := OLD.client_id;
+  end if;
+  if TG_OP <> 'DELETE' then
+    p_new_gl := NEW.source_gl; p_new_date := NEW.date; p_client := NEW.client_id;
+  end if;
   if TG_OP = 'UPDATE' and
     NEW.source_gl is not distinct from OLD.source_gl and
     NEW.date is not distinct from OLD.date and
@@ -18,9 +27,9 @@ begin
 
   update public.reconciliations r set status = 'REVIEW'
   where r.client_id = p_client and r.status = 'PASS' and (
-    (TG_OP <> 'INSERT' and r.gl = OLD.source_gl and OLD.date <= r.period_end)
+    (r.gl = p_old_gl and p_old_date <= r.period_end)
     or
-    (TG_OP <> 'DELETE' and r.gl = NEW.source_gl and NEW.date <= r.period_end)
+    (r.gl = p_new_gl and p_new_date <= r.period_end)
   );
 
   if TG_OP = 'DELETE' then return OLD; end if;
@@ -38,8 +47,17 @@ returns trigger language plpgsql security definer set search_path = ''
 as $$
 declare
   p_client uuid;
+  p_old_date date;
+  p_new_date date;
+  p_old_lines jsonb := '[]'::jsonb;
+  p_new_lines jsonb := '[]'::jsonb;
 begin
-  p_client := case when TG_OP = 'DELETE' then OLD.client_id else NEW.client_id end;
+  if TG_OP <> 'INSERT' then
+    p_old_date := OLD.date; p_old_lines := coalesce(OLD.lines, '[]'::jsonb); p_client := OLD.client_id;
+  end if;
+  if TG_OP <> 'DELETE' then
+    p_new_date := NEW.date; p_new_lines := coalesce(NEW.lines, '[]'::jsonb); p_client := NEW.client_id;
+  end if;
   if TG_OP = 'UPDATE' and
      NEW.date is not distinct from OLD.date and
      NEW.lines is not distinct from OLD.lines then
@@ -48,16 +66,16 @@ begin
 
   update public.reconciliations r set status = 'REVIEW'
   where r.client_id = p_client and r.status = 'PASS' and (
-    (TG_OP <> 'INSERT' and OLD.date <= r.period_end and exists (
-      select 1 from pg_catalog.jsonb_array_elements(coalesce(OLD.lines, '[]'::jsonb)) as item
+    (p_old_date <= r.period_end and exists (
+      select 1 from pg_catalog.jsonb_array_elements(p_old_lines) as item
       where item->>'gl' = r.gl and (
         coalesce(nullif(item->>'debit','')::numeric, 0) <> 0
         or coalesce(nullif(item->>'credit','')::numeric, 0) <> 0
       )
     ))
     or
-    (TG_OP <> 'DELETE' and NEW.date <= r.period_end and exists (
-      select 1 from pg_catalog.jsonb_array_elements(coalesce(NEW.lines, '[]'::jsonb)) as item
+    (p_new_date <= r.period_end and exists (
+      select 1 from pg_catalog.jsonb_array_elements(p_new_lines) as item
       where item->>'gl' = r.gl and (
         coalesce(nullif(item->>'debit','')::numeric, 0) <> 0
         or coalesce(nullif(item->>'credit','')::numeric, 0) <> 0
