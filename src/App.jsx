@@ -12,6 +12,7 @@ import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosi
 import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
 import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
 import { journalEntryBalance } from './tbsJournalBalance.js';
+import { impactedTransactionReconciliations, impactedJournalReconciliations, impactedAccountReconciliations, uniqueImpactedReconciliations, pendingReviewReconciliations, reconciliationImpactConfirmation } from './tbsReconciliationReview.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
 import { normalizeReceiptEmail, isValidReceiptEmail, resolveReceiptEmail } from './tbsServiceReceiptEmail.js';
 import { bulkPayrollSelection, bulkMissingRecipients } from './tbsBulkPayroll.js';
@@ -1357,6 +1358,25 @@ async function fetchAllRows(table, clientId, orderCol) {
       return next;
     });
   }, []);
+  // Confirm in the UI once before a user-initiated change. Database triggers
+  // are the durable protection, including edits from other screens/sessions.
+  function confirmReconciliationImpact(impacted) {
+    if (!impacted.length) return true;
+    if (!window.confirm(reconciliationImpactConfirmation(impacted))) return false;
+    const ids = impacted.map(r => r.id);
+    setReconciliationsRaw(prev => pendingReviewReconciliations(prev, ids));
+    return true;
+  }
+  const confirmTransactionImpact = (before, after) =>
+    confirmReconciliationImpact(impactedTransactionReconciliations(before, after, reconciliations));
+  const confirmJournalImpact = (before, after) =>
+    confirmReconciliationImpact(impactedJournalReconciliations(before, after, reconciliations));
+  const confirmAccountImpact = (before, after) =>
+    confirmReconciliationImpact(impactedAccountReconciliations(before, after, reconciliations));
+  const confirmBulkTransactionImpact = changes =>
+    confirmReconciliationImpact(uniqueImpactedReconciliations(changes.map(([before, after]) =>
+      impactedTransactionReconciliations(before, after, reconciliations))));
+
   const setDismissedSuggestions = useCallback((updater) => {
     setDismissedSuggestionsRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -1634,7 +1654,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
         {!portalLimited && tab === 'transactions' && (
           <TransactionsView
-            transactions={transactions} setTransactions={setTransactions} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
+            transactions={transactions} setTransactions={setTransactions} confirmTransactionImpact={confirmTransactionImpact} confirmBulkTransactionImpact={confirmBulkTransactionImpact} rules={rules} setRules={setRules} glName={glName} accounts={accounts}
             invoices={invoices} setInvoices={setInvoices} invoiceTotal={invoiceTotal}
             dismissedSuggestions={dismissedSuggestions} setDismissedSuggestions={setDismissedSuggestions}
             journalEntries={journalEntries} reconciliations={reconciliations} setReconciliations={setReconciliations}
@@ -1649,7 +1669,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             invoiceRetentionBase={invoiceRetentionBase}
             invoiceIvuBase={invoiceIvuBase}
             invoices={invoices} setInvoices={setInvoices} customers={customers}
-            transactions={transactions} setTransactions={setTransactions} accounts={accounts} reconciliations={reconciliations}
+            transactions={transactions} setTransactions={setTransactions} confirmTransactionImpact={confirmTransactionImpact} accounts={accounts} reconciliations={reconciliations}
             invoiceTotal={invoiceTotal} onPrint={setPrintInvoice} businessName={businessName}
             products={products}
             sendingEmail={sendingEmail} logoDataUri={logoDataUri} replyToEmail={replyToEmail}
@@ -1677,10 +1697,10 @@ async function fetchAllRows(table, clientId, orderCol) {
           />
         )}
         {!portalLimited && tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
-        {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} isMaster={businessName === 'Twelve Business Strategies'} />}
+        {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} confirmAccountImpact={confirmAccountImpact} isMaster={businessName === 'Twelve Business Strategies'} />}
         {!portalLimited && tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
-        {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} accounts={accounts} />}
-        {!portalLimited && tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} accounts={accounts} journalEntries={journalEntries}
+        {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} confirmJournalImpact={confirmJournalImpact} accounts={accounts} />}
+        {!portalLimited && tab === 'reconciliation' && <ReconciliationView reconciliations={reconciliations} setReconciliations={setReconciliations} transactions={transactions} setTransactions={setTransactions} confirmTransactionImpact={confirmTransactionImpact} accounts={accounts} journalEntries={journalEntries}
           reviewingId={reconcilingReviewId} setReviewingId={setReconcilingReviewId} verified={reconcilingVerified} setVerified={setReconcilingVerified} businessName={businessName} />}
         {tab === 'payroll' && <PayrollView clientId={selectedClientId} employees={employees} setEmployees={setEmployees} payrollRuns={payrollRuns} setPayrollRuns={setPayrollRuns}
           payrollLines={payrollLines} setPayrollLines={setPayrollLines} leaveEntries={leaveEntries} setLeaveEntries={setLeaveEntries}
@@ -2054,7 +2074,7 @@ function Dashboard({ summary, transactions, invoices, accounts, journalEntries, 
   );
 }
 
-function TransactionsView({ transactions, setTransactions, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, setReconciliations, pendingReviewIds, setReconcilingVerified }) {
+function TransactionsView({ transactions, setTransactions, confirmTransactionImpact, confirmBulkTransactionImpact, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, setReconciliations, pendingReviewIds, setReconcilingVerified }) {
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -2085,6 +2105,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     return set;
   }, [reconciliations]);
 
+  const pendingReconciliationIds = useMemo(() => {
+    const set = new Set();
+    (reconciliations || []).filter(r => r.status !== 'PASS').forEach(r =>
+      (r.verifiedIds || []).forEach(id => set.add(id)));
+    return set;
+  }, [reconciliations]);
+
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (filters.dateFrom && t.date < filters.dateFrom) return false;
@@ -2102,7 +2129,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (filters.sign === 'negative' && t.amount >= 0) return false;
       if (filters.reconciled) {
         const isReconciled = reconciledIds.has(t.id);
-        const isPending = (pendingReviewIds || []).includes(t.id);
+        const isPending = pendingReconciliationIds.has(t.id) || (pendingReviewIds || []).includes(t.id);
         if (filters.reconciled === 'reconciled' && !isReconciled) return false;
         if (filters.reconciled === 'pending' && !isPending) return false;
         if (filters.reconciled === 'none' && (isReconciled || isPending)) return false;
@@ -2110,7 +2137,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
       return true;
     });
-  }, [transactions, filters, search, reconciledIds, pendingReviewIds]);
+  }, [transactions, filters, search, reconciledIds, pendingReconciliationIds, pendingReviewIds]);
   const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || filters.sign || search.trim();
 
   const quickPeriods = useMemo(() => {
@@ -2274,6 +2301,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
       const { gl, mode } = suggestGL(r.description, rules);
       return { id: uid(), date: r.date, description: r.description, amount: r.amount, gl, status: mode, sourceGL: importCardGL || null };
     });
+    if (!confirmBulkTransactionImpact(newTx.map(row => [null, row]))) return;
     setTransactions(prev => [...prev, ...newTx]);
     setCsvText('');
     setShowImport(false);
@@ -2287,6 +2315,7 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setError('');
     const { gl, mode } = suggestGL(form.description, rules);
     const t = { id: uid(), date: form.date, description: form.description.trim(), amount: Number(form.amount), gl, status: mode, sourceGL: form.sourceGL || null };
+    if (!confirmTransactionImpact(null, t)) return;
     setTransactions(prev => [...prev, t]);
     setForm({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   }
@@ -2295,9 +2324,13 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, gl, status: 'AUTO' } : t));
   }
   function updateSourceGL(id, sourceGL) {
+    const original = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(original, original && { ...original, sourceGL })) return;
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t));
   }
   function updateDate(id, date) {
+    const original = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(original, original && { ...original, date })) return;
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t));
     const linked = findLinkedPayment(id);
     if (linked && date) {
@@ -2314,6 +2347,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   function updateAmount(id, amount) {
     if (amount === '' || isNaN(Number(amount))) return;
     const numeric = Number(amount);
+    const original = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(original, original && { ...original, amount: numeric })) return;
     const linked = findLinkedPayment(id);
     if (linked) {
       const otherPaid = (linked.inv.payments || []).filter(p => p.id !== linked.payment.id).reduce((s, p) => s + (Number(p.amount) || 0), 0);
@@ -2332,6 +2367,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
   }
   function applyBulkAccount() {
     if (!bulkSourceGL || selected.length === 0) return;
+    if (!confirmBulkTransactionImpact(transactions.filter(t => selected.includes(t.id))
+      .map(t => [t, { ...t, sourceGL: bulkSourceGL }]))) return;
     setTransactions(prev => prev.map(t => selected.includes(t.id) ? { ...t, sourceGL: bulkSourceGL } : t));
     setSelected([]);
     setBulkSourceGL('');
@@ -2982,8 +3019,8 @@ function TransactionsView({ transactions, setTransactions, rules, setRules, glNa
                 <td style={{ padding: '6px 4px' }}>
                   {reconciledIds.has(t.id)
                     ? <span style={{ color: '#0F6E56', fontWeight: 600, fontSize: 13 }}>✓ Reconciled</span>
-                    : (pendingReviewIds || []).includes(t.id)
-                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 13 }}>Marked (pending)</span>
+                    : (pendingReconciliationIds.has(t.id) || (pendingReviewIds || []).includes(t.id))
+                      ? <span style={{ color: '#0C447C', fontWeight: 600, fontSize: 13 }}>Pending Review</span>
                       : <span style={{ color: '#6B7280', fontSize: 13 }}>—</span>}
                 </td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
@@ -4360,7 +4397,7 @@ function InvoiceSettingsPanel({ businessName, sendingEmail, logoDataUri, replyTo
 }
 
 
-function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, accounts, reconciliations, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings, clients = [], isStaff = false }) {
+function InvoicesView({ invoices, setInvoices, customers, transactions, setTransactions, confirmTransactionImpact, accounts, reconciliations, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, invoiceRetentionBase, invoiceIvuBase, onPrint, businessName, products, sendingEmail, logoDataUri, replyToEmail, invoiceLanguage, businessPhone, invoicePrefix, invoiceNumberPadding, onSaveInvoiceSettings, savingInvoiceSettings, clients = [], isStaff = false }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankInvoice());
   const [error, setError] = useState('');
@@ -4593,6 +4630,14 @@ function InvoicesView({ invoices, setInvoices, customers, transactions, setTrans
     const paid = Number((
       legacyPaid + updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
     ).toFixed(2));
+
+    // Reassigning the payment's bank account or moving a bank payment into a
+    // completed period invalidates that period's reconciliation.
+    const oldPaymentTx = transactions.find(t => t.id === transactionId);
+    if (!confirmTransactionImpact(oldPaymentTx, {
+      ...(oldPaymentTx || {}), id: transactionId, date: payDate,
+      amount: Number(amt.toFixed(2)), sourceGL: paySourceGL,
+    })) return;
 
     setInvoices(prev => prev.map(i => {
       if (i.id !== inv.id) return i;
@@ -7198,7 +7243,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   );
 }
 
-function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
+function ChartOfAccountsView({ accounts, setAccounts, confirmAccountImpact, isMaster }) {
   const [form, setForm] = useState({ code: '', name: '', type: 'Expense', isCogs: false });
   const [error, setError] = useState('');
   const [editingCode, setEditingCode] = useState(null);
@@ -7229,6 +7274,8 @@ function ChartOfAccountsView({ accounts, setAccounts, isMaster }) {
     setEditDraft({ name: a.name, type: a.type, isCogs: !!a.isCogs });
   }
   function saveEdit(code) {
+    const before = accounts.find(a => a.code === code);
+    if (before && !confirmAccountImpact(before, { ...before, type: editDraft.type })) return;
     setAccounts(prev => prev.map(a => a.code === code ? { ...a, name: editDraft.name, type: editDraft.type, isCogs: editDraft.type === 'Expense' ? editDraft.isCogs : false } : a));
     setEditingCode(null);
   }
@@ -7446,7 +7493,7 @@ function RulesView({ rules, setRules, accounts }) {
   );
 }
 
-function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
+function JournalEntriesView({ journalEntries, setJournalEntries, confirmJournalImpact, accounts }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankJE());
   const [error, setError] = useState('');
@@ -7473,6 +7520,9 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
       return;
     }
     setError('');
+    const before = editingId ? journalEntries.find(j => j.id === editingId) : null;
+    const candidate = { ...form, id: editingId || 'new-journal-entry' };
+    if (!confirmJournalImpact(before, candidate)) return;
     if (editingId) {
       setJournalEntries(prev => prev.map(j => j.id === editingId ? { ...form, id: editingId } : j));
     } else {
@@ -7509,6 +7559,8 @@ function JournalEntriesView({ journalEntries, setJournalEntries, accounts }) {
     setError('');
   }
   function removeJE(id) {
+    const before = journalEntries.find(j => j.id === id);
+    if (!confirmJournalImpact(before, null)) return;
     setJournalEntries(prev => prev.filter(j => j.id !== id));
   }
 
@@ -10794,7 +10846,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
   );
 }
 
-function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified, businessName }) {
+function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, confirmTransactionImpact, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified, businessName }) {
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
@@ -10986,9 +11038,22 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
       return h.slice(0, -1);
     });
   }
-  function editTxDate(id, date) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t)); }
-  function editTxAmount(id, amount) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t)); }
-  function editTxAccount(id, sourceGL) { setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t)); }
+  function editTxDate(id, date) {
+    const old = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(old, old && { ...old, date })) return;
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, date } : t));
+  }
+  function editTxAmount(id, amount) {
+    if (amount === '' || !Number.isFinite(Number(amount))) return;
+    const old = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(old, old && { ...old, amount: Number(amount) })) return;
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, amount: Number(amount) } : t));
+  }
+  function editTxAccount(id, sourceGL) {
+    const old = transactions.find(t => t.id === id);
+    if (!confirmTransactionImpact(old, old && { ...old, sourceGL })) return;
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, sourceGL } : t));
+  }
 
   return (
     <div>
@@ -11050,7 +11115,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
-                <td style={{ padding: '6px 4px' }}><StatusBadge status={r.status === 'PASS' ? 'APPROVED' : 'REVIEW'} /></td>
+                <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' ? '#0F6E56' : '#A16207', fontWeight: 700, fontSize: 12 }}>{r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}</span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
                   <button onClick={() => deleteOne(r.id)} style={iconBtn}><Trash2 size={14} /></button>
