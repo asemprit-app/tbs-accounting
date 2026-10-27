@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {cardAwareTransactionPostings,matchMirroredCardPayments,sourceBalanceMovement,categoryBalanceMovement} from '../src/tbsCardPaymentAccounting.js';
+import {cardAwareTransactionPostings,matchMirroredCardPayments,potentiallyUnmatchedCardTransfers,sourceBalanceMovement,categoryBalanceMovement} from '../src/tbsCardPaymentAccounting.js';
 const accounts=[{code:'BANK',type:'Asset'},{code:'CARD',type:'Liability'},{code:'EXP',type:'Expense'},{code:'EQUITY',type:'Equity'},{code:'INCOME',type:'Revenue'},{code:'EQUIP',type:'Asset'}];
 const sum=(postings,gl)=>postings.filter(p=>p.gl===gl).reduce((n,p)=>n+p.amount,0);
 const bank=(id='bank')=>({id,date:'2026-09-24',description:'CC PAYMENT',sourceGL:'BANK',gl:'CARD',amount:-1000});
@@ -97,4 +97,15 @@ test('card self-coded payment before bank feed keeps ending liability correct',(
   const {postings}=cardAwareTransactionPostings([b,c],accounts);
   assert.equal(sum(postings,'BANK'),-1000);
   assert.equal(sum(postings,'CARD'),-1000);
+});
+
+test('misclassified counterpart is flagged for human review, never silently reclassified',()=>{
+  const b={...bank(),gl:'EQUITY'}, c=card();
+  const {postings,matches}=cardAwareTransactionPostings([b,c],accounts);
+  assert.equal(matches.length,0);
+  assert.equal(potentiallyUnmatchedCardTransfers([b,c],accounts).length,1);
+  assert.equal(sum(postings,'EQUITY'),-1000); // leave user classification unchanged
+});
+test('paired card payment is not reported as needing review',()=>{
+  assert.equal(potentiallyUnmatchedCardTransfers([bank(),card()],accounts).length,0);
 });
