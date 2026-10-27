@@ -20,16 +20,19 @@ test('card-only payment reduces card liability and credits bank asset',()=>{
 test('two feed rows are one transfer, not two transfers, nor offsets',()=>{
   const {postings,matches}=cardAwareTransactionPostings([bank(),card()],accounts);
   assert.equal(matches.length,1);
-  assert.equal(postings.length,2);
+  assert.equal(postings.length,4); // first feed + second feed + offset
   assert.equal(sum(postings,'BANK'),-1000);
   assert.equal(sum(postings,'CARD'),-1000);
   assert.equal(sum(postings,'EXP'),0);
+  const asOf = postings.filter(p => p.date <= '2026-09-24');
+  assert.equal(sum(asOf,'BANK'),-1000);
+  assert.equal(sum(asOf,'CARD'),-1000);
 });
 test('legacy card self-category pairs with bank feed and is not double counted',()=>{
   const self={...card(),gl:'CARD'};
   const {postings,matches}=cardAwareTransactionPostings([bank(),self],accounts);
   assert.equal(matches.length,1);
-  assert.equal(postings.length,2);
+  assert.equal(postings.length,4);
   assert.equal(sum(postings,'CARD'),-1000);
 });
 test('card charge increases debt and expense; opposite signs on card payment',()=>{
@@ -67,4 +70,31 @@ test('source-liability sign aligns with bank reconciliation sourceAccountAmount'
   const byCode=new Map(accounts.map(a=>[a.code,a]));
   assert.equal(sourceBalanceMovement(card(),byCode),-1000);
   assert.equal(categoryBalanceMovement(card(),byCode),-1000);
+});
+
+test('same-day reciprocal feeds do not double count and produce only two legs', () => {
+  const b=bank();
+  const c={...card(),date:b.date};
+  const {postings,matches}=cardAwareTransactionPostings([b,c],accounts);
+  assert.equal(matches.length,1);
+  assert.equal(postings.length,2);
+  assert.equal(sum(postings,'BANK'),-1000);
+  assert.equal(sum(postings,'CARD'),-1000);
+});
+test('card-side feed can precede bank-side feed without temporary report imbalance',()=>{
+  const b=bank();
+  const c={...card(),date:'2026-09-22'};
+  const {postings}=cardAwareTransactionPostings([b,c],accounts);
+  const beforeBank=postings.filter(p=>p.date< b.date);
+  assert.equal(sum(beforeBank,'BANK'),-1000);
+  assert.equal(sum(beforeBank,'CARD'),-1000);
+  assert.equal(sum(postings,'BANK'),-1000);
+  assert.equal(sum(postings,'CARD'),-1000);
+});
+test('card self-coded payment before bank feed keeps ending liability correct',()=>{
+  const b=bank();
+  const c={...card(),date:'2026-09-22',gl:'CARD'};
+  const {postings}=cardAwareTransactionPostings([b,c],accounts);
+  assert.equal(sum(postings,'BANK'),-1000);
+  assert.equal(sum(postings,'CARD'),-1000);
 });
