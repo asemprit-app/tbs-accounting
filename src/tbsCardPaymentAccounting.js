@@ -28,11 +28,18 @@ export function matchMirroredCardPayments(transactions, accounts) {
   const byCode = new Map(accounts.map(a => [a.code, a]));
   const bank = transactions.filter(t => isAsset(byCode.get(t.sourceGL)?.type) && cents(t.amount) < 0 && t.sourceGL !== t.gl);
   const card = transactions.filter(t => isLiability(byCode.get(t.sourceGL)?.type) && cents(t.amount) > 0);
+  const cardByAmount = new Map();
+  for (const c of card) {
+    const key = cents(c.amount);
+    if (!cardByAmount.has(key)) cardByAmount.set(key, []);
+    cardByAmount.get(key).push(c);
+  }
   const candidates = [];
   for (const b of bank) {
-    for (const c of card) {
+    for (const c of cardByAmount.get(-cents(b.amount)) || []) {
       if (!b.id || !c.id || b.id === c.id) continue;
-      if (cents(b.amount) !== -cents(c.amount) || Math.abs(days(b.date) - days(c.date)) > 5) continue;
+      if (b.client_id && c.client_id && b.client_id !== c.client_id) continue;
+      if (Math.abs(days(b.date) - days(c.date)) > 5) continue;
       // Both statements must explicitly identify the opposite account. Also
       // support older card imports categorized back to their own card account.
       if (b.gl !== c.sourceGL || (c.gl !== b.sourceGL && c.gl !== c.sourceGL)) continue;
@@ -46,6 +53,32 @@ export function matchMirroredCardPayments(transactions, accounts) {
   }
   // Never guess among two payments with identical dates and amounts.
   return candidates.filter(p => bankCounts.get(p.bankId) === 1 && cardCounts.get(p.cardId) === 1);
+}
+
+export function potentiallyUnmatchedCardTransfers(transactions, accounts) {
+  const byCode = new Map(accounts.map(a => [a.code,a]));
+  const matched = new Set(matchMirroredCardPayments(transactions, accounts)
+    .flatMap(m => [`${m.bankId}|${m.cardId}`]));
+  const cardByAmount = new Map();
+  for (const c of transactions) {
+    if (!isLiability(byCode.get(c.sourceGL)?.type) || cents(c.amount) <= 0) continue;
+    const key = cents(c.amount);
+    if (!cardByAmount.has(key)) cardByAmount.set(key, []);
+    cardByAmount.get(key).push(c);
+  }
+  const audit = [];
+  for (const b of transactions) {
+    if (!isAsset(byCode.get(b.sourceGL)?.type) || cents(b.amount) >= 0) continue;
+    for (const c of cardByAmount.get(-cents(b.amount)) || []) {
+      if (b.client_id && c.client_id && b.client_id !== c.client_id) continue;
+      if (Math.abs(days(b.date) - days(c.date)) > 5) continue;
+      if (!(b.gl === c.sourceGL || c.gl === b.sourceGL)) continue;
+      if (matched.has(`${b.id}|${c.id}`)) continue;
+      audit.push({bankId:b.id,cardId:c.id,amount:Math.abs(Number(b.amount)),
+        reason:'Payment counterparts have different or incomplete account classifications'});
+    }
+  }
+  return audit;
 }
 
 export function cardAwareTransactionPostings(transactions, accounts) {
