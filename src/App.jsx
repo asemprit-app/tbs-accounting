@@ -1,4 +1,5 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
+import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -307,6 +308,21 @@ async function loadJsPdf() {
 
   if (!window.jspdf?.jsPDF) throw new Error('jsPDF is unavailable.');
   return window.jspdf.jsPDF;
+}
+
+// Personal payment documents use jsPDF text rather than a screenshot of a
+// fixed/scrollable modal. That avoids blank captures, overflow and ghost pages.
+async function generatePersonalPaymentPdfBase64(model) {
+  const JsPdf = await loadJsPdf();
+  const doc = drawSinglePagePaymentPdf(JsPdf, model);
+  if (doc.getNumberOfPages() !== 1) {
+    throw new Error('Payment PDF has an unexpected page count; email was not sent.');
+  }
+  const blob = doc.output('blob');
+  if (!blob || blob.size < 950) {
+    throw new Error('Payment PDF is empty; email was not sent.');
+  }
+  return blobToBase64(blob);
 }
 
 async function generateCustomerStatementPdfBase64({
@@ -4140,7 +4156,9 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
     setSending(true);
     setSendMsg('');
     try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_${service.employeeName}_${service.date}.pdf`);
+      const pdfBase64 = await generatePersonalPaymentPdfBase64(serviceReceiptPdfModel({
+        service, calculations: c, businessName, logoDataUri,
+      }));
       const result = await sendServiceReceipt({ serviceId: service.id, pdfBase64 });
       setSendMsg(`Accepted for delivery to ${result.to}.`);
     } catch (err) {
@@ -10423,7 +10441,10 @@ function BulkPayrollStubsModal({ run, lines, employees, businessName, logoDataUr
       const employee = employees.find(e => e.id === line.employeeId);
       setProgress(`Sending ${i + 1} of ${readyToEmail.length} — ${employee?.name || 'employee'}`);
       try {
-        const pdfBase64 = await generatePdfBase64FromElement(`bulk-paystub-${line.id}`, `PayStub_${run.payDate}.pdf`);
+        const pdfBase64 = await generatePersonalPaymentPdfBase64(payStubPdfModel({
+          line, run, employee, businessName, logoDataUri,
+          hourRows: payrollStubHourRows(line, employee), totalHours: lineTotalHours(line),
+        }));
         const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
         outcome.push({ id: line.id, name: employee?.name || '(unknown)', ok: true, detail: `Accepted: ${result.to}` });
       } catch (error) {
@@ -10518,7 +10539,10 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
     setSending(true);
     setSendMsg('');
     try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `PayStub_${emp.name}_${run.payDate}.pdf`);
+      const pdfBase64 = await generatePersonalPaymentPdfBase64(payStubPdfModel({
+        line, run, employee: emp, businessName, logoDataUri,
+        hourRows: payrollStubHourRows(line, emp), totalHours: lineTotalHours(line),
+      }));
       const result = await sendPayrollStub({ lineId: line.id, pdfBase64 });
       setSendMsg(`Accepted for delivery to ${result.to}.`);
     } catch (err) {
