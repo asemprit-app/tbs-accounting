@@ -88,7 +88,10 @@ test('Balance Sheet, Trial Balance, and A/R drilldown share receivable movements
   assert.ok(app.includes('list.push(...invoiceReceivableEntries(invoices, invoiceTotal, tradeReceivableGL))'));
   assert.ok(app.includes('const amount = arBankCategoryPosting(t, tradeReceivableGL, linkedIds)'));
   assert.ok(app.includes('if (amount !== null) list.push'));
-  assert.ok(app.includes('if (t.sourceGL && t.sourceGL !== t.gl)'));
+  assert.ok(app.includes('cardAwareTransactionPostings(transactions, accounts)'));
+  assert.ok(app.includes('transactionPostings'));
+  assert.ok(app.includes('p.gl === tradeReceivableGL'));
+  // A/R stays special-cased while source movements are now provided by a shared helper.
   assert.ok(app.includes("} else if (gl === tradeReceivableGL && tradeReceivableGL) {"));
   assert.ok(app.includes("return invoicePaidAsOfDate(inv, asOfDate)"));
   assert.ok(app.includes("const bal = balanceAsOf(a.code, to)"));
