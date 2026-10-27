@@ -1,5 +1,5 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
-import { cardAwareTransactionPostings } from './tbsCardPaymentAccounting.js';
+import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -6242,9 +6242,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   // sign as Bank Reconciliation. If two feeds describe one card payoff, post
   // only the bank outflow and liability decrease, never double the transfer.
   // All client records remain unchanged in Supabase.
-  const { transactionPostings, mirroredCardPayments } = useMemo(() => {
+  const { transactionPostings, mirroredCardPayments, cardTransferReviewCandidates } = useMemo(() => {
     const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts);
-    return { transactionPostings: txPostings, mirroredCardPayments: matches };
+    const pending = potentiallyUnmatchedCardTransfers(transactions, accounts);
+    return { transactionPostings: txPostings, mirroredCardPayments: matches, cardTransferReviewCandidates: pending };
   }, [transactions, accounts]);
 
   const postings = useMemo(() => {
@@ -6311,6 +6312,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const equityRows = equityAccts.map(a => ({ ...a, value: balanceAsOf(a.code, to) }));
   const accumulatedIncome = incomeThroughDate(postings, accounts, invoices, invoiceRevenueSubtotal, to);
   const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + accumulatedIncome;
+  const balanceSheetDifference = Number((totalAssets - totalLiabilities - totalEquity).toFixed(2));
 
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
@@ -6424,6 +6426,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ['', 'Accumulated Income', accumulatedIncome],
         ['', 'Total Equity', totalEquity],
+        ['', 'Balance Check (Assets - Liabilities - Equity)', balanceSheetDifference],
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
     }
@@ -6867,6 +6870,14 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
               {' '}counted once per account, preserving both bank and card reconciliation entries.
             </div>
           )}
+          {cardTransferReviewCandidates.length > 0 && (
+            <div role="status" style={{ fontSize: 12, color: '#92400E', padding: '7px 10px', marginBottom: 10,
+              background: '#FFF7ED', borderRadius: 6 }}>
+              {cardTransferReviewCandidates.length} possible credit-card transfer match{cardTransferReviewCandidates.length === 1 ? '' : 'es'}
+              {' '}need review: one or both entries may be categorized to different accounts.
+              Confirm both sides in Transactions before changing historical records.
+            </div>
+          )}
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Assets</div>
           {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Assets" value={totalAssets} bold />
@@ -6879,6 +6890,15 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           <Row label="Total Equity" value={totalEquity} bold />
           <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 8, paddingTop: 8 }}>
             <Row label="Liabilities + Equity" value={totalLiabilities + totalEquity} bold />
+          <div style={{ color: Math.abs(balanceSheetDifference) < 0.01 ? '#0F6E56' : '#B45309', marginTop: 7 }}>
+            <Row label="Balance Check (Assets - Liabilities - Equity)" value={balanceSheetDifference} bold />
+          </div>
+          {Math.abs(balanceSheetDifference) >= 0.01 && (
+            <div style={{ fontSize: 12, color: '#92400E', marginTop: 6 }}>
+              Balance Sheet still differs. Review opening balances, outstanding transfers, missing entries and unmatched card payments.
+              No balancing entry has been added automatically.
+            </div>
+          )}
           </div>
         </Card>
       </div>
