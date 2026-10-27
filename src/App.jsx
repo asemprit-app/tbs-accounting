@@ -1,4 +1,5 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
+import { cardAwareTransactionPostings } from './tbsCardPaymentAccounting.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -6237,25 +6238,25 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   // coded to (Meals, Office Supplies...) AND the bank/card it moved through (sourceGL) — both need to
   // count, or a bank/card's own balance would miss almost everything categorized to an expense.
   const tradeReceivableGL = findTradeReceivableCode(accounts);
+  // Normalize bank and credit-card postings using the same natural balance
+  // sign as Bank Reconciliation. If two feeds describe one card payoff, post
+  // only the bank outflow and liability decrease, never double the transfer.
+  // All client records remain unchanged in Supabase.
+  const { transactionPostings, mirroredCardPayments } = useMemo(() => {
+    const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts);
+    return { transactionPostings: txPostings, mirroredCardPayments: matches };
+  }, [transactions, accounts]);
+
   const postings = useMemo(() => {
-    const list = [];
+    const list = transactionPostings
+      .filter(p => !(p.category && p.gl === tradeReceivableGL && tradeReceivableGL));
     const linkedIds = linkedInvoiceTransactionIds(invoices);
     transactions.forEach(t => {
-      if (t.gl === tradeReceivableGL && tradeReceivableGL) {
-        // A positive bank deposit is a CREDIT to A/R, not a debit.
-        // Linked invoice payments already provide the credit via the invoice ledger.
-        const amount = arBankCategoryPosting(t, tradeReceivableGL, linkedIds);
-        if (amount !== null) list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction', description: t.description });
-      } else if (t.gl) {
-        const acct = accounts.find(a => a.code === t.gl);
-        // in the bank register, negative = outflow, positive = inflow.
-        const amount = acct?.type === 'Expense' ? -Number(t.amount) : Number(t.amount);
-        list.push({ date: t.date, gl: t.gl, amount, source: 'Transaction', description: t.description });
-      }
-      // Bank/cash account movement remains positive for a deposit, exactly once.
-      if (t.sourceGL && t.sourceGL !== t.gl) {
-        list.push({ date: t.date, gl: t.sourceGL, amount: Number(t.amount) || 0, source: 'Transaction', description: t.description });
-      }
+      if (t.gl !== tradeReceivableGL || !tradeReceivableGL || t.gl === t.sourceGL) return;
+      // The invoice ledger already contains credits from linked deposits.
+      const amount = arBankCategoryPosting(t, tradeReceivableGL, linkedIds);
+      if (amount !== null) list.push({ id: `${t.id}-ar`, date: t.date, gl: t.gl, amount,
+        source: 'Transaction', description: t.description, transactionId: t.id });
     });
     // Issued invoices debit A/R. Payments credit A/R, including those allocated
     // to several invoices from a SINGLE bank deposit. Do not manufacture bank rows.
@@ -6271,7 +6272,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       });
     });
     return list;
-  }, [transactions, journalEntries, accounts, invoices, invoiceTotal, tradeReceivableGL]);
+  }, [transactionPostings, transactions, journalEntries, accounts, invoices, invoiceTotal, tradeReceivableGL]);
 
   function balanceAsOf(gl, asOfDate) {
     return postings.filter(p => p.gl === gl && p.date <= asOfDate).reduce((s, p) => s + p.amount, 0);
@@ -6859,6 +6860,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
 
         <Card style={{ display: visibleReports.includes('balance_sheet') ? 'block' : 'none' }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>Balance Sheet (as of {to})</div>
+          {mirroredCardPayments.length > 0 && (
+            <div style={{ fontSize: 12, color: '#475569', padding: '7px 10px', marginBottom: 10,
+              background: '#F7F8FA', borderRadius: 6 }}>
+              {mirroredCardPayments.length} matched bank-to-credit-card payment{mirroredCardPayments.length === 1 ? '' : 's'}
+              {' '}counted once per account, preserving both bank and card reconciliation entries.
+            </div>
+          )}
           <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>Assets</div>
           {assetRows.filter(r => r.value !== 0).map(r => <Row key={r.code} label={r.name} value={r.value} gl={r.code} mode="asOf" />)}
           <Row label="Total Assets" value={totalAssets} bold />
@@ -7121,33 +7129,16 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
               amount: p.amount, type: p.source });
           });
         } else {
-        transactions.forEach(t => {
-          const matchesCategory = t.gl === gl;
-          const matchesSource = t.sourceGL === gl && t.sourceGL !== t.gl;
-          if (!matchesCategory && !matchesSource) return;
-          if (mode === 'period' && (t.date < from || t.date > to)) return;
-          if (mode === 'asOf' && t.date > to) return;
-          let amount;
-          if (matchesCategory) {
-            const acct = accounts.find(a => a.code === gl);
-            amount = acct?.type === 'Expense' ? -t.amount : t.amount;
-          } else {
-            amount = t.amount; // as the source bank/card, the amount is already the natural change
-          }
-          items.push({ id: t.id + (matchesSource ? '-src' : ''), date: t.date, description: t.description, amount, type: 'Transaction' });
-        });
-        journalEntries.forEach(je => {
-          je.lines.forEach(l => {
-            if (l.gl !== gl) return;
-            if (mode === 'period' && (je.date < from || je.date > to)) return;
-            if (mode === 'asOf' && je.date > to) return;
-            const acct = accounts.find(a => a.code === gl);
-            const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
-            const debit = Number(l.debit) || 0, credit = Number(l.credit) || 0;
-            const amount = isDebitSide ? (debit - credit) : (credit - debit);
-            items.push({ id: `je-${je.id}`, date: je.date, description: `Journal Entry — ${je.memo || l.desc || 'no memo'}`, amount, type: 'Journal Entry' });
+          // Exactly the same postings and amounts used by Balance Sheet/P&L.
+          // Mirrored credit-card payoff category legs are not double-counted.
+          postings.forEach((posting, index) => {
+            if (posting.gl !== gl) return;
+            if (mode === 'period' && (posting.date < from || posting.date > to)) return;
+            if (mode === 'asOf' && posting.date > to) return;
+            items.push({ id: posting.id || `posting-${index}`, date: posting.date,
+              description: posting.description || posting.source, amount: posting.amount,
+              type: posting.source });
           });
-        });
         }
         items.sort((a, b) => a.date.localeCompare(b.date));
         const total = items.reduce((s, i) => s + i.amount, 0);
