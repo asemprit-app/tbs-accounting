@@ -51,19 +51,51 @@ export function matchMirroredCardPayments(transactions, accounts) {
 export function cardAwareTransactionPostings(transactions, accounts) {
   const byCode = new Map(accounts.map(a => [a.code,a]));
   const matches = matchMirroredCardPayments(transactions,accounts);
-  const matchedIds = new Set(matches.flatMap(m=>[m.bankId,m.cardId]));
+  const byId = new Map(transactions.map(t => [t.id,t]));
+  const laterCategoryToSkip = new Set();
+  const correctingPostings = new Map();
+
+  for (const match of matches) {
+    const bank = byId.get(match.bankId), card = byId.get(match.cardId);
+    if (!bank || !card) continue;
+    if (bank.date === card.date) {
+      // Both feeds on the same day represent only two real ledger legs.
+      laterCategoryToSkip.add(bank.id);
+      laterCategoryToSkip.add(card.id);
+      continue;
+    }
+    // Keep the first side's category so every historical as-of date works,
+    // then offset that temporary counterpart at the second side's date.
+    // This prevents a bank payment posted on Sep 30 and card receipt on Oct 1
+    // from unbalancing the Sep 30 Balance Sheet.
+    const first = bank.date < card.date ? bank : card;
+    const second = first.id === bank.id ? card : bank;
+    laterCategoryToSkip.add(second.id);
+    if (first.gl && first.gl !== first.sourceGL) {
+      correctingPostings.set(second.id, {
+        id: `${first.id}-${second.id}-transfer-offset`, date: second.date,
+        gl: first.gl, amount: -categoryBalanceMovement(first,byCode),
+        source: 'Matched Transfer Adjustment',
+        description: `Duplicate card-payment feed offset — ${first.description || 'payment'}`,
+        transactionId: second.id,
+      });
+    }
+  }
+
   const postings = [];
   for (const t of transactions) {
-    const raw = Number(t.amount)||0;
     if (t.sourceGL) {
       postings.push({id:`${t.id}-src`,date:t.date,gl:t.sourceGL,
         amount:sourceBalanceMovement(t,byCode),source:'Transaction',
         description:t.description,transactionId:t.id});
     }
-    if (!t.gl || t.gl === t.sourceGL || matchedIds.has(t.id)) continue;
-    postings.push({id:`${t.id}-cat`,date:t.date,gl:t.gl,
-      amount:categoryBalanceMovement(t,byCode),source:'Transaction',
-      description:t.description,transactionId:t.id,category:true});
+    if (t.gl && t.gl !== t.sourceGL && !laterCategoryToSkip.has(t.id)) {
+      postings.push({id:`${t.id}-cat`,date:t.date,gl:t.gl,
+        amount:categoryBalanceMovement(t,byCode),source:'Transaction',
+        description:t.description,transactionId:t.id,category:true});
+    }
+    const correction = correctingPostings.get(t.id);
+    if (correction) postings.push(correction);
   }
   return {postings,matches};
 }
