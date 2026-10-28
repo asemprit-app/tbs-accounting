@@ -1,6 +1,7 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
+import { inferCreditCardSourceSigns } from './tbsCreditCardStatementSigns.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -83,7 +84,7 @@ function matchAccountByName(text, accounts) {
   return bestScore > 0 ? bestCode : '';
 }
 
-function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
+function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '', cardSigns = new Map()) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
@@ -129,7 +130,7 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
       // the internal sign stays consistent (negative = expense), same as the bank format.
       if (source === 'card' && gl) {
         const acct = accounts.find(a => a.code === gl);
-        if (acct?.type === 'Expense') amount = -amount;
+        if (acct?.type === 'Expense' && (cardSigns.get(cardGL) ?? -1) === -1) amount = -amount;
       }
       rows.push({ date, description: finalDesc, amount, gl, mode, rawCategory: category });
     } else {
@@ -2092,6 +2093,7 @@ function Dashboard({ summary, transactions, invoices, accounts, journalEntries, 
 }
 
 function TransactionsView({ transactions, setTransactions, confirmTransactionImpact, confirmBulkTransactionImpact, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, setReconciliations, pendingReviewIds, setReconcilingVerified }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -2304,7 +2306,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   }
 
   function importCSV() {
-    const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
+    const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL, cardSourceSigns);
     if (rows.length === 0) {
       setImportError('No valid rows were recognized. Expected format: date,description,amount — or date,description,category,amount (Wave export).');
       return;
@@ -6223,6 +6225,7 @@ function naturalAmount(gl, amount, accounts) {
 }
 
 function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
@@ -6261,10 +6264,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   // only the bank outflow and liability decrease, never double the transfer.
   // All client records remain unchanged in Supabase.
   const { transactionPostings, mirroredCardPayments, cardTransferReviewCandidates } = useMemo(() => {
-    const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts);
-    const pending = potentiallyUnmatchedCardTransfers(transactions, accounts);
+    const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts, cardSourceSigns);
+    const pending = potentiallyUnmatchedCardTransfers(transactions, accounts, cardSourceSigns);
     return { transactionPostings: txPostings, mirroredCardPayments: matches, cardTransferReviewCandidates: pending };
-  }, [transactions, accounts]);
+  }, [transactions, accounts, cardSourceSigns]);
 
   const postings = useMemo(() => {
     const list = transactionPostings
@@ -10882,6 +10885,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
 }
 
 function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, confirmTransactionImpact, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified, businessName }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
@@ -10954,9 +10958,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     const amount = Number(rawAmount) || 0;
 
     // Bank / cash accounts (Assets): keep the imported sign.
-    // Credit cards / payables (Liabilities): invert the imported bank-feed sign
-    // so purchases increase the liability and payments reduce it.
-    if (acct?.type === 'Liability') return -amount;
+    // Credit cards may use opposite statement-feed signs. Preserve each
+    // account's convention using previously approved reconciliations.
+    if (acct?.type === 'Liability') return amount * (cardSourceSigns.get(gl) ?? -1);
     return amount;
   }
 
