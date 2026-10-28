@@ -109,3 +109,24 @@ test('misclassified counterpart is flagged for human review, never silently recl
 test('paired card payment is not reported as needing review',()=>{
   assert.equal(potentiallyUnmatchedCardTransfers([bank(),card()],accounts).length,0);
 });
+
+test('Panda-like positive card purchases and negative card payments keep statement signs',()=>{
+  const signs=new Map([['CARD',1]]);
+  const charge={id:'new-charge',date:'2026-09-01',sourceGL:'CARD',gl:'EXP',amount:154.70};
+  const payment={id:'card-payment',date:'2026-09-08',sourceGL:'CARD',gl:'BANK',amount:-1189.82};
+  const withdrawal={id:'bank-payment',date:'2026-09-09',sourceGL:'BANK',gl:'CARD',amount:-1189.82};
+  const {postings,matches}=cardAwareTransactionPostings([charge,payment,withdrawal],accounts,signs);
+  assert.equal(matches.length,1);
+  assert.equal(sum(postings,'CARD'),154.70-1189.82);
+  assert.equal(sum(postings,'EXP'),154.70);
+  assert.equal(sum(postings,'BANK'),-1189.82);
+});
+test('Panda like card payment kept to one ledger movement with two statement dates',()=>{
+  const signs=new Map([['CARD',1]]);
+  const withdrawal={id:'b',date:'2026-09-09',sourceGL:'BANK',gl:'CARD',amount:-1189.82};
+  const receipt={id:'c',date:'2026-09-08',sourceGL:'CARD',gl:'BANK',amount:-1189.82};
+  const {postings,matches}=cardAwareTransactionPostings([withdrawal,receipt],accounts,signs);
+  assert.equal(matches.length,1);
+  assert.equal(sum(postings,'BANK'),-1189.82);
+  assert.equal(sum(postings,'CARD'),-1189.82);
+});
