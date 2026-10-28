@@ -11153,8 +11153,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
                 <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
+                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current calculated book balance; review and recalculate to save.' : ''}>
+                  {money(r.status === 'PASS' ? r.ledgerBalance : (usePreviousStatementOpening(r.gl)
+                    ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance : ledgerBalanceFor(r.gl,r.periodEnd)))}
+                </td>
+                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current difference; reconciliation remains pending until review is saved.' : ''}>
+                  {money(r.status === 'PASS' ? r.difference : Number((r.statementBalance -
+                    (usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance
+                      : ledgerBalanceFor(r.gl,r.periodEnd))).toFixed(2)))}
+                </td>
                 <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' ? '#0F6E56' : '#A16207', fontWeight: 700, fontSize: 12 }}>{r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}</span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
