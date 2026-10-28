@@ -1,6 +1,7 @@
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
+import { inferCreditCardSourceSigns } from './tbsCreditCardStatementSigns.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -83,7 +84,7 @@ function matchAccountByName(text, accounts) {
   return bestScore > 0 ? bestCode : '';
 }
 
-function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
+function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '', cardSigns = new Map()) {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   const rows = [];
   for (const line of lines) {
@@ -129,7 +130,7 @@ function parseBankCSV(text, accounts, rules, source = 'bank', cardGL = '') {
       // the internal sign stays consistent (negative = expense), same as the bank format.
       if (source === 'card' && gl) {
         const acct = accounts.find(a => a.code === gl);
-        if (acct?.type === 'Expense') amount = -amount;
+        if (acct?.type === 'Expense' && (cardSigns.get(cardGL) ?? -1) === -1) amount = -amount;
       }
       rows.push({ date, description: finalDesc, amount, gl, mode, rawCategory: category });
     } else {
@@ -2092,6 +2093,7 @@ function Dashboard({ summary, transactions, invoices, accounts, journalEntries, 
 }
 
 function TransactionsView({ transactions, setTransactions, confirmTransactionImpact, confirmBulkTransactionImpact, rules, setRules, glName, accounts, invoices, setInvoices, invoiceTotal, dismissedSuggestions, setDismissedSuggestions, journalEntries, reconciliations, setReconciliations, pendingReviewIds, setReconcilingVerified }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [form, setForm] = useState({ date: todayStr(), description: '', amount: '', sourceGL: '' });
   const [error, setError] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -2304,7 +2306,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   }
 
   function importCSV() {
-    const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL);
+    const rows = parseBankCSV(csvText, accounts, rules, importSource, importCardGL, cardSourceSigns);
     if (rows.length === 0) {
       setImportError('No valid rows were recognized. Expected format: date,description,amount — or date,description,category,amount (Wave export).');
       return;
@@ -6223,6 +6225,7 @@ function naturalAmount(gl, amount, accounts) {
 }
 
 function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
@@ -6261,10 +6264,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   // only the bank outflow and liability decrease, never double the transfer.
   // All client records remain unchanged in Supabase.
   const { transactionPostings, mirroredCardPayments, cardTransferReviewCandidates } = useMemo(() => {
-    const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts);
-    const pending = potentiallyUnmatchedCardTransfers(transactions, accounts);
+    const { postings: txPostings, matches } = cardAwareTransactionPostings(transactions, accounts, cardSourceSigns);
+    const pending = potentiallyUnmatchedCardTransfers(transactions, accounts, cardSourceSigns);
     return { transactionPostings: txPostings, mirroredCardPayments: matches, cardTransferReviewCandidates: pending };
-  }, [transactions, accounts]);
+  }, [transactions, accounts, cardSourceSigns]);
 
   const postings = useMemo(() => {
     const list = transactionPostings
@@ -10882,6 +10885,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
 }
 
 function ReconciliationView({ reconciliations, setReconciliations, transactions, setTransactions, confirmTransactionImpact, accounts, journalEntries, reviewingId, setReviewingId, verified, setVerified, businessName }) {
+  const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const bankAccounts = accounts.filter(a => a.type === 'Asset' || a.type === 'Liability');
   const [form, setForm] = useState({ gl: '', periodEnd: todayStr(), statementBalance: '' });
   const [error, setError] = useState('');
@@ -10954,9 +10958,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     const amount = Number(rawAmount) || 0;
 
     // Bank / cash accounts (Assets): keep the imported sign.
-    // Credit cards / payables (Liabilities): invert the imported bank-feed sign
-    // so purchases increase the liability and payments reduce it.
-    if (acct?.type === 'Liability') return -amount;
+    // Credit cards may use opposite statement-feed signs. Preserve each
+    // account's convention using previously approved reconciliations.
+    if (acct?.type === 'Liability') return amount * (cardSourceSigns.get(gl) ?? -1);
     return amount;
   }
 
@@ -10969,6 +10973,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   const isNSMClient = (businessName || '').trim().toUpperCase() === 'NSM OBGYN MEDICAL';
+  const usePreviousStatementOpening = gl => isNSMClient || cardSourceSigns.get(gl) === 1;
 
   function previousPassedReconciliation(gl, periodEnd, excludeId = null) {
     return reconciliations
@@ -11005,7 +11010,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     if (!form.gl || !form.statementBalance) { setError('Select the account and enter the statement balance.'); return; }
     setError('');
     const statementBalance = Number(form.statementBalance);
-    const nsmCalc = isNSMClient ? nsmLedgerFor(form.gl, form.periodEnd) : null;
+    const nsmCalc = usePreviousStatementOpening(form.gl) ? nsmLedgerFor(form.gl, form.periodEnd) : null;
     const ledgerBalance = nsmCalc ? nsmCalc.ledgerBalance : ledgerBalanceFor(form.gl, form.periodEnd);
     const difference = Number((statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
@@ -11013,7 +11018,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
 
     let verifiedIds = [];
     if (status === 'PASS') {
-      if (isNSMClient) {
+      if (nsmCalc) {
         verifiedIds = nsmCalc.periodPostings.map(p => p.id);
       } else {
         const matchingTxIds = transactions.filter(t => t.sourceGL === form.gl && t.date <= form.periodEnd).map(t => t.id);
@@ -11030,7 +11035,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   function refreshReconciliation(r, ledgerBalanceOverride, verifiedIdsOverride) {
-    const defaultLedger = isNSMClient ? nsmLedgerFor(r.gl, r.periodEnd, r.id).ledgerBalance : ledgerBalanceFor(r.gl, r.periodEnd);
+    const defaultLedger = usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl, r.periodEnd, r.id).ledgerBalance : ledgerBalanceFor(r.gl, r.periodEnd);
     const ledgerBalance = ledgerBalanceOverride !== undefined ? ledgerBalanceOverride : defaultLedger;
     const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
@@ -11042,7 +11047,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     const r = reconciliations.find(x => x.id === id);
     // Para NSM se conservan solamente marcas que realmente pertenecen al período actual.
     // Esto evita contadores imposibles como "33 of 32 verified" por IDs arrastrados.
-    if (r && isNSMClient) {
+    if (r && usePreviousStatementOpening(r.gl)) {
       const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
       const validIds = new Set(calc.periodPostings.map(p => p.id));
       setVerified((r.verifiedIds || []).filter(id => validIds.has(id)));
@@ -11148,8 +11153,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
                 <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(r.ledgerBalance)}</td>
-                <td style={{ padding: '6px 4px' }}>{money(r.difference)}</td>
+                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current calculated book balance; review and recalculate to save.' : ''}>
+                  {money(r.status === 'PASS' ? r.ledgerBalance : (usePreviousStatementOpening(r.gl)
+                    ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance : ledgerBalanceFor(r.gl,r.periodEnd)))}
+                </td>
+                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current difference; reconciliation remains pending until review is saved.' : ''}>
+                  {money(r.status === 'PASS' ? r.difference : Number((r.statementBalance -
+                    (usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance
+                      : ledgerBalanceFor(r.gl,r.periodEnd))).toFixed(2)))}
+                </td>
                 <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' ? '#0F6E56' : '#A16207', fontWeight: 700, fontSize: 12 }}>{r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}</span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
@@ -11168,7 +11180,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         let openingBalance = 0;
         let periodTx = [];
 
-        if (isNSMClient) {
+        if (usePreviousStatementOpening(r.gl)) {
           const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
           openingBalance = calc.openingBalance;
           periodTx = calc.periodPostings;
@@ -11225,7 +11237,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
-                {isNSMClient && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
+                {usePreviousStatementOpening(r.gl) && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified</span>
@@ -11330,7 +11342,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               {periodTx.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
-                <button onClick={() => { refreshReconciliation(r, liveLedger, isNSMClient ? currentVerified : verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+                <button onClick={() => { refreshReconciliation(r, liveLedger, usePreviousStatementOpening(r.gl) ? currentVerified : verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
               </div>
             </Card>
           </div>

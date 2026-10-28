@@ -10,27 +10,31 @@ const days = date => {
 const isAsset = type => type === 'Asset';
 const isLiability = type => type === 'Liability';
 
-export function sourceBalanceMovement(transaction, accountsByCode) {
+export function sourceBalanceMovement(transaction, accountsByCode, signsByGL = new Map()) {
   const raw = Number(transaction.amount) || 0;
   // The reconciliation engine already uses this convention. For a credit
   // card, a positive statement payment decreases the liability.
-  return isLiability(accountsByCode.get(transaction.sourceGL)?.type) ? -raw : raw;
+  return isLiability(accountsByCode.get(transaction.sourceGL)?.type) ? raw * (signsByGL.get(transaction.sourceGL) ?? -1) : raw;
 }
-export function categoryBalanceMovement(transaction, accountsByCode) {
+export function categoryBalanceMovement(transaction, accountsByCode, signsByGL = new Map()) {
   const raw = Number(transaction.amount) || 0;
   const targetType = accountsByCode.get(transaction.gl)?.type;
-  // Category postings are the other side of the source-account movement.
-  // Debit-normal assets/expenses move opposite the bank feed amount.
+  const sourceType = accountsByCode.get(transaction.sourceGL)?.type;
+  // Natural sign depends on both sides of the journal entry.
+  if (sourceType === 'Liability') {
+    const movement = sourceBalanceMovement(transaction, accountsByCode, signsByGL);
+    return isAsset(targetType) || targetType === 'Expense' ? movement : -movement;
+  }
   return isAsset(targetType) || targetType === 'Expense' ? -raw : raw;
 }
 
-export function matchMirroredCardPayments(transactions, accounts) {
+export function matchMirroredCardPayments(transactions, accounts, signsByGL = new Map()) {
   const byCode = new Map(accounts.map(a => [a.code, a]));
   const bank = transactions.filter(t => isAsset(byCode.get(t.sourceGL)?.type) && cents(t.amount) < 0 && t.sourceGL !== t.gl);
-  const card = transactions.filter(t => isLiability(byCode.get(t.sourceGL)?.type) && cents(t.amount) > 0);
+  const card = transactions.filter(t => isLiability(byCode.get(t.sourceGL)?.type) && cents(sourceBalanceMovement(t,byCode,signsByGL)) < 0);
   const cardByAmount = new Map();
   for (const c of card) {
-    const key = cents(c.amount);
+    const key = -cents(sourceBalanceMovement(c,byCode,signsByGL));
     if (!cardByAmount.has(key)) cardByAmount.set(key, []);
     cardByAmount.get(key).push(c);
   }
@@ -55,14 +59,14 @@ export function matchMirroredCardPayments(transactions, accounts) {
   return candidates.filter(p => bankCounts.get(p.bankId) === 1 && cardCounts.get(p.cardId) === 1);
 }
 
-export function potentiallyUnmatchedCardTransfers(transactions, accounts) {
+export function potentiallyUnmatchedCardTransfers(transactions, accounts, signsByGL = new Map()) {
   const byCode = new Map(accounts.map(a => [a.code,a]));
-  const matched = new Set(matchMirroredCardPayments(transactions, accounts)
+  const matched = new Set(matchMirroredCardPayments(transactions, accounts, signsByGL)
     .flatMap(m => [`${m.bankId}|${m.cardId}`]));
   const cardByAmount = new Map();
   for (const c of transactions) {
-    if (!isLiability(byCode.get(c.sourceGL)?.type) || cents(c.amount) <= 0) continue;
-    const key = cents(c.amount);
+    if (!isLiability(byCode.get(c.sourceGL)?.type) || cents(sourceBalanceMovement(c,byCode,signsByGL)) >= 0) continue;
+    const key = -cents(sourceBalanceMovement(c,byCode,signsByGL));
     if (!cardByAmount.has(key)) cardByAmount.set(key, []);
     cardByAmount.get(key).push(c);
   }
@@ -81,9 +85,9 @@ export function potentiallyUnmatchedCardTransfers(transactions, accounts) {
   return audit;
 }
 
-export function cardAwareTransactionPostings(transactions, accounts) {
+export function cardAwareTransactionPostings(transactions, accounts, signsByGL = new Map()) {
   const byCode = new Map(accounts.map(a => [a.code,a]));
-  const matches = matchMirroredCardPayments(transactions,accounts);
+  const matches = matchMirroredCardPayments(transactions,accounts,signsByGL);
   const byId = new Map(transactions.map(t => [t.id,t]));
   const laterCategoryToSkip = new Set();
   const correctingPostings = new Map();
@@ -107,7 +111,7 @@ export function cardAwareTransactionPostings(transactions, accounts) {
     if (first.gl && first.gl !== first.sourceGL) {
       correctingPostings.set(second.id, {
         id: `${first.id}-${second.id}-transfer-offset`, date: second.date,
-        gl: first.gl, amount: -categoryBalanceMovement(first,byCode),
+        gl: first.gl, amount: -categoryBalanceMovement(first,byCode,signsByGL),
         source: 'Matched Transfer Adjustment',
         description: `Duplicate card-payment feed offset — ${first.description || 'payment'}`,
         transactionId: second.id,
@@ -119,12 +123,12 @@ export function cardAwareTransactionPostings(transactions, accounts) {
   for (const t of transactions) {
     if (t.sourceGL) {
       postings.push({id:`${t.id}-src`,date:t.date,gl:t.sourceGL,
-        amount:sourceBalanceMovement(t,byCode),source:'Transaction',
+        amount:sourceBalanceMovement(t,byCode,signsByGL),source:'Transaction',
         description:t.description,transactionId:t.id});
     }
     if (t.gl && t.gl !== t.sourceGL && !laterCategoryToSkip.has(t.id)) {
       postings.push({id:`${t.id}-cat`,date:t.date,gl:t.gl,
-        amount:categoryBalanceMovement(t,byCode),source:'Transaction',
+        amount:categoryBalanceMovement(t,byCode,signsByGL),source:'Transaction',
         description:t.description,transactionId:t.id,category:true});
     }
     const correction = correctingPostings.get(t.id);
