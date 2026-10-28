@@ -10973,6 +10973,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   const isNSMClient = (businessName || '').trim().toUpperCase() === 'NSM OBGYN MEDICAL';
+  const usePreviousStatementOpening = gl => isNSMClient || cardSourceSigns.get(gl) === 1;
 
   function previousPassedReconciliation(gl, periodEnd, excludeId = null) {
     return reconciliations
@@ -11009,7 +11010,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     if (!form.gl || !form.statementBalance) { setError('Select the account and enter the statement balance.'); return; }
     setError('');
     const statementBalance = Number(form.statementBalance);
-    const nsmCalc = isNSMClient ? nsmLedgerFor(form.gl, form.periodEnd) : null;
+    const nsmCalc = usePreviousStatementOpening(form.gl) ? nsmLedgerFor(form.gl, form.periodEnd) : null;
     const ledgerBalance = nsmCalc ? nsmCalc.ledgerBalance : ledgerBalanceFor(form.gl, form.periodEnd);
     const difference = Number((statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
@@ -11017,7 +11018,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
 
     let verifiedIds = [];
     if (status === 'PASS') {
-      if (isNSMClient) {
+      if (nsmCalc) {
         verifiedIds = nsmCalc.periodPostings.map(p => p.id);
       } else {
         const matchingTxIds = transactions.filter(t => t.sourceGL === form.gl && t.date <= form.periodEnd).map(t => t.id);
@@ -11034,7 +11035,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   function refreshReconciliation(r, ledgerBalanceOverride, verifiedIdsOverride) {
-    const defaultLedger = isNSMClient ? nsmLedgerFor(r.gl, r.periodEnd, r.id).ledgerBalance : ledgerBalanceFor(r.gl, r.periodEnd);
+    const defaultLedger = usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl, r.periodEnd, r.id).ledgerBalance : ledgerBalanceFor(r.gl, r.periodEnd);
     const ledgerBalance = ledgerBalanceOverride !== undefined ? ledgerBalanceOverride : defaultLedger;
     const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
     const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
@@ -11046,7 +11047,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     const r = reconciliations.find(x => x.id === id);
     // Para NSM se conservan solamente marcas que realmente pertenecen al período actual.
     // Esto evita contadores imposibles como "33 of 32 verified" por IDs arrastrados.
-    if (r && isNSMClient) {
+    if (r && usePreviousStatementOpening(r.gl)) {
       const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
       const validIds = new Set(calc.periodPostings.map(p => p.id));
       setVerified((r.verifiedIds || []).filter(id => validIds.has(id)));
@@ -11172,7 +11173,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         let openingBalance = 0;
         let periodTx = [];
 
-        if (isNSMClient) {
+        if (usePreviousStatementOpening(r.gl)) {
           const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
           openingBalance = calc.openingBalance;
           periodTx = calc.periodPostings;
@@ -11229,7 +11230,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
-                {isNSMClient && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
+                {usePreviousStatementOpening(r.gl) && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified</span>
@@ -11334,7 +11335,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               {periodTx.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
-                <button onClick={() => { refreshReconciliation(r, liveLedger, isNSMClient ? currentVerified : verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+                <button onClick={() => { refreshReconciliation(r, liveLedger, usePreviousStatementOpening(r.gl) ? currentVerified : verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
               </div>
             </Card>
           </div>
