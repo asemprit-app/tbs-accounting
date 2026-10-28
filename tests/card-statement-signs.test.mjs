@@ -35,3 +35,17 @@ test('Unproven card formats retain legacy convention rather than guessing',()=>{
   assert.equal(liabilitySourceMovement('2020',100,new Map()),-100);
   assert.equal(inferCreditCardSourceSigns(accounts,tx,journalEntries,[rec[0]]).get('2020'),-1);
 });
+
+test('Panda observed Sep 11 balance is 184.89 after Aug opening and four card transactions',()=>{
+  const ledger=[
+    {date:'2026-08-19',amount:10.02},
+    {date:'2026-09-01',amount:20.17},
+    {date:'2026-09-04',amount:154.70},
+    {date:'2026-09-08',amount:-1189.82},
+  ];
+  const sign = inferCreditCardSourceSigns(accounts, tx, journalEntries, rec).get('2020');
+  const book = 1189.82 + ledger.reduce((total,t)=>total+liabilitySourceMovement('2020',t.amount,new Map([['2020',sign]])),0);
+  assert.equal(Number(book.toFixed(2)),184.89);
+  assert.equal(Number((184.89-book).toFixed(2)),0);
+});
+
