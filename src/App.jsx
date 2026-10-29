@@ -4148,7 +4148,58 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
   const recipientEmail = resolveReceiptEmail(service, emp);
   const showHours = Number(service.hours) > 0;
   const [sending, setSending] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
+
+  async function handlePrint() {
+    // Open the print preview synchronously with the user's click so popup
+    // blockers do not break PDF printing after jsPDF finishes loading.
+    const preview = window.open('about:blank', '_blank');
+    if (preview) {
+      preview.opener = null;
+      preview.document.title = 'Preparing payment receipt';
+      preview.document.body.textContent = 'Preparing the payment receipt PDF…';
+    }
+    setPrinting(true);
+    setSendMsg('');
+    try {
+      // Reuse the SAME one-page data-driven PDF used for the emailed receipt.
+      // Never print the fixed / scrollable Services dialog: it can cause
+      // extra empty pages and blank content in Chrome's print layout.
+      const JsPdf = await loadJsPdf();
+      const doc = drawSinglePagePaymentPdf(JsPdf, serviceReceiptPdfModel({
+        service, calculations: c, businessName, logoDataUri,
+      }));
+      if (doc.getNumberOfPages() !== 1) {
+        throw new Error('The receipt PDF did not fit on one page.');
+      }
+      const blob = doc.output('blob');
+      if (!blob || blob.size < 950) {
+        throw new Error('The receipt PDF was empty; printing was cancelled.');
+      }
+      const url = URL.createObjectURL(blob);
+      if (preview && !preview.closed) {
+        // Browser-native PDF viewer supports Print or Save as PDF on one sheet.
+        preview.location.replace(url);
+      } else {
+        // Popup-blocker fallback: download the actual PDF rather than
+        // falling back to printing the scrollable Services dialog.
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'Receipt_' + String(service.employeeName || 'Services').replace(/[^a-z0-9_-]/gi, '_') + '_' + service.date + '.pdf';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setSendMsg('The browser blocked the print preview; the one-page PDF was downloaded instead.');
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (err) {
+      if (preview && !preview.closed) preview.close();
+      setSendMsg('Could not prepare receipt PDF: ' + err.message);
+    } finally {
+      setPrinting(false);
+    }
+  }
 
   async function handleSend() {
     if (!recipientEmail || !isValidReceiptEmail(recipientEmail)) {
@@ -4180,7 +4231,7 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
             <button onClick={handleSend} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Receipt'}
             </button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={handlePrint} disabled={printing || sending} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> {printing ? 'Preparing PDF…' : 'Print / Save PDF'}</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -4212,7 +4263,17 @@ function ServiceReceiptModal({ service, employees, businessName, logoDataUri, se
           </div>
         </div>
       </div>
-      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+      <style>{`@media print {
+        @page { size: letter portrait; margin: 0.5in; }
+        .no-print-overlay { position: static !important; background: transparent !important; display: block !important; }
+        .print-hide { display: none !important; }
+        body * { visibility: hidden !important; }
+        #invoice-print-area, #invoice-print-area * { visibility: visible !important; }
+        #invoice-print-area { position: absolute !important; left: 0 !important; top: 0 !important;
+          max-height: none !important; height: auto !important; overflow: visible !important;
+          width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; padding: 0 !important; }
+        #invoice-content-only { break-inside: avoid !important; page-break-inside: avoid !important; }
+      }`}</style>
     </div>
   );
 }
