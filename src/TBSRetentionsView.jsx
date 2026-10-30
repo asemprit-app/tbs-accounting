@@ -276,6 +276,39 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         </div>)}
       </div>
       <div style={surface}>
+        <div style={{display:'flex',gap:12,alignItems:'center',justifyContent:'space-between',flexWrap:'wrap'}}>
+          <h3 style={{margin:'0 0 10px',fontSize:17}}>Resumen dinámico desde Gross Pay</h3>
+          <div><label style={label}>Agrupar</label>
+            <select style={field} value={pivotGrouping} onChange={e=>setPivotGrouping(e.target.value)}>
+              <option value="month">Mensual</option>
+              <option value="quarter">Trimestral</option>
+            </select>
+          </div>
+        </div>
+        <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
+          Gross Pay es el total bruto de Payroll FINAL, agrupado por fecha de pago.
+          Las retenciones y la participación patronal se muestran separadas.
+          Gross Pay no equivale necesariamente a salarios tributables para FICA, SINOT,
+          desempleo ni a la nómina cubierta por CFSE; verifica los topes y las planillas oficiales.
+        </p>
+        <div style={{overflowX:'auto'}}>
+          <table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
+            <thead><tr style={{background:'#F5F7FA'}}>
+              {['Período','Gross Pay','Retenciones','Patronal','Pagos','Pendiente','A favor'].map(t=>
+                <th key={t} style={cell}>{t}</th>)}
+            </tr></thead>
+            <tbody>{pivotRows.map(row=><tr key={row.period}>
+              <td style={cell}><strong>{row.period}</strong></td>
+              {['gross','retained','employer','paid','pending','overpaid'].map(name=>
+                <td key={name} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>
+                  {fmt(row[name])}
+                </td>)}
+            </tr>)}</tbody>
+          </table>
+        </div>
+        {!pivotRows.length&&<p style={{fontSize:12,color:'#64748B'}}>No hay nóminas u obligaciones para este período.</p>}
+      </div>
+      <div style={surface}>
         <h3 style={{margin:'0 0 12px',fontSize:17}}>Balances por período y obligación</h3>
         <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:13}}>
           <thead><tr style={{background:'#F5F7FA'}}>
@@ -291,6 +324,68 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
           </tr>)}</tbody>
         </table></div>
         {summaryRows.length===0 && <p style={{color:'#64748B',fontSize:13}}>No hay retenciones ni pagos para los filtros seleccionados.</p>}
+      </div>
+      <div style={surface}>
+        <h3 style={{margin:'0 0 8px',fontSize:17}}>
+          {editingAssessmentId?'Editar obligación determinada':'Registrar obligaciones patronales (DTRH / FUTA / CFSE)'}
+        </h3>
+        <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
+          Registra el importe determinado en la planilla de desempleo, aportación especial o
+          notificación de la CFSE. En aportaciones trimestrales utiliza el mes de cierre del
+          trimestre como referencia; para CFSE usa el mes inicial de la póliza y anota su
+          período de cobertura. No se estima automáticamente una tasa sin la determinación.
+        </p>
+        <form onSubmit={saveAssessment}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12}}>
+            <div><label style={label}>Obligación patronal</label>
+              <select required style={{...field,width:'100%'}} value={assessmentForm.category}
+                onChange={e=>setAssessmentForm(x=>({...x,category:e.target.value}))}>
+                {ASSESSMENT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+              </select></div>
+            <div><label style={label}>Período de referencia</label>
+              <input required type="month" style={{...field,width:'100%'}} value={assessmentForm.tax_period}
+                onChange={e=>setAssessmentForm(x=>({...x,tax_period:e.target.value}))}/></div>
+            <div><label style={label}>Importe determinado ($)</label>
+              <input required type="number" min="0.01" step="0.01" style={{...field,width:'100%'}}
+                value={assessmentForm.amount} onChange={e=>setAssessmentForm(x=>({...x,amount:e.target.value}))}/></div>
+            <div><label style={label}>Fecha límite (opcional)</label>
+              <input type="date" style={{...field,width:'100%'}} value={assessmentForm.due_date}
+                onChange={e=>setAssessmentForm(x=>({...x,due_date:e.target.value}))}/></div>
+            <div><label style={label}>Planilla, póliza o referencia</label>
+              <input maxLength={250} style={{...field,width:'100%'}} value={assessmentForm.reference}
+                onChange={e=>setAssessmentForm(x=>({...x,reference:e.target.value}))}/></div>
+            <div><label style={label}>Notas</label>
+              <input maxLength={1000} style={{...field,width:'100%'}} value={assessmentForm.notes}
+                onChange={e=>setAssessmentForm(x=>({...x,notes:e.target.value}))}/></div>
+          </div>
+          <div style={{display:'flex',gap:8,marginTop:13}}>
+            <button type="submit" disabled={assessmentBusy} style={{...btn,background:'#17365D',color:'#fff'}}>
+              {assessmentBusy?'Guardando…':editingAssessmentId?'Actualizar obligación':'Guardar obligación'}</button>
+            {editingAssessmentId&&<button type="button" style={btn} disabled={assessmentBusy} onClick={resetAssessment}>
+              Cancelar</button>}
+          </div>
+        </form>
+        {assessmentMessage&&<p role="status" style={{fontSize:12,color:assessmentMessage.startsWith('No se')||assessmentMessage.startsWith('Error')?'#B00020':'#0F6E56'}}>
+          {assessmentMessage}</p>}
+        <div style={{overflowX:'auto',marginTop:15}}>
+          <table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
+            <thead><tr style={{background:'#F5F7FA'}}>
+              {['Período','Concepto','Importe','Vencimiento','Referencia','Notas','Acciones'].map(x=>
+                <th key={x} style={cell}>{x}</th>)}
+            </tr></thead>
+            <tbody>{visibleAssessments.map(row=><tr key={row.id}>
+              <td style={cell}>{row.tax_period}</td><td style={cell}>{catLabel(row.category)}</td>
+              <td style={cell}>{fmt(row.amount)}</td><td style={cell}>{row.due_date||'—'}</td>
+              <td style={cell}>{row.reference||'—'}</td><td style={cell}>{row.notes||'—'}</td>
+              <td style={{...cell,whiteSpace:'nowrap'}}>
+                <button type="button" style={btn} disabled={assessmentBusy} onClick={()=>editAssessment(row)}>Editar</button>{' '}
+                <button type="button" style={{...btn,color:'#B00020'}} disabled={assessmentBusy} onClick={()=>deleteAssessment(row)}>Eliminar</button>
+              </td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        {!visibleAssessments.length&&<p style={{fontSize:12,color:'#64748B'}}>
+          Todavía no hay obligaciones determinadas para el período seleccionado.</p>}
       </div>
       <div style={surface}>
         <h3 style={{margin:'0 0 8px',fontSize:17}}>{editingId?'Editar pago realizado':'Registrar pago realizado'}</h3>
@@ -352,11 +447,13 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         </>}
       </div>
       <div style={{fontSize:12,color:'#64748B',lineHeight:1.5,marginBottom:14}}>
-        <strong>Alcance del control:</strong> no se aplican pagos automáticamente a otros meses ni se crean
-        Journal Entries. Los pagos bancarios o previamente registrados en contabilidad deben registrarse aquí
-        para descontarlos del balance de este control. No se incluyen aportaciones patronales ni
-        otras deducciones no identificadas como impuestos. Las retenciones de empleados registradas en
-        Services se muestran combinadas y deben validarse para evitar duplicarlas con Payroll.
+        <strong>Alcance y verificación:</strong> FICA patronal y SINOT patronal muestran cálculos de
+        referencia basados en Payroll FINAL. Valida salarios sujetos, topes anuales,
+        exenciones y aportación patronal real antes de radicar o pagar. Las obligaciones
+        de desempleo y CFSE se registran según las planillas o pólizas oficiales.
+        No se generan Journal Entries ni se aplican pagos a otro período automáticamente.
+        Los pagos previamente contabilizados deben registrarse aquí para descontarlos del control.
+        Las retenciones combinadas de empleados de Services se revisan para evitar duplicarlas con Payroll.
       </div>
     </>}
   </div>;
