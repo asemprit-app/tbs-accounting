@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
-import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,retentionBalances,validPeriod,asMoney,cents} from './tbsRetentionLedger.js';
+import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,retentionBalances,validPeriod,asMoney,cents,payrollGrossByPeriod,retentionPivot} from './tbsRetentionLedger.js';
 
 const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 const getDate=()=>new Date().toISOString().slice(0,10);
@@ -29,6 +29,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
   const [periodFilter,setPeriodFilter]=useState('all');
   const [groupFilter,setGroupFilter]=useState('all');
   const [showHistory,setShowHistory]=useState(true);
+  const [pivotGrouping,setPivotGrouping]=useState('month');
 
   useEffect(()=>{
     let active=true;
@@ -69,6 +70,14 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
   const summaryRows=summary.rows.filter(r=>fits(r.category,r.period));
   const visiblePayments=payments.filter(p=>fits(p.category,p.tax_period));
   const visibleAssessments=assessments.filter(a=>fits(a.category,a.tax_period));
+  const grossMonths=useMemo(()=>payrollGrossByPeriod(payrollRuns,payrollLines),
+    [payrollRuns,payrollLines]);
+  const pivotRows=useMemo(()=>retentionPivot(summary,grossMonths,pivotGrouping),
+    [summary,grossMonths,pivotGrouping]).filter(r=>{
+      if(periodFilter==='all')return true;
+      return pivotGrouping==='month' ? r.period===periodFilter :
+        r.period===periodFilter.slice(0,4)+'-Q'+Math.ceil(Number(periodFilter.slice(5))/3);
+    });
   const totals=summaryRows.reduce((a,r)=>({
     accrued:a.accrued+cents(r.accrued),paid:a.paid+cents(r.paid),
     pending:a.pending+cents(r.pending),overpaid:a.overpaid+cents(r.overpaid),
@@ -203,13 +212,22 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
 
   function exportCSV(){
     const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
-    const columns=[['Período','Categoría','Retenido','Pagado','Pendiente','A favor'],
+    const columns=[['Período','Categoría','Obligación','Pagado','Pendiente','A favor'],
       ...summaryRows.map(r=>[r.period,catLabel(r.category),
         r.accrued.toFixed(2),r.paid.toFixed(2),r.pending.toFixed(2),r.overpaid.toFixed(2)])];
     const detail=[['Fecha de pago','Período aplicado','Categoría','Cantidad','Referencia','Notas'],
       ...visiblePayments.map(p=>[p.paid_date,p.tax_period,catLabel(p.category),
         Number(p.amount).toFixed(2),p.reference,p.notes])];
-    const csv=[...columns.map(c=>c.map(quote).join(',')),'',...detail.map(c=>c.map(quote).join(','))].join('\r\n');
+    const pivot=[['Período','Gross Pay','Retenciones empleado/servicios','Patronal','Pagos','Pendiente','Pagos en exceso'],
+      ...pivotRows.map(r=>[r.period,...['gross','retained','employer','paid','pending','overpaid']
+        .map(key=>Number(r[key]).toFixed(2))])];
+    const assessed=[['Período','Obligación patronal','Total determinado','Vencimiento','Referencia','Notas'],
+      ...visibleAssessments.map(a=>[a.tax_period,catLabel(a.category),Number(a.amount).toFixed(2),
+        a.due_date||'',a.reference,a.notes])];
+    const csv=[...pivot.map(row=>row.map(quote).join(',')),'',
+      ...columns.map(row=>row.map(quote).join(',')),'',
+      ...detail.map(row=>row.map(quote).join(',')),'',
+      ...assessed.map(row=>row.map(quote).join(','))].join('\r\n');
     const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;
     a.download='Retenciones_'+(businessName||'Client').replace(/[^a-z0-9_-]/gi,'_')+'.csv';
@@ -217,10 +235,11 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
   }
 
   return <div style={{maxWidth:1180}}>
-    <h2 style={{margin:'0 0 6px'}}>Retentions / Retenciones</h2>
+    <h2 style={{margin:'0 0 6px'}}>Retenciones y Obligaciones Patronales</h2>
     <p style={{color:'#64748B',fontSize:13,margin:'0 0 16px'}}>
-      Control de retenciones de Payroll y Services. Los importes retenidos se calculan
-      de registros FINAL; los pagos se registran aquí por categoría y período contributivo.
+      Control por cliente basado en Gross Pay, retenciones de Payroll/Services, aportaciones
+      patronales, desempleo y CFSE. Las retenciones automáticas proceden de períodos FINAL;
+      los pagos y las obligaciones determinadas por agencias se registran por separado.
     </p>
     {loadState==='loading' && <p>Consultando pagos registrados…</p>}
     {loadState==='error' && <div style={{...surface,color:'#B00020'}}>
@@ -236,8 +255,10 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
             </select></div>
           <div><label style={label}>Origen</label>
             <select style={field} value={groupFilter} onChange={e=>setGroupFilter(e.target.value)}>
-              <option value="all">Payroll + Services</option>
-              <option value="Payroll">Payroll</option><option value="Services">Services</option>
+              <option value="all">Todos los conceptos</option>
+              <option value="Payroll">Retenciones de Payroll</option>
+              <option value="Services">Retenciones de Services</option>
+              <option value="Patronal">Obligaciones patronales</option>
               {RETENTION_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
             </select></div>
           <button style={btn} onClick={exportCSV}>Exportar CSV</button>
@@ -245,7 +266,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10,marginBottom:16}}>
         {[
-          ['Retenido',total('accrued'),'#17365D'],
+          ['Obligaciones acumuladas',total('accrued'),'#17365D'],
           ['Pagos registrados',total('paid'),'#0F6E56'],
           ['Pendiente de pagar',total('pending'),'#A16207'],
           ['Pagos en exceso',total('overpaid'),'#475569'],
@@ -255,10 +276,10 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         </div>)}
       </div>
       <div style={surface}>
-        <h3 style={{margin:'0 0 12px',fontSize:17}}>Balances por período y retención</h3>
+        <h3 style={{margin:'0 0 12px',fontSize:17}}>Balances por período y obligación</h3>
         <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:13}}>
           <thead><tr style={{background:'#F5F7FA'}}>
-            {['Período','Tipo de retención','Retenido','Pagado','Pendiente','A favor','Estado'].map(x=>
+            {['Período','Concepto','Obligación','Pagado','Pendiente','A favor','Estado'].map(x=>
               <th key={x} style={cell}>{x}</th>)}
           </tr></thead>
           <tbody>{summaryRows.map(r=><tr key={r.category+'|'+r.period}>
