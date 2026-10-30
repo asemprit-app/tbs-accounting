@@ -58,7 +58,7 @@ export default function TBSRetentionManualBases({
     const payload={
       tax_period:form.tax_period,mode:form.mode,
       reference:form.reference.trim().slice(0,250),notes:form.notes.trim().slice(0,1000),
-      ...Object.fromEntries(amounts.map(k=>[k:asMoney(cents(form[k]))])),
+      ...Object.fromEntries(amounts.map(k=>[k,asMoney(cents(form[k]))])),
     };
     if(!validPeriod(payload.tax_period)||!['reference','additional'].includes(payload.mode)||
       amounts.some(k=>form[k]!==''&&(!Number.isFinite(Number(form[k]))||Number(form[k])<0))||
