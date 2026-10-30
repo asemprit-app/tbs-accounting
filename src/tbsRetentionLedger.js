@@ -16,6 +16,19 @@ export const RETENTION_CATEGORIES = Object.freeze([
  {id:'employer_unemployment_special',label:'Patronal · Aportación especial DTRH',group:'Patronal',calculation:'assessment'},
  {id:'employer_cfse',label:'Patronal · CFSE / Fondo del Seguro del Estado',group:'Patronal',calculation:'assessment'},
 ]);
+// UI-only FICA rollups. Keep the original Social Security and Medicare
+// ledgers untouched so previous remittances and agency-level audit remain valid.
+export const FICA_DETAIL_GROUPS = Object.freeze({
+  payroll_fica: ['payroll_ss','payroll_medicare'],
+  employer_fica: ['employer_ss','employer_medicare'],
+});
+export const FICA_ROLLUP_LABELS = Object.freeze({
+  payroll_fica: 'FICA retenido · Seguro Social + Medicare',
+  employer_fica: 'FICA patronal · Seguro Social + Medicare',
+});
+export const ficaGroupForCategory = category =>
+  Object.entries(FICA_DETAIL_GROUPS).find(([,values])=>values.includes(category))?.[0]||null;
+
 export const cents = n => Math.round((Number(n)||0)*100);
 export const asMoney = centsValue => Math.round(Number(centsValue)||0)/100;
 export const isRetentionCategory = id => RETENTION_CATEGORIES.some(x => x.id===id);
@@ -117,18 +130,53 @@ export function retentionPivot(balances,grossMonths,grouping='month') {
     ? month.slice(0,4)+'-Q'+Math.ceil(Number(month.slice(5,7))/3) : month;
   for(const row of balances.rows){
     const key=periodKey(row.period);
-    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0};
+    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0,
+      ficaEmployee:0,ficaEmployer:0,ficaTotal:0};
     const employer=RETENTION_CATEGORIES.find(c=>c.id===row.category)?.group==='Patronal';
     x[employer?'employer':'retained']+=cents(row.accrued);
+    const ficaGroup=ficaGroupForCategory(row.category);
+    if(ficaGroup){
+      const ficaAmount=cents(row.accrued);
+      x[ficaGroup==='employer_fica'?'ficaEmployer':'ficaEmployee']+=ficaAmount;
+      x.ficaTotal+=ficaAmount; // subtotal only; never add again to employer/retained
+    }
     x.paid+=cents(row.paid);x.pending+=cents(row.pending);x.overpaid+=cents(row.overpaid);
     totals.set(key,x);
   }
   for(const [month,amount] of grossMonths){
     const key=periodKey(month);
-    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0};
+    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0,
+      ficaEmployee:0,ficaEmployer:0,ficaTotal:0};
     x.gross+=cents(amount);totals.set(key,x);
   }
   return Array.from(totals.values()).map(row=>Object.fromEntries(
     Object.entries(row).map(([k,v])=>[k,k==='period'?v:asMoney(v)])))
     .sort((a,b)=>b.period.localeCompare(a.period));
+}
+
+// One row per FICA share and tax period. This only changes presentation:
+// employee and employer contributions remain independently reconcilable.
+// A payment allocated to either SS or Medicare contributes to the FICA total.
+export function retentionDisplayRows(rows=[]) {
+  const output=new Map();
+  for(const row of rows){
+    const category=ficaGroupForCategory(row.category)||row.category;
+    const key=category+'|'+row.period;
+    if(!output.has(key))output.set(key,{
+      category,period:row.period,accrued:0,paid:0,pending:0,overpaid:0,
+      components:[],isFicaRollup:Boolean(ficaGroupForCategory(row.category)),
+    });
+    const x=output.get(key);
+    x.accrued+=cents(row.accrued);
+    x.paid+=cents(row.paid);
+    x.components.push({...row});
+  }
+  return Array.from(output.values()).map(row=>{
+    const accrued=asMoney(row.accrued),paid=asMoney(row.paid);
+    // Combined FICA is a single liability for display. Avoid showing one
+    // subcomponent as overdue if the other already has a corresponding credit.
+    const pending=asMoney(Math.max(0,row.accrued-row.paid));
+    const overpaid=asMoney(Math.max(0,row.paid-row.accrued));
+    return {...row,accrued,paid,pending,overpaid};
+  }).sort((a,b)=>b.period.localeCompare(a.period)||a.category.localeCompare(b.category));
 }
