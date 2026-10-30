@@ -90,6 +90,8 @@ test('Financial Reports uses shared native print preview, not fixed 640px scroll
  assert.ok(print.includes('page-break-before: always'));
  assert.ok(print.includes('page-break-inside: avoid'));
  assert.ok(print.includes('overflow: visible !important'));
+ assert.ok(print.includes('body > *:not(.tbs-report-preview-overlay)'));
+ assert.ok(print.includes('position: static !important'));
  assert.ok(print.includes('reportPrintCell(cell)'));
  assert.ok(print.includes('reportPrintNumeric(cell)'));
  assert.ok(print.includes('breakdown &&')===false || print.includes('header.length<=6'));
