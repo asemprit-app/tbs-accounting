@@ -68,7 +68,7 @@ test('Cash Flow prints activity groups and subsections with original numbers',()
  ];
  const view=presentFinancialReportRows('cash_flow',sample);
  assert.deepEqual(view.filter(r=>r.kind==='section').map(r=>r.cells[1]),
-  ['Sales','Purchases','Payroll']);
+  ['OPERATING ACTIVITIES','Sales','Purchases','Payroll','INVESTING ACTIVITIES']);
  assert.equal(view.find(r=>r.cells[1]==='INVESTING ACTIVITIES').kind,'section');
  assert.equal(view.find(r=>r.cells[1]==='Net Cash from Operating Activities').kind,'total');
  assert.equal(view.filter(r=>r.cells[1]==='Purchases'&&r.kind==='standard').length,1);
