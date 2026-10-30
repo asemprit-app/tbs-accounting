@@ -19,7 +19,7 @@ export const RETENTION_CATEGORIES = Object.freeze([
 export const cents = n => Math.round((Number(n)||0)*100);
 export const asMoney = centsValue => Math.round(Number(centsValue)||0)/100;
 export const isRetentionCategory = id => RETENTION_CATEGORIES.some(x => x.id===id);
-export const ASSESSMENT_CATEGORIES = RETENTION_CATEGORIES.filter(x=>x.calculation==='assessment');
+export const ASSESSMENT_CATEGORIES = RETENTION_CATEGORIES.filter(x=>x.group==='Patronal');
 export const validPeriod = s => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(s||''));
 const month = date => typeof date==='string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0,7) : '';
 const add = (map,cat,period,value) => {
@@ -57,11 +57,18 @@ export function retentionObligations({services=[],payrollRuns=[],payrollLines=[]
    // employee SINOT. This is a provisional control, verify DTRH assessment.
    add(map,'employer_sinot',period,l.sinot);
  }
+ // Agency assessments are posted as manual obligations; documented FICA/
+ // SINOT amounts override the Payroll-based estimates for the same month.
+ // This avoids summing the official amount on top of an already accrued estimate.
+ const manual = new Map();
  for(const a of assessments) {
    if(!ASSESSMENT_CATEGORIES.some(c=>c.id===a.category))continue;
    const value=Number(a.amount);
-   if(value>0)add(map,a.category,a.tax_period,value);
+   if(value<=0||!validPeriod(a.tax_period))continue;
+   const key=a.category+'|'+a.tax_period;
+   manual.set(key,(manual.get(key)||0)+cents(value));
  }
+ for(const [key,value] of manual)map.set(key,value);
  return map;
 }
 export function retentionBalances(input,payments=[]) {
