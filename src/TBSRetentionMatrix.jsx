@@ -28,7 +28,21 @@ export default function TBSRetentionMatrix({services,payrollRuns,payrollLines,as
  const sum=key=>Math.round(displayedRows.reduce((total,r)=>total+Math.round(Number(r[key]||0)*100),0))/100;
  const buttonStyle={padding:'6px 10px',border:'1px solid #CBD5E1',borderRadius:5,background:'#fff',
    color:'#17365D',cursor:'pointer',fontSize:12};
- const selectField=(name,value,setter,options)=><label style={{display:'grid',gap:4,fontSize:12,color:'#475569'}}>
+ function exportVisibleCsv(){
+   const quote=value=>'"'+String(value??'').replace(/"/g,'""')+'"';
+   const cols=['period',...columns.map(c=>c.key)];
+   const content=[['Período',...columns.map(c=>c.group.toUpperCase()+' · '+c.label)],
+     ...displayedRows.map(r=>cols.map(key=>r[key]??0)),
+     ['Totales visibles',...columns.map(c=>sum(c.key))]]
+     .map(row=>row.map(quote).join(',')).join('\\r\\n');
+   const file=new Blob(['\\uFEFF'+content],{type:'text/csv;charset=utf-8'});
+   const url=URL.createObjectURL(file);
+   const a=document.createElement('a');
+   a.href=url;a.download='Control_Retenciones_'+periodGrouping+'.csv';
+   document.body.appendChild(a);a.click();a.remove();
+   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }
+  const selectField=(name,value,setter,options)=><label style={{display:'grid',gap:4,fontSize:12,color:'#475569'}}>
    {name}<select style={input} value={value} onChange={e=>setter(e.target.value)}>
      {options.map(([val,label])=><option key={val} value={val}>{label}</option>)}
    </select></label>;
@@ -46,8 +60,9 @@ export default function TBSRetentionMatrix({services,payrollRuns,payrollLines,as
        {selectField('Agrupar',periodGrouping,v=>{setPeriodGrouping(v);setFilters({});},[
          ['month','Mensual'],['quarter','Trimestral'],['year','Anual']])}
        {selectField('Año',selectedYear,setSelectedYear,[['all','Todos'],...years.map(y=>[y,y])])}
-       <button type="button" style={buttonStyle} onClick={()=>{setFilters({});setSelectedYear('all');setVisibleGroups(['fica','sinot','pr','services','other']);setSort({key:'period',asc:false});}}>
+              <button type="button" style={buttonStyle} onClick={()=>{setFilters({});setSelectedYear('all');setVisibleGroups(['fica','sinot','pr','services','other']);setSort({key:'period',asc:false});}}>
          Restablecer filtros</button>
+       <button type="button" style={buttonStyle} onClick={exportVisibleCsv}>Exportar matriz CSV</button>
      </div>
    </div>
    <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:14,alignItems:'center'}}>
