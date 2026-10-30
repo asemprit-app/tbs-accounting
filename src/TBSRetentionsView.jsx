@@ -1,6 +1,8 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
 import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,FICA_DETAIL_GROUPS,FICA_ROLLUP_LABELS,retentionDisplayRows,retentionBalances,validPeriod,asMoney,cents,payrollGrossByPeriod,retentionPivot} from './tbsRetentionLedger.js';
+import TBSRetentionMatrix from './TBSRetentionMatrix.jsx';
+import {buildRetentionMatrix,PAYMENT_FORM_GROUPS,PAYMENT_GROUPS} from './tbsRetentionControlMatrix.js';
 
 const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 const getDate=()=>new Date().toISOString().slice(0,10);
@@ -88,18 +90,35 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       return pivotGrouping==='month' ? r.period===periodFilter :
         r.period===periodFilter.slice(0,4)+'-Q'+Math.ceil(Number(periodFilter.slice(5))/3);
     });
-  const totals=summaryRows.reduce((a,r)=>({
-    accrued:a.accrued+cents(r.accrued),paid:a.paid+cents(r.paid),
-    pending:a.pending+cents(r.pending),overpaid:a.overpaid+cents(r.overpaid),
-  }),{accrued:0,paid:0,pending:0,overpaid:0});
-  const ficaShareTotals=retentionDisplayRows(rawSummaryRows);
-  const ficaWithheld=ficaShareTotals.filter(r=>r.category==='payroll_fica')
-    .reduce((sum,r)=>sum+cents(r.accrued),0);
-  const ficaEmployer=ficaShareTotals.filter(r=>r.category==='employer_fica')
-    .reduce((sum,r)=>sum+cents(r.accrued),0);
-  const ficaTotal=asMoney(ficaWithheld+ficaEmployer);
+  const monthlyMatrix=useMemo(()=>buildRetentionMatrix(
+    {services,payrollRuns,payrollLines,assessments},payments,'month'
+  ),[services,payrollRuns,payrollLines,assessments,payments]);
+  const cardRows=monthlyMatrix.filter(r=>periodFilter==='all'||r.period===periodFilter);
+  const groupNames=['fica','sinot','pr','services','other'];
+  const totals=cardRows.reduce((acc,row)=>{
+    for(const group of groupNames){
+      const obligation=group==='fica'||group==='sinot'
+        ? row[group+'_employee']+row[group+'_employer']
+        : row[group+'_accrued'];
+      acc.accrued+=cents(obligation);
+      acc.paid+=cents(row[group+'_paid']);
+      acc.pending+=cents(row[group+'_pending']);
+    }
+    acc.overpaid+=cents(row.overpaid);
+    acc.gross+=cents(row.gross);
+    return acc;
+  },{accrued:0,paid:0,pending:0,overpaid:0,gross:0});
+  const ficaTotal=asMoney(cardRows.reduce((sum,r)=>
+    sum+cents(r.fica_employee)+cents(r.fica_employer),0));
   const total=(type)=>fmt(asMoney(totals[type]));
   const change=(name,val)=>setForm(f=>({...f,[name]:val}));
+  function selectPaymentPeriod(period){
+    setEditingId('');
+    setMessage('');
+    setForm(prev=>({...prev,tax_period:period,
+      category:PAYMENT_FORM_GROUPS.some(x=>x.id===prev.category)?prev.category:'fica_remittance'}));
+    document.getElementById('retention-payment-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
 
   function startEdit(payment){
     setForm({category:payment.category,tax_period:payment.tax_period,
@@ -114,13 +133,20 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     e.preventDefault();if(saving)return;
     const amount=Math.round(Number(form.amount)*100)/100;
     if(!RETENTION_CATEGORIES.some(c=>c.id===form.category)||!validPeriod(form.tax_period)||
-       !/^\d{4}-\d{2}-\d{2}$/.test(form.paid_date)||!Number.isFinite(amount)||amount<=0){
+       !/^\d{4}-\d{2}-\d{2}$/.test(form.paid_date)||!Number.isFinite(amount)||amount<=0 ||
+       (form.category==='employer_other'&&!form.notes.trim()&&!form.reference.trim())){
       setMessage('Verifica categoría, período YYYY-MM, fecha y una cantidad mayor que $0.00.');return;
     }
     const otherPayments=payments.filter(p=>p.id!==editingId);
-    const outstanding=retentionBalances({services,payrollRuns,payrollLines,assessments},otherPayments).rows
-      .find(r=>r.period===form.tax_period&&r.category===form.category);
-    const available=outstanding?.pending||0;
+    // One remittance may cover both FICA portions (employee+employer) or
+    // both SINOT portions. Check the combined obligation, not a nonexistent
+    // stand-alone category, when warning about possible overpayment.
+    const group=Object.entries(PAYMENT_GROUPS)
+      .find(([,cats])=>cats.includes(form.category))?.[0];
+    const period=buildRetentionMatrix(
+      {services,payrollRuns,payrollLines,assessments},otherPayments,'month'
+    ).find(r=>r.period===form.tax_period);
+    const available=period&&group?period[group+'_pending']:0;
     if(amount>available+0.009){
       const excess=fmt(amount-available);
       if(!window.confirm('Este pago excede el balance registrado de ese período en '+excess+
@@ -181,6 +207,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     const amount=Math.round(Number(assessmentForm.amount)*100)/100;
     if(!ASSESSMENT_CATEGORIES.some(c=>c.id===assessmentForm.category)||
        !validPeriod(assessmentForm.tax_period)||!Number.isFinite(amount)||amount<=0||
+       (assessmentForm.category==='employer_other'&&!assessmentForm.reference.trim()&&!assessmentForm.notes.trim())||
        (assessmentForm.due_date&&!/^\d{4}-\d{2}-\d{2}$/.test(assessmentForm.due_date))){
       setAssessmentMessage('Verifica la categoría patronal, período, importe y fecha de vencimiento.');return;
     }
@@ -260,7 +287,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     <h2 style={{margin:'0 0 6px'}}>Retenciones y Obligaciones Patronales</h2>
     <p style={{color:'#64748B',fontSize:13,margin:'0 0 16px'}}>
       Control por cliente basado en Gross Pay, retenciones de Payroll/Services, aportaciones
-      patronales, desempleo y CFSE. Las retenciones automáticas proceden de períodos FINAL;
+      patronales, desempleo, CFSE y otras obligaciones. Las retenciones automáticas proceden de períodos FINAL;
       los pagos y las obligaciones determinadas por agencias se registran por separado.
     </p>
     {loadState==='loading' && <p>Consultando pagos registrados…</p>}
@@ -269,6 +296,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     </div>}
     {loadState==='ready' && <>
       <div style={{...surface}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#475569',marginBottom:10}}>Filtros para historial y registros (matriz: filtros propios por columna)</div>
         <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'end',justifyContent:'space-between'}}>
           <div><label style={label}>Período contributivo</label>
             <select style={field} value={periodFilter} onChange={e=>setPeriodFilter(e.target.value)}>
@@ -300,73 +328,44 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
           <div style={{fontSize:21,fontWeight:700,color,marginTop:7}}>{value}</div>
         </div>)}
       </div>
-      <div style={surface}>
-        <div style={{display:'flex',gap:12,alignItems:'center',justifyContent:'space-between',flexWrap:'wrap'}}>
-          <h3 style={{margin:'0 0 10px',fontSize:17}}>Resumen dinámico desde Gross Pay</h3>
-          <div><label style={label}>Agrupar</label>
-            <select style={field} value={pivotGrouping} onChange={e=>setPivotGrouping(e.target.value)}>
-              <option value="month">Mensual</option>
-              <option value="quarter">Trimestral</option>
-            </select>
-          </div>
-        </div>
-        <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
-          Gross Pay es el total bruto de Payroll FINAL, agrupado por fecha de pago.
-          Las retenciones y la participación patronal se muestran separadas.
-          FICA = Seguro Social + Medicare. FICA total incluye ambas porciones, retenida y patronal,
-          y es un subtotal de referencia; no se vuelve a sumar a las obligaciones.
-          Gross Pay no equivale necesariamente a salarios tributables para FICA, SINOT,
-          desempleo ni a la nómina cubierta por CFSE; verifica los topes y las planillas oficiales.
+      <TBSRetentionMatrix services={services} payrollRuns={payrollRuns}
+        payrollLines={payrollLines} assessments={assessments} payments={payments}
+        onRecordPayment={selectPaymentPeriod} />
+      <details style={{...surface}}>
+        <summary style={{fontWeight:700,fontSize:15,cursor:'pointer'}}>Detalle para auditoría: retenciones y pagos originales</summary>
+        <p style={{fontSize:12,color:'#64748B',lineHeight:1.5}}>
+          Muestra las cuentas individuales de Seguro Social, Medicare, SINOT y otros conceptos.
+          Los pagos combinados se descuentan en la matriz superior; este detalle no debe usarse
+          para determinar el saldo consolidado de FICA o SINOT.
         </p>
-        <div style={{overflowX:'auto'}}>
-          <table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
-            <thead><tr style={{background:'#F5F7FA'}}>
-              {['Período','Gross Pay','FICA retenido','FICA patronal','FICA total',
-                'Retenciones','Patronal','Pagos','Pendiente','A favor'].map(t=>
-                <th key={t} style={cell}>{t}</th>)}
-            </tr></thead>
-            <tbody>{pivotRows.map(row=><tr key={row.period}>
-              <td style={cell}><strong>{row.period}</strong></td>
-              {['gross','ficaEmployee','ficaEmployer','ficaTotal','retained','employer','paid','pending','overpaid'].map(name=>
-                <td key={name} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>
-                  {fmt(row[name])}
-                </td>)}
-            </tr>)}</tbody>
-          </table>
-        </div>
-        {!pivotRows.length&&<p style={{fontSize:12,color:'#64748B'}}>No hay nóminas u obligaciones para este período.</p>}
-      </div>
-      <div style={surface}>
-        <h3 style={{margin:'0 0 12px',fontSize:17}}>Balances por período y obligación</h3>
-        <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:13}}>
+        <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
           <thead><tr style={{background:'#F5F7FA'}}>
-            {['Período','Concepto','Obligación','Pagado','Pendiente','A favor','Estado'].map(x=>
+            {['Período','Concepto original','Obligación','Pago registrado en esa categoría'].map(x=>
               <th key={x} style={cell}>{x}</th>)}
           </tr></thead>
           <tbody>{summaryRows.map(r=><tr key={r.category+'|'+r.period}>
             <td style={cell}>{r.period}</td>
             <td style={cell}>{catLabel(r.category)}
-              {r.isFicaRollup&&<details style={{marginTop:4,fontSize:11,color:'#64748B'}}>
+              {r.isFicaRollup&&<details style={{fontSize:11,color:'#64748B',marginTop:4}}>
                 <summary>Ver desglose de Seguro Social y Medicare</summary>
-                {r.components.map((part,i)=><div key={i} style={{margin:'4px 0 0 4px'}}>
+                {r.components.map((part,i)=><div key={i}>
                   {catLabel(part.category)}: {fmt(part.accrued)} · Pagado {fmt(part.paid)}
                 </div>)}
               </details>}
             </td>
-            {['accrued','paid','pending','overpaid'].map(key=>
-              <td key={key} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{fmt(r[key])}</td>)}
-            <td style={cell}><strong style={{color:r.pending>0.009?'#A16207':r.overpaid>0.009?'#475569':'#0F6E56'}}>
-              {r.pending>0.009?'Pendiente':r.overpaid>0.009?'A favor':'Pagado'}</strong></td>
+            <td style={{...cell,textAlign:'right'}}>{fmt(r.accrued)}</td>
+            <td style={{...cell,textAlign:'right'}}>{fmt(r.paid)}</td>
           </tr>)}</tbody>
         </table></div>
-        {summaryRows.length===0 && <p style={{color:'#64748B',fontSize:13}}>No hay retenciones ni pagos para los filtros seleccionados.</p>}
-      </div>
+      </details>
       <div style={surface}>
         <h3 style={{margin:'0 0 8px',fontSize:17}}>
           {editingAssessmentId?'Editar obligación determinada':'Registrar obligación / importe patronal confirmado'}
         </h3>
         <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
-          Registra desempleo, aportación especial, FUTA y CFSE según la planilla o póliza.
+          Registra desempleo, aportación especial, FUTA, CFSE y cualquier otra obligación patronal
+          que requiera pago. Para Otras obligaciones indica el concepto en Referencia o Notas.
+          Registra los importes según la planilla, factura o póliza.
           Para FICA y SINOT, si tienes el importe patronal oficial, introdúcelo aquí:
           sustituirá el cálculo de referencia del mismo período sin duplicarlo.
           Las obligaciones trimestrales utilizan como referencia el mes de cierre del
@@ -424,14 +423,20 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         {!visibleAssessments.length&&<p style={{fontSize:12,color:'#64748B'}}>
           Todavía no hay obligaciones determinadas para el período seleccionado.</p>}
       </div>
-      <div style={surface}>
+      <div style={surface} id="retention-payment-form">
         <h3 style={{margin:'0 0 8px',fontSize:17}}>{editingId?'Editar pago realizado':'Registrar pago realizado'}</h3>
         <form onSubmit={savePayment}>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12}}>
             <div><label style={label}>Tipo de retención</label>
               <select required style={{...field,width:'100%'}} value={form.category}
                 onChange={e=>change('category',e.target.value)}>
-                {RETENTION_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                <optgroup label="Pagos de grupos consolidados">
+                  {PAYMENT_FORM_GROUPS.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                </optgroup>
+                <optgroup label="Categorías individuales (históricas)">
+                  {RETENTION_CATEGORIES.filter(c=>!PAYMENT_FORM_GROUPS.some(x=>x.id===c.id))
+                    .map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                </optgroup>
               </select></div>
             <div><label style={label}>Período que cubre (YYYY-MM)</label>
               <input required type="month" style={{...field,width:'100%'}} value={form.tax_period}
