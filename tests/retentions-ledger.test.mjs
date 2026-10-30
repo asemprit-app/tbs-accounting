@@ -63,3 +63,15 @@ test('unemployment/CFSE depend on explicit assessments, never invent rates from 
  assert.equal(cfse.accrued,950);assert.equal(cfse.pending,650);
  assert.ok(!report.rows.some(r=>r.category==='employer_unemployment_futa'));
 });
+
+test('official employer SINOT/FICA assessments override calculated amounts instead of doubling them',()=>{
+ const modified={...input,assessments:[
+  {category:'employer_sinot',tax_period:'2026-10',amount:8.75},
+  {category:'employer_ss',tax_period:'2026-10',amount:61.80},
+  {category:'employer_medicare',tax_period:'2026-10',amount:14.50}
+ ]};
+ const x=retentionBalances(modified,[]);
+ assert.equal(x.rows.find(r=>r.category==='employer_sinot').accrued,8.75);
+ assert.equal(x.rows.find(r=>r.category==='employer_ss').accrued,61.8);
+ assert.equal(x.rows.find(r=>r.category==='employer_medicare').accrued,14.5);
+});
