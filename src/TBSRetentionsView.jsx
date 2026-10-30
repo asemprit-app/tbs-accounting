@@ -1,10 +1,11 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
-import {RETENTION_CATEGORIES,retentionBalances,validPeriod,asMoney,cents} from './tbsRetentionLedger.js';
+import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,retentionBalances,validPeriod,asMoney,cents} from './tbsRetentionLedger.js';
 
 const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 const getDate=()=>new Date().toISOString().slice(0,10);
 const blank=()=>({category:'services_contractor',tax_period:getDate().slice(0,7),paid_date:getDate(),amount:'',reference:'',notes:''});
+const blankAssessment=()=>({category:'employer_unemployment_pr',tax_period:getDate().slice(0,7),amount:'',due_date:'',reference:'',notes:''});
 const surface={border:'1px solid #E2E5E9',borderRadius:9,padding:16,background:'#fff',marginBottom:16};
 const field={border:'1px solid #CBD5E1',borderRadius:5,padding:'8px 9px',maxWidth:'100%',boxSizing:'border-box'};
 const btn={border:'1px solid #CBD5E1',background:'#fff',color:'#17365D',borderRadius:5,padding:'7px 11px',cursor:'pointer'};
@@ -14,6 +15,11 @@ const catLabel=id=>RETENTION_CATEGORIES.find(c=>c.id===id)?.label||id;
 
 export default function RetentionsView({clientId,services,payrollRuns,payrollLines,businessName}) {
   const [payments,setPayments]=useState([]);
+  const [assessments,setAssessments]=useState([]);
+  const [assessmentForm,setAssessmentForm]=useState(blankAssessment);
+  const [editingAssessmentId,setEditingAssessmentId]=useState('');
+  const [assessmentMessage,setAssessmentMessage]=useState('');
+  const [assessmentBusy,setAssessmentBusy]=useState(false);
   const [loadState,setLoadState]=useState('loading');
   const [loadMessage,setLoadMessage]=useState('');
   const [form,setForm]=useState(blank);
@@ -26,31 +32,43 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
 
   useEffect(()=>{
     let active=true;
-    setLoadState('loading');setPayments([]);setLoadMessage('');setMessage('');
-    setEditingId('');setForm(blank());setPeriodFilter('all');setGroupFilter('all');
+    setLoadState('loading');setPayments([]);setAssessments([]);setLoadMessage('');setMessage('');
+    setEditingId('');setForm(blank());setEditingAssessmentId('');setAssessmentForm(blankAssessment());
+    setAssessmentMessage('');setPeriodFilter('all');setGroupFilter('all');
     (async()=>{
-      const {data,error}=await supabase.from('retention_payments')
-        .select('id,client_id,category,tax_period,paid_date,amount,reference,notes,created_at')
-        .eq('client_id',clientId).order('paid_date',{ascending:false});
+      const [paymentResult,assessmentResult]=await Promise.all([
+        supabase.from('retention_payments')
+          .select('id,client_id,category,tax_period,paid_date,amount,reference,notes,created_at')
+          .eq('client_id',clientId).order('paid_date',{ascending:false}),
+        supabase.from('retention_assessments')
+          .select('id,client_id,category,tax_period,amount,due_date,reference,notes,created_at')
+          .eq('client_id',clientId).order('tax_period',{ascending:false})
+      ]);
       if(!active)return;
-      if(error){setLoadState('error');setLoadMessage(error.message);return;}
-      setPayments((data||[]).map(p=>({...p,amount:Number(p.amount)||0})));
+      if(paymentResult.error||assessmentResult.error){
+        setLoadState('error');
+        setLoadMessage(paymentResult.error?.message||assessmentResult.error?.message||'Could not load employer obligations');
+        return;
+      }
+      setPayments((paymentResult.data||[]).map(p=>({...p,amount:Number(p.amount)||0})));
+      setAssessments((assessmentResult.data||[]).map(a=>({...a,amount:Number(a.amount)||0})));
       setLoadState('ready');
     })();
     return ()=>{active=false;};
   },[clientId]);
 
-  const summary=useMemo(()=>retentionBalances({services,payrollRuns,payrollLines},payments),
-    [services,payrollRuns,payrollLines,payments]);
+  const summary=useMemo(()=>retentionBalances({services,payrollRuns,payrollLines,assessments},payments),
+    [services,payrollRuns,payrollLines,assessments,payments]);
 
   const months=useMemo(()=>Array.from(new Set([
-    ...summary.rows.map(r=>r.period),...payments.map(p=>p.tax_period)
-  ])).sort().reverse(),[summary.rows,payments]);
+    ...summary.rows.map(r=>r.period),...payments.map(p=>p.tax_period),...assessments.map(a=>a.tax_period)
+  ])).sort().reverse(),[summary.rows,payments,assessments]);
   const fits=(cat,period)=>(groupFilter==='all'||RETENTION_CATEGORIES.some(x=>
     x.id===cat && (groupFilter===x.group || groupFilter===cat))) &&
     (periodFilter==='all'||period===periodFilter);
   const summaryRows=summary.rows.filter(r=>fits(r.category,r.period));
   const visiblePayments=payments.filter(p=>fits(p.category,p.tax_period));
+  const visibleAssessments=assessments.filter(a=>fits(a.category,a.tax_period));
   const totals=summaryRows.reduce((a,r)=>({
     accrued:a.accrued+cents(r.accrued),paid:a.paid+cents(r.paid),
     pending:a.pending+cents(r.pending),overpaid:a.overpaid+cents(r.overpaid),
@@ -75,7 +93,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       setMessage('Verifica categoría, período YYYY-MM, fecha y una cantidad mayor que $0.00.');return;
     }
     const otherPayments=payments.filter(p=>p.id!==editingId);
-    const outstanding=retentionBalances({services,payrollRuns,payrollLines},otherPayments).rows
+    const outstanding=retentionBalances({services,payrollRuns,payrollLines,assessments},otherPayments).rows
       .find(r=>r.period===form.tax_period&&r.category===form.category);
     const available=outstanding?.pending||0;
     if(amount>available+0.009){
