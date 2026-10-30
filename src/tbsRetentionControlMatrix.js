@@ -49,7 +49,7 @@ const categoryGroup = category => {
  return null;
 };
 export function buildRetentionMatrix(input, payments=[], grouping='month') {
- const { services=[],payrollRuns=[],payrollLines=[],assessments=[] }=input||{};
+ const { services=[],payrollRuns=[],payrollLines=[],assessments=[],manualEntries=[] }=input||{};
  const summaries=new Map();
  const rowFor=month=>{
    if(!summaries.has(month)){
@@ -121,6 +121,21 @@ export function buildRetentionMatrix(input, payments=[], grouping='month') {
  for(const [key,amount] of paid){
    const [month,g]=key.split('|');
    rowFor(month)[g+'_paid']+=amount;
+ }
+ // Manually entered *additional* payroll liabilities are used only when
+ // source payroll/services records do not already contain them. Reference
+ // plans never increase liabilities or Gross Pay, preventing double counting.
+ for(const item of manualEntries){
+   if(item.mode!=='additional' ||
+     !/^\d{4}-(0[1-9]|1[0-2])$/.test(item.tax_period||''))continue;
+   const row=rowFor(item.tax_period);
+   row.gross+=cents(item.gross_pay);
+   row.fica_employee+=cents(item.fica_employee);
+   row.fica_employer+=cents(item.fica_employer);
+   row.sinot_employee+=cents(item.sinot_employee);
+   row.sinot_employer+=cents(item.sinot_employer);
+   row.pr_accrued+=cents(item.pr_tax);
+   row.services_accrued+=cents(item.services_retention);
  }
  // A remittance belongs to the declared month; never silently offset
  // another month when consolidating quarters or annual totals.
