@@ -2,6 +2,7 @@ import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
 import { inferCreditCardSourceSigns } from './tbsCreditCardStatementSigns.js';
+import TBSFinancialReportPrint from './TBSFinancialReportPrint.jsx';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -6491,7 +6492,6 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       const rows = [
         ...revenueRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ...(invoiceRevenueInPeriod !== 0 ? [['', 'Invoicing (Service Revenue)', invoiceRevenueInPeriod]] : []),
-        ...(invoiceReimbursableInPeriod !== 0 ? [['', 'Reimbursable Expenses (excluded from income)', invoiceReimbursableInPeriod]] : []),
         ['', 'Total Sales', totalRevenue],
         ...(cogsRows.length > 0 ? [
           ...cogsRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
@@ -6512,8 +6512,9 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ['', 'Total Liabilities', totalLiabilities],
         ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Accumulated Income', accumulatedIncome],
+        ['', 'Accumulated income through ending date', accumulatedIncome],
         ['', 'Total Equity', totalEquity],
+        ['', 'Liabilities + Equity', totalLiabilities + totalEquity],
         ['', 'Balance Check (Assets - Liabilities - Equity)', balanceSheetDifference],
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
@@ -7300,43 +7301,13 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
 
       {showExportPreview && (() => {
         const usesBreakdownPdf = breakdown !== 'none' && ['pnl', 'balance_sheet', 'ap'].includes(selectedReport);
-        const { title, header, rows } = usesBreakdownPdf ? getBreakdownData(selectedReport, breakdown) : getReportData(selectedReport);
-        return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} className="no-print-overlay">
-            <div style={{ background: '#fff', width: 640, maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 28 }} id="invoice-print-area">
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }} className="print-hide">
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
-                  <button onClick={() => setShowExportPreview(false)} style={iconBtn}><X size={14} /></button>
-                </div>
-              </div>
-              <ReportHeader businessName={businessName} reportName={title} periodStart={from} periodEnd={to} logoUrl={null} />
-              <div>
-                <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid #ccc', textAlign: 'left' }}>
-                    {header.map(h => <th key={h} style={{ padding: '4px 6px', textAlign: h === header[header.length - 1] ? 'right' : 'left' }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {rows.map((r, i) => {
-                      const isTotal = typeof r[1] === 'string' && /^Total|^Net |^Gross Profit$|ACTIVITIES$|OVERVIEW$/.test(r[1]);
-                      return (
-                        <tr key={i} style={{ fontWeight: isTotal ? 700 : 400, borderTop: isTotal ? '1px solid #E2E5E9' : 'none' }}>
-                          {r.map((cell, ci) => (
-                            <td key={ci} style={{ padding: '4px 6px', textAlign: ci === r.length - 1 && typeof cell === 'number' ? 'right' : 'left' }}>
-                              {typeof cell === 'number' ? money(cell) : cell}
-                            </td>
-                          ))}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
-          </div>
-        );
+        const data = usesBreakdownPdf
+          ? getBreakdownData(selectedReport, breakdown)
+          : getReportData(selectedReport);
+        return <TBSFinancialReportPrint businessName={businessName}
+          title={data.title} header={data.header} rows={data.rows}
+          selectedReport={selectedReport} breakdown={usesBreakdownPdf}
+          onClose={() => setShowExportPreview(false)} />;
       })()}
     </div>
   );
