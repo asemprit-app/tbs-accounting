@@ -72,8 +72,12 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
   const visibleAssessments=assessments.filter(a=>fits(a.category,a.tax_period));
   const grossMonths=useMemo(()=>payrollGrossByPeriod(payrollRuns,payrollLines),
     [payrollRuns,payrollLines]);
-  const pivotRows=useMemo(()=>retentionPivot(summary,grossMonths,pivotGrouping),
-    [summary,grossMonths,pivotGrouping]).filter(r=>{
+  const pivotRows=useMemo(()=>{
+    const filtered={...summary,rows:summary.rows.filter(r=>
+      groupFilter==='all'||RETENTION_CATEGORIES.some(c=>c.id===r.category &&
+        (c.group===groupFilter||c.id===groupFilter)))};
+    return retentionPivot(filtered,grossMonths,pivotGrouping);
+  },[summary,grossMonths,pivotGrouping,groupFilter]).filter(r=>{
       if(periodFilter==='all')return true;
       return pivotGrouping==='month' ? r.period===periodFilter :
         r.period===periodFilter.slice(0,4)+'-Q'+Math.ceil(Number(periodFilter.slice(5))/3);
