@@ -140,6 +140,67 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     }catch(err){setMessage('Error al eliminar: '+err.message);}
     finally{setSaving(false);}
   }
+  function resetAssessment(){
+    setAssessmentForm(blankAssessment());setEditingAssessmentId('');setAssessmentMessage('');
+  }
+  function editAssessment(row){
+    setEditingAssessmentId(row.id);
+    setAssessmentForm({category:row.category,tax_period:row.tax_period,
+      amount:String(row.amount),due_date:row.due_date||'',
+      reference:row.reference||'',notes:row.notes||''});
+    setAssessmentMessage('');
+  }
+  async function saveAssessment(e){
+    e.preventDefault();
+    if(assessmentBusy)return;
+    const amount=Math.round(Number(assessmentForm.amount)*100)/100;
+    if(!ASSESSMENT_CATEGORIES.some(c=>c.id===assessmentForm.category)||
+       !validPeriod(assessmentForm.tax_period)||!Number.isFinite(amount)||amount<=0||
+       (assessmentForm.due_date&&!/^\d{4}-\d{2}-\d{2}$/.test(assessmentForm.due_date))){
+      setAssessmentMessage('Verifica la categoría patronal, período, importe y fecha de vencimiento.');return;
+    }
+    if(!window.confirm((editingAssessmentId?'Actualizar':'Registrar')+' obligación patronal de '+fmt(amount)+
+      ' ('+catLabel(assessmentForm.category)+', '+assessmentForm.tax_period+')?'))return;
+    setAssessmentBusy(true);setAssessmentMessage('');
+    try{
+      const payload={category:assessmentForm.category,tax_period:assessmentForm.tax_period,amount,
+        due_date:assessmentForm.due_date||null,
+        reference:assessmentForm.reference.trim().slice(0,250),
+        notes:assessmentForm.notes.trim().slice(0,1000)};
+      if(editingAssessmentId){
+        const {data,error}=await supabase.from('retention_assessments').update(payload)
+          .eq('client_id',clientId).eq('id',editingAssessmentId).select('*').single();
+        if(error)throw error;
+        setAssessments(prev=>prev.map(a=>a.id===editingAssessmentId?{...data,amount:Number(data.amount)}:a));
+      }else{
+        const {data:{user},error:authError}=await supabase.auth.getUser();
+        if(authError||!user?.id)throw new Error('La sesión expiró. Inicia sesión nuevamente.');
+        const {data,error}=await supabase.from('retention_assessments')
+          .insert({...payload,client_id:clientId,created_by:user.id}).select('*').single();
+        if(error)throw error;
+        setAssessments(prev=>[{...data,amount:Number(data.amount)},...prev]);
+      }
+      setAssessmentForm(blankAssessment());setEditingAssessmentId('');
+      setAssessmentMessage('Obligación guardada. El balance se recalculó sin modificar los Journal Entries.');
+    }catch(error){setAssessmentMessage('No se guardó: '+(error?.message||String(error)));}
+    finally{setAssessmentBusy(false);}
+  }
+  async function deleteAssessment(row){
+    if(assessmentBusy||!window.confirm('¿Eliminar la obligación de '+fmt(row.amount)+' para '+
+      catLabel(row.category)+' ('+row.tax_period+')? Los pagos registrados no se eliminarán.'))return;
+    setAssessmentBusy(true);setAssessmentMessage('');
+    try{
+      const {data,error}=await supabase.from('retention_assessments').delete()
+        .eq('client_id',clientId).eq('id',row.id).select('id');
+      if(error)throw error;
+      if(!data?.length)throw new Error('No se eliminó ningún registro; verifica permisos.');
+      setAssessments(prev=>prev.filter(a=>a.id!==row.id));
+      if(editingAssessmentId===row.id)resetAssessment();
+      setAssessmentMessage('Obligación eliminada. Pagos conservados y saldo recalculado.');
+    }catch(error){setAssessmentMessage('Error: '+error.message);}
+    finally{setAssessmentBusy(false);}
+  }
+
   function exportCSV(){
     const quote=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
     const columns=[['Período','Categoría','Retenido','Pagado','Pendiente','A favor'],
