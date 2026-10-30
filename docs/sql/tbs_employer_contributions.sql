@@ -17,6 +17,7 @@ create table if not exists public.retention_assessments (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references public.clients(id) on delete cascade,
   category text not null check (category in (
+    'employer_ss','employer_medicare','employer_sinot',
     'employer_unemployment_pr','employer_unemployment_futa',
     'employer_unemployment_special','employer_cfse'
   )),
@@ -48,4 +49,4 @@ create policy retention_assessments_staff_delete on public.retention_assessments
 revoke all on public.retention_assessments from anon;
 grant select,insert,update,delete on public.retention_assessments to authenticated;
 comment on table public.retention_assessments is
-  'Staff-entered PR/FUTA unemployment and CFSE obligations by reference period, no GL postings.';
+  'Staff-entered agency obligations and official employer FICA/SINOT overrides by period, no GL postings.';
