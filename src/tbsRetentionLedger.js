@@ -1,0 +1,66 @@
+// Read-only withholding obligations. This ledger tracks remittances and does
+// not post accounting entries. Finalized records only. All money in cents.
+export const RETENTION_CATEGORIES = Object.freeze([
+ {id:'services_contractor',label:'Services · Contractor retention',group:'Services'},
+ {id:'services_employee',label:'Services · Employee retention (combined)',group:'Services'},
+ {id:'payroll_pr',label:'Payroll · PR income tax',group:'Payroll'},
+ {id:'payroll_federal',label:'Payroll · Federal income tax',group:'Payroll'},
+ {id:'payroll_ss',label:'Payroll · Social Security withheld',group:'Payroll'},
+ {id:'payroll_medicare',label:'Payroll · Medicare withheld',group:'Payroll'},
+ {id:'payroll_sinot',label:'Payroll · SINOT withheld',group:'Payroll'},
+]);
+export const cents = n => Math.round((Number(n)||0)*100);
+export const asMoney = centsValue => Math.round(Number(centsValue)||0)/100;
+export const isRetentionCategory = id => RETENTION_CATEGORIES.some(x => x.id===id);
+export const validPeriod = s => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(s||''));
+const month = date => typeof date==='string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0,7) : '';
+const add = (map,cat,period,value) => {
+ if(!validPeriod(period) || !isRetentionCategory(cat) || !Number.isFinite(Number(value))) return;
+ const key=cat+'|'+period;
+ map.set(key,(map.get(key)||0)+cents(value));
+};
+export function retentionObligations({services=[],payrollRuns=[],payrollLines=[]}={}) {
+ const map=new Map();
+ for(const s of services) {
+   if(s.status !== 'FINAL') continue;
+   const type=s.resourceType || s.resource_type || 'service_provider';
+   const category=type==='employee' ? 'services_employee':'services_contractor';
+   add(map,category,month(s.date || s.service_date),s.retentionAmount ?? s.retention_amount);
+ }
+ const finalized=new Map(payrollRuns.filter(r=>r.status==='FINAL').map(r=>[r.id,month(r.payDate || r.pay_date)]));
+ for(const l of payrollLines){
+   const period=finalized.get(l.payrollRunId || l.payroll_run_id);
+   if(!period)continue;
+   add(map,'payroll_pr',period,l.prIncomeTax ?? l.pr_income_tax);
+   add(map,'payroll_federal',period,l.federalIncomeTax ?? l.federal_income_tax);
+   add(map,'payroll_ss',period,l.socialSecurity ?? l.social_security);
+   add(map,'payroll_medicare',period,l.medicare);
+   add(map,'payroll_sinot',period,l.sinot);
+ }
+ return map;
+}
+export function retentionBalances(input,payments=[]) {
+ const accrued=retentionObligations(input);
+ const paid=new Map();
+ for(const p of payments) {
+   if(!isRetentionCategory(p.category) || !validPeriod(p.tax_period))continue;
+   add(paid,p.category,p.tax_period,p.amount);
+ }
+ const keys=new Set([...accrued.keys(),...paid.keys()]);
+ const byCategory=new Map(RETENTION_CATEGORIES.map(cat=>[cat.id,{...cat,accrued:0,paid:0,pending:0,overpaid:0}]));
+ const rows=Array.from(keys).map(key=>{
+   const [category,period]=key.split('|');
+   const amount=accrued.get(key)||0,pay=paid.get(key)||0;
+   const result={category,period,accrued:asMoney(amount),paid:asMoney(pay),
+     pending:asMoney(Math.max(0,amount-pay)),overpaid:asMoney(Math.max(0,pay-amount))};
+   const bucket=byCategory.get(category);
+   if(bucket){
+     bucket.accrued+=amount; bucket.paid+=pay; bucket.pending+=Math.max(0,amount-pay); bucket.overpaid+=Math.max(0,pay-amount);
+   }
+   return result;
+ }).sort((a,b)=>b.period.localeCompare(a.period)||a.category.localeCompare(b.category));
+ return {rows,categories:Array.from(byCategory.values()).map(x=>({
+   ...x,accrued:asMoney(x.accrued),paid:asMoney(x.paid),
+   pending:asMoney(x.pending),overpaid:asMoney(x.overpaid),
+ }))};
+}

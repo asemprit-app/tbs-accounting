@@ -10,6 +10,7 @@ import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
 import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
+import TBSRetentionsView from './TBSRetentionsView.jsx';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
 import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
@@ -1700,6 +1701,10 @@ async function fetchAllRows(table, clientId, orderCol) {
         {!portalLimited && tab === 'products' && (
           <ProductsView products={products} setProducts={setProducts} />
         )}
+        {isStaff && tab === 'retentions' && (
+          <TBSRetentionsView clientId={clientId} businessName={businessName} services={services}
+            payrollRuns={payrollRuns} payrollLines={payrollLines} />
+        )}
         {tab === 'services' && (
           <ServicesView clientId={selectedClientId} services={services} setServices={setServices} employees={employees}
             businessName={businessName} logoDataUri={logoDataUri} sendingEmail={sendingEmail} replyToEmail={replyToEmail}
@@ -1849,6 +1854,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     { id: 'reconciliation', label: 'Reconciliation', icon: Landmark },
     { id: 'payroll', label: 'Payroll', icon: Wallet },
     { id: 'services', label: 'Services', icon: DollarSign },
+    ...(isStaff ? [{ id: 'retentions', label: 'Retenciones / Retentions', icon: ListChecks }] : []),
     ...(isStaff ? [
       { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
       { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle },
