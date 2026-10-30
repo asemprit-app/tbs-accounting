@@ -6,14 +6,14 @@ const td={borderBottom:'1px solid #E7EBF0',padding:'9px 7px',whiteSpace:'nowrap'
 const input={border:'1px solid #CBD5E1',borderRadius:5,padding:'5px 6px',fontSize:11,background:'#fff'};
 const groupColor={fica:'#EAF2FC',sinot:'#EBF6F3',pr:'#FFF5E8',services:'#F1EEFB',other:'#F2F4F6',gross:'#EFF2F7'};
 const title={fontSize:17,fontWeight:700,color:'#1F2937'};
-export default function TBSRetentionMatrix({services,payrollRuns,payrollLines,assessments,payments,onRecordPayment}){
+export default function TBSRetentionMatrix({services,payrollRuns,payrollLines,assessments,payments,manualEntries=[],onRecordPayment}){
  const [periodGrouping,setPeriodGrouping]=useState('month');
  const [selectedYear,setSelectedYear]=useState('all');
  const [visibleGroups,setVisibleGroups]=useState(['fica','sinot','pr','services','other']);
  const [filters,setFilters]=useState({});
  const [sort,setSort]=useState({key:'period',asc:false});
- const rows=useMemo(()=>buildRetentionMatrix({services,payrollRuns,payrollLines,assessments},payments,periodGrouping),
-   [services,payrollRuns,payrollLines,assessments,payments,periodGrouping]);
+ const rows=useMemo(()=>buildRetentionMatrix({services,payrollRuns,payrollLines,assessments,manualEntries},payments,periodGrouping),
+   [services,payrollRuns,payrollLines,assessments,manualEntries,payments,periodGrouping]);
  const years=useMemo(()=>[...new Set(rows.map(row=>row.period.slice(0,4)))].sort().reverse(),[rows]);
  const displayedRows=useMemo(()=>{
    const subset=filterMatrixRows(rows,filters).filter(r=>selectedYear==='all'||r.period.startsWith(selectedYear));
