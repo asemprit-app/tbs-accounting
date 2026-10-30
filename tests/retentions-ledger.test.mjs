@@ -12,7 +12,7 @@ const input={
   {id:'r2',payDate:'2026-10-30',status:'DRAFT'}
  ],
  payrollLines:[
-  {id:'l1',payrollRunId:'r1',prIncomeTax:80.01,federalIncomeTax:5,socialSecurity:62,medicare:14.5,sinot:2.1},
+  {id:'l1',payrollRunId:'r1',gross:1000,prIncomeTax:80.01,federalIncomeTax:5,socialSecurity:62,medicare:14.5,sinot:2.1},
   {id:'l2',payrollRunId:'r2',prIncomeTax:1000,socialSecurity:999},
  ]};
 test('only finalized pay dates generate obligations with separate tax categories',()=>{
