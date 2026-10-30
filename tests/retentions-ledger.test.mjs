@@ -24,7 +24,10 @@ test('only finalized pay dates generate obligations with separate tax categories
  assert.equal(m.get('payroll_ss|2026-10'),6200);
  assert.equal(m.get('payroll_medicare|2026-10'),1450);
  assert.equal(m.get('payroll_sinot|2026-10'),210);
- assert.equal(m.size,7);
+ assert.equal(m.get('employer_ss|2026-10'),6200);
+ assert.equal(m.get('employer_medicare|2026-10'),1450);
+ assert.equal(m.get('employer_sinot|2026-10'),210);
+ assert.equal(m.size,10);
 });
 test('payments allocate to specific tax month, partial payments preserve payable',()=>{
  const report=retentionBalances(input,[
@@ -47,4 +50,16 @@ test('payments do not become new expenses and no employee net pay is modified',(
  retentionBalances(input,[{category:'payroll_ss',tax_period:'2026-10',amount:10}]);
  assert.equal(JSON.stringify(input),original);
  assert.equal(isRetentionCategory('made_up_category'),false);
+});
+
+test('unemployment/CFSE depend on explicit assessments, never invent rates from gross pay',()=>{
+ const assessment={...input,assessments:[
+   {category:'employer_unemployment_pr',tax_period:'2026-09',amount:135.20},
+   {category:'employer_cfse',tax_period:'2026-07',amount:950},
+ ]};
+ const report=retentionBalances(assessment,[{category:'employer_cfse',tax_period:'2026-07',amount:300}]);
+ assert.equal(report.rows.find(r=>r.category==='employer_unemployment_pr').pending,135.20);
+ const cfse=report.rows.find(r=>r.category==='employer_cfse');
+ assert.equal(cfse.accrued,950);assert.equal(cfse.pending,650);
+ assert.ok(!report.rows.some(r=>r.category==='employer_unemployment_futa'));
 });
