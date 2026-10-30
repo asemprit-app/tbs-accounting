@@ -34,8 +34,8 @@ export default function TBSRetentionMatrix({services,payrollRuns,payrollLines,as
    const content=[['Período',...columns.map(c=>c.group.toUpperCase()+' · '+c.label)],
      ...displayedRows.map(r=>cols.map(key=>r[key]??0)),
      ['Totales visibles',...columns.map(c=>sum(c.key))]]
-     .map(row=>row.map(quote).join(',')).join('\\r\\n');
-   const file=new Blob(['\\uFEFF'+content],{type:'text/csv;charset=utf-8'});
+     .map(row=>row.map(quote).join(',')).join('\r\n');
+   const file=new Blob(['\uFEFF'+content],{type:'text/csv;charset=utf-8'});
    const url=URL.createObjectURL(file);
    const a=document.createElement('a');
    a.href=url;a.download='Control_Retenciones_'+periodGrouping+'.csv';
