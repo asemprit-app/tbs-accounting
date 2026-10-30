@@ -89,3 +89,39 @@ export function retentionBalances(input,payments=[]) {
    pending:asMoney(x.pending),overpaid:asMoney(x.overpaid),
  }))};
 }
+
+export function payrollGrossByPeriod(payrollRuns=[],payrollLines=[],grouping='month') {
+  const validRuns=new Map((payrollRuns||[]).filter(r=>r.status==='FINAL')
+    .map(r=>[r.id,{date:r.payDate||r.pay_date,period:month(r.payDate||r.pay_date)}]));
+  const result=new Map();
+  for(const l of payrollLines||[]){
+    const run=validRuns.get(l.payrollRunId||l.payroll_run_id);
+    if(!run||!validPeriod(run.period))continue;
+    const key=grouping==='quarter'
+      ? run.period.slice(0,4)+'-Q'+Math.ceil(Number(run.period.slice(5,7))/3)
+      : run.period;
+    result.set(key,(result.get(key)||0)+cents(l.gross));
+  }
+  return new Map(Array.from(result,([period,minor])=>[period,asMoney(minor)]));
+}
+export function retentionPivot(balances,grossMonths,grouping='month') {
+  const totals=new Map();
+  const periodKey=month=>grouping==='quarter'
+    ? month.slice(0,4)+'-Q'+Math.ceil(Number(month.slice(5,7))/3) : month;
+  for(const row of balances.rows){
+    const key=periodKey(row.period);
+    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0};
+    const employer=RETENTION_CATEGORIES.find(c=>c.id===row.category)?.group==='Patronal';
+    x[employer?'employer':'retained']+=cents(row.accrued);
+    x.paid+=cents(row.paid);x.pending+=cents(row.pending);x.overpaid+=cents(row.overpaid);
+    totals.set(key,x);
+  }
+  for(const [month,amount] of grossMonths){
+    const key=periodKey(month);
+    const x=totals.get(key)||{period:key,gross:0,retained:0,employer:0,paid:0,pending:0,overpaid:0};
+    x.gross+=cents(amount);totals.set(key,x);
+  }
+  return Array.from(totals.values()).map(row=>Object.fromEntries(
+    Object.entries(row).map(([k,v])=>[k,k==='period'?v:asMoney(v)])))
+    .sort((a,b)=>b.period.localeCompare(a.period));
+}
