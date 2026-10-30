@@ -41,7 +41,7 @@ test('combined payment offsets both FICA employee and employer but does not doub
  {tax_period:'2026-10',category:'services_remittance',amount:30},
  {tax_period:'2026-10',category:'employer_cfse',amount:50},
  ];
- const r=buildRetentionMatrix(input,payments)[0];
+ const r=buildRetentionMatrix(input,payments).find(row=>row.period==='2026-10');
  assert.equal(r.fica_paid,253); assert.equal(r.fica_pending,53);
  assert.equal(r.sinot_paid,8); assert.equal(r.sinot_pending,5);
  assert.equal(r.pr_paid,90); assert.equal(r.pr_pending,10);
