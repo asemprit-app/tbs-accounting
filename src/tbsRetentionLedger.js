@@ -8,10 +8,18 @@ export const RETENTION_CATEGORIES = Object.freeze([
  {id:'payroll_ss',label:'Payroll · Social Security withheld',group:'Payroll'},
  {id:'payroll_medicare',label:'Payroll · Medicare withheld',group:'Payroll'},
  {id:'payroll_sinot',label:'Payroll · SINOT withheld',group:'Payroll'},
+ {id:'employer_ss',label:'Patronal · Seguro Social (FICA)',group:'Patronal',calculation:'payroll'},
+ {id:'employer_medicare',label:'Patronal · Medicare (FICA)',group:'Patronal',calculation:'payroll'},
+ {id:'employer_sinot',label:'Patronal · SINOT',group:'Patronal',calculation:'payroll'},
+ {id:'employer_unemployment_pr',label:'Patronal · Desempleo PR (SUTA)',group:'Patronal',calculation:'assessment'},
+ {id:'employer_unemployment_futa',label:'Patronal · Desempleo federal (FUTA)',group:'Patronal',calculation:'assessment'},
+ {id:'employer_unemployment_special',label:'Patronal · Aportación especial DTRH',group:'Patronal',calculation:'assessment'},
+ {id:'employer_cfse',label:'Patronal · CFSE / Fondo del Seguro del Estado',group:'Patronal',calculation:'assessment'},
 ]);
 export const cents = n => Math.round((Number(n)||0)*100);
 export const asMoney = centsValue => Math.round(Number(centsValue)||0)/100;
 export const isRetentionCategory = id => RETENTION_CATEGORIES.some(x => x.id===id);
+export const ASSESSMENT_CATEGORIES = RETENTION_CATEGORIES.filter(x=>x.calculation==='assessment');
 export const validPeriod = s => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(s||''));
 const month = date => typeof date==='string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(0,7) : '';
 const add = (map,cat,period,value) => {
@@ -19,7 +27,7 @@ const add = (map,cat,period,value) => {
  const key=cat+'|'+period;
  map.set(key,(map.get(key)||0)+cents(value));
 };
-export function retentionObligations({services=[],payrollRuns=[],payrollLines=[]}={}) {
+export function retentionObligations({services=[],payrollRuns=[],payrollLines=[],assessments=[]}={}) {
  const map=new Map();
  for(const s of services) {
    if(s.status !== 'FINAL') continue;
@@ -36,6 +44,23 @@ export function retentionObligations({services=[],payrollRuns=[],payrollLines=[]
    add(map,'payroll_ss',period,l.socialSecurity ?? l.social_security);
    add(map,'payroll_medicare',period,l.medicare);
    add(map,'payroll_sinot',period,l.sinot);
+   // Keep the employer share separate from employee withholding.
+   // These amounts mirror Payroll's current employer matching method.
+   add(map,'employer_ss',period,l.socialSecurity ?? l.social_security);
+   // Additional Medicare Tax (0.9%) has no employer matching component.
+   // Use only the standard employee-withheld Medicare share up to 1.45% of
+   // gross for a conservative employer matching estimate.
+   const withheldMedicare=Number(l.medicare)||0;
+   const standardMedicare=Math.round((Number(l.gross)||0)*0.0145*100)/100;
+   add(map,'employer_medicare',period,Math.max(0,Math.min(withheldMedicare,standardMedicare)));
+   // Payroll Journal Entries currently assume employer SINOT matches the
+   // employee SINOT. This is a provisional control, verify DTRH assessment.
+   add(map,'employer_sinot',period,l.sinot);
+ }
+ for(const a of assessments) {
+   if(!ASSESSMENT_CATEGORIES.some(c=>c.id===a.category))continue;
+   const value=Number(a.amount);
+   if(value>0)add(map,a.category,a.tax_period,value);
  }
  return map;
 }
