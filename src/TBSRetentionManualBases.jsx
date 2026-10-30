@@ -49,7 +49,7 @@ export default function TBSRetentionManualBases({
 
   function edit(row){
     setExpanded(true);setEditId(row.id);
-    setForm({...empty(),...row,...Object.fromEntries(amounts.map(k=>[k:String(row[k]||'')]))});
+    setForm({...empty(),...row,...Object.fromEntries(amounts.map(k=>[k,String(row[k]||'')]))});
     setMessage('');
     document.getElementById('partial-retention-base')?.scrollIntoView({behavior:'smooth'});
   }
