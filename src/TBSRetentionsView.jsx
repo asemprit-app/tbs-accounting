@@ -2,6 +2,7 @@ import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
 import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,FICA_DETAIL_GROUPS,FICA_ROLLUP_LABELS,retentionDisplayRows,retentionBalances,validPeriod,asMoney,cents,payrollGrossByPeriod,retentionPivot} from './tbsRetentionLedger.js';
 import TBSRetentionMatrix from './TBSRetentionMatrix.jsx';
+import TBSRetentionManualBases from './TBSRetentionManualBases.jsx';
 import {buildRetentionMatrix,PAYMENT_FORM_GROUPS,PAYMENT_GROUPS} from './tbsRetentionControlMatrix.js';
 
 const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
@@ -17,6 +18,7 @@ const catLabel=id=>FICA_ROLLUP_LABELS[id]||RETENTION_CATEGORIES.find(c=>c.id===i
 
 export default function RetentionsView({clientId,services,payrollRuns,payrollLines,businessName}) {
   const [payments,setPayments]=useState([]);
+  const [manualEntries,setManualEntries]=useState([]);
   const [assessments,setAssessments]=useState([]);
   const [assessmentForm,setAssessmentForm]=useState(blankAssessment);
   const [editingAssessmentId,setEditingAssessmentId]=useState('');
@@ -35,26 +37,30 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
 
   useEffect(()=>{
     let active=true;
-    setLoadState('loading');setPayments([]);setAssessments([]);setLoadMessage('');setMessage('');
+    setLoadState('loading');setPayments([]);setAssessments([]);setManualEntries([]);setLoadMessage('');setMessage('');
     setEditingId('');setForm(blank());setEditingAssessmentId('');setAssessmentForm(blankAssessment());
     setAssessmentMessage('');setPeriodFilter('all');setGroupFilter('all');
     (async()=>{
-      const [paymentResult,assessmentResult]=await Promise.all([
+      const [paymentResult,assessmentResult,manualResult]=await Promise.all([
         supabase.from('retention_payments')
           .select('id,client_id,category,tax_period,paid_date,amount,reference,notes,created_at')
           .eq('client_id',clientId).order('paid_date',{ascending:false}),
         supabase.from('retention_assessments')
           .select('id,client_id,category,tax_period,amount,due_date,reference,notes,created_at')
-          .eq('client_id',clientId).order('tax_period',{ascending:false})
+          .eq('client_id',clientId).order('tax_period',{ascending:false}),
+        supabase.from('tbs_retention_manual_bases')
+          .select('*').eq('client_id',clientId).order('created_at',{ascending:false})
       ]);
       if(!active)return;
-      if(paymentResult.error||assessmentResult.error){
+      if(paymentResult.error||assessmentResult.error||manualResult.error){
         setLoadState('error');
-        setLoadMessage(paymentResult.error?.message||assessmentResult.error?.message||'Could not load employer obligations');
+        setLoadMessage(paymentResult.error?.message||assessmentResult.error?.message||
+          manualResult.error?.message||'Could not load employer obligations');
         return;
       }
       setPayments((paymentResult.data||[]).map(p=>({...p,amount:Number(p.amount)||0})));
       setAssessments((assessmentResult.data||[]).map(a=>({...a,amount:Number(a.amount)||0})));
+      setManualEntries(manualResult.data||[]);
       setLoadState('ready');
     })();
     return ()=>{active=false;};
@@ -64,8 +70,9 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     [services,payrollRuns,payrollLines,assessments,payments]);
 
   const months=useMemo(()=>Array.from(new Set([
-    ...summary.rows.map(r=>r.period),...payments.map(p=>p.tax_period),...assessments.map(a=>a.tax_period)
-  ])).sort().reverse(),[summary.rows,payments,assessments]);
+    ...summary.rows.map(r=>r.period),...payments.map(p=>p.tax_period),
+    ...assessments.map(a=>a.tax_period),...manualEntries.map(e=>e.tax_period)
+  ])).sort().reverse(),[summary.rows,payments,assessments,manualEntries]);
   const fits=(cat,period)=>(groupFilter==='all'||
     (groupFilter==='payroll_fica'&&FICA_DETAIL_GROUPS.payroll_fica.includes(cat))||
     (groupFilter==='employer_fica'&&FICA_DETAIL_GROUPS.employer_fica.includes(cat))||
@@ -91,8 +98,8 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         r.period===periodFilter.slice(0,4)+'-Q'+Math.ceil(Number(periodFilter.slice(5))/3);
     });
   const monthlyMatrix=useMemo(()=>buildRetentionMatrix(
-    {services,payrollRuns,payrollLines,assessments},payments,'month'
-  ),[services,payrollRuns,payrollLines,assessments,payments]);
+    {services,payrollRuns,payrollLines,assessments,manualEntries},payments,'month'
+  ),[services,payrollRuns,payrollLines,assessments,manualEntries,payments]);
   const cardRows=monthlyMatrix.filter(r=>periodFilter==='all'||r.period===periodFilter);
   const groupNames=['fica','sinot','pr','services','other'];
   const totals=cardRows.reduce((acc,row)=>{
@@ -112,6 +119,12 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     sum+cents(r.fica_employee)+cents(r.fica_employer),0));
   const total=(type)=>fmt(asMoney(totals[type]));
   const change=(name,val)=>setForm(f=>({...f,[name]:val}));
+  function prepareManualPayment(payment){
+    setEditingId('');
+    setMessage('');
+    setForm(prev=>({...prev,...payment,paid_date:getDate()}));
+    document.getElementById('retention-payment-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
   function selectPaymentPeriod(period){
     setEditingId('');
     setMessage('');
@@ -144,7 +157,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     const group=Object.entries(PAYMENT_GROUPS)
       .find(([,cats])=>cats.includes(form.category))?.[0];
     const period=buildRetentionMatrix(
-      {services,payrollRuns,payrollLines,assessments},otherPayments,'month'
+      {services,payrollRuns,payrollLines,assessments,manualEntries},otherPayments,'month'
     ).find(r=>r.period===form.tax_period);
     const available=period&&group?period[group+'_pending']:0;
     if(amount>available+0.009){
@@ -330,7 +343,10 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       </div>
       <TBSRetentionMatrix services={services} payrollRuns={payrollRuns}
         payrollLines={payrollLines} assessments={assessments} payments={payments}
-        onRecordPayment={selectPaymentPeriod} />
+        manualEntries={manualEntries} onRecordPayment={selectPaymentPeriod} />
+      <TBSRetentionManualBases clientId={clientId} entries={manualEntries}
+        onChange={setManualEntries} payrollRuns={payrollRuns}
+        onPreparePayment={prepareManualPayment} />
       <details style={{...surface}}>
         <summary style={{fontWeight:700,fontSize:15,cursor:'pointer'}}>Detalle para auditoría: retenciones y pagos originales</summary>
         <p style={{fontSize:12,color:'#64748B',lineHeight:1.5}}>
