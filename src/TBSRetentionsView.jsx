@@ -90,16 +90,26 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       return pivotGrouping==='month' ? r.period===periodFilter :
         r.period===periodFilter.slice(0,4)+'-Q'+Math.ceil(Number(periodFilter.slice(5))/3);
     });
-  const totals=summaryRows.reduce((a,r)=>({
-    accrued:a.accrued+cents(r.accrued),paid:a.paid+cents(r.paid),
-    pending:a.pending+cents(r.pending),overpaid:a.overpaid+cents(r.overpaid),
-  }),{accrued:0,paid:0,pending:0,overpaid:0});
-  const ficaShareTotals=retentionDisplayRows(rawSummaryRows);
-  const ficaWithheld=ficaShareTotals.filter(r=>r.category==='payroll_fica')
-    .reduce((sum,r)=>sum+cents(r.accrued),0);
-  const ficaEmployer=ficaShareTotals.filter(r=>r.category==='employer_fica')
-    .reduce((sum,r)=>sum+cents(r.accrued),0);
-  const ficaTotal=asMoney(ficaWithheld+ficaEmployer);
+  const monthlyMatrix=useMemo(()=>buildRetentionMatrix(
+    {services,payrollRuns,payrollLines,assessments},payments,'month'
+  ),[services,payrollRuns,payrollLines,assessments,payments]);
+  const cardRows=monthlyMatrix.filter(r=>periodFilter==='all'||r.period===periodFilter);
+  const groupNames=['fica','sinot','pr','services','other'];
+  const totals=cardRows.reduce((acc,row)=>{
+    for(const group of groupNames){
+      const obligation=group==='fica'||group==='sinot'
+        ? row[group+'_employee']+row[group+'_employer']
+        : row[group+'_accrued'];
+      acc.accrued+=cents(obligation);
+      acc.paid+=cents(row[group+'_paid']);
+      acc.pending+=cents(row[group+'_pending']);
+    }
+    acc.overpaid+=cents(row.overpaid);
+    acc.gross+=cents(row.gross);
+    return acc;
+  },{accrued:0,paid:0,pending:0,overpaid:0,gross:0});
+  const ficaTotal=asMoney(cardRows.reduce((sum,r)=>
+    sum+cents(r.fica_employee)+cents(r.fica_employer),0));
   const total=(type)=>fmt(asMoney(totals[type]));
   const change=(name,val)=>setForm(f=>({...f,[name]:val}));
   function selectPaymentPeriod(period){
@@ -286,6 +296,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     </div>}
     {loadState==='ready' && <>
       <div style={{...surface}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#475569',marginBottom:10}}>Filtros para historial y registros (matriz: filtros propios por columna)</div>
         <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'end',justifyContent:'space-between'}}>
           <div><label style={label}>Período contributivo</label>
             <select style={field} value={periodFilter} onChange={e=>setPeriodFilter(e.target.value)}>
@@ -320,31 +331,33 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       <TBSRetentionMatrix services={services} payrollRuns={payrollRuns}
         payrollLines={payrollLines} assessments={assessments} payments={payments}
         onRecordPayment={selectPaymentPeriod} />
-      <div style={surface}>
-        <h3 style={{margin:'0 0 12px',fontSize:17}}>Balances por período y obligación</h3>
-        <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:13}}>
+      <details style={{...surface}}>
+        <summary style={{fontWeight:700,fontSize:15,cursor:'pointer'}}>Detalle para auditoría: retenciones y pagos originales</summary>
+        <p style={{fontSize:12,color:'#64748B',lineHeight:1.5}}>
+          Muestra las cuentas individuales de Seguro Social, Medicare, SINOT y otros conceptos.
+          Los pagos combinados se descuentan en la matriz superior; este detalle no debe usarse
+          para determinar el saldo consolidado de FICA o SINOT.
+        </p>
+        <div style={{overflowX:'auto'}}><table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
           <thead><tr style={{background:'#F5F7FA'}}>
-            {['Período','Concepto','Obligación','Pagado','Pendiente','A favor','Estado'].map(x=>
+            {['Período','Concepto original','Obligación','Pago registrado en esa categoría'].map(x=>
               <th key={x} style={cell}>{x}</th>)}
           </tr></thead>
           <tbody>{summaryRows.map(r=><tr key={r.category+'|'+r.period}>
             <td style={cell}>{r.period}</td>
             <td style={cell}>{catLabel(r.category)}
-              {r.isFicaRollup&&<details style={{marginTop:4,fontSize:11,color:'#64748B'}}>
+              {r.isFicaRollup&&<details style={{fontSize:11,color:'#64748B',marginTop:4}}>
                 <summary>Ver desglose de Seguro Social y Medicare</summary>
-                {r.components.map((part,i)=><div key={i} style={{margin:'4px 0 0 4px'}}>
+                {r.components.map((part,i)=><div key={i}>
                   {catLabel(part.category)}: {fmt(part.accrued)} · Pagado {fmt(part.paid)}
                 </div>)}
               </details>}
             </td>
-            {['accrued','paid','pending','overpaid'].map(key=>
-              <td key={key} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{fmt(r[key])}</td>)}
-            <td style={cell}><strong style={{color:r.pending>0.009?'#A16207':r.overpaid>0.009?'#475569':'#0F6E56'}}>
-              {r.pending>0.009?'Pendiente':r.overpaid>0.009?'A favor':'Pagado'}</strong></td>
+            <td style={{...cell,textAlign:'right'}}>{fmt(r.accrued)}</td>
+            <td style={{...cell,textAlign:'right'}}>{fmt(r.paid)}</td>
           </tr>)}</tbody>
         </table></div>
-        {summaryRows.length===0 && <p style={{color:'#64748B',fontSize:13}}>No hay retenciones ni pagos para los filtros seleccionados.</p>}
-      </div>
+      </details>
       <div style={surface}>
         <h3 style={{margin:'0 0 8px',fontSize:17}}>
           {editingAssessmentId?'Editar obligación determinada':'Registrar obligación / importe patronal confirmado'}
