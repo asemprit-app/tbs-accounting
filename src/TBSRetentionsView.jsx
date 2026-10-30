@@ -285,11 +285,19 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     const assessed=[['Período','Obligación patronal','Total determinado','Vencimiento','Referencia','Notas'],
       ...visibleAssessments.map(a=>[a.tax_period,catLabel(a.category),Number(a.amount).toFixed(2),
         a.due_date||'',a.reference,a.notes])];
+    const bases=[['Período','Modo','Gross Pay','FICA Employee','FICA Employer',
+      'SINOT Employee','SINOT Employer','PR Tax','Retenciones Services',
+      'FICA previsto','SINOT previsto','PR previsto','Services previsto','Referencia','Notas'],
+      ...manualEntries.map(e=>[e.tax_period,e.mode,...[
+        'gross_pay','fica_employee','fica_employer','sinot_employee','sinot_employer','pr_tax',
+        'services_retention','planned_fica','planned_sinot','planned_pr','planned_services'
+      ].map(k=>Number(e[k]||0).toFixed(2)),e.reference||'',e.notes||''])];
     const csv=[...pivot.map(row=>row.map(quote).join(',')),'',
       ...columns.map(row=>row.map(quote).join(',')),'',
       ...ficaBreakdown.map(row=>row.map(quote).join(',')),'',
       ...detail.map(row=>row.map(quote).join(',')),'',
-      ...assessed.map(row=>row.map(quote).join(','))].join('\r\n');
+      ...assessed.map(row=>row.map(quote).join(',')),'',
+      ...bases.map(row=>row.map(quote).join(','))].join('\r\n');
     const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;
     a.download='Retenciones_'+(businessName||'Client').replace(/[^a-z0-9_-]/gi,'_')+'.csv';
@@ -326,7 +334,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
               <option value="employer_fica">FICA patronal (Seguro Social + Medicare)</option>
               {RETENTION_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
             </select></div>
-          <button style={btn} onClick={exportCSV}>Exportar CSV</button>
+          <button style={btn} onClick={exportCSV}>Exportar historial + bases CSV</button>
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10,marginBottom:16}}>
