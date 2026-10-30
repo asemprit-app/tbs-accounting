@@ -44,3 +44,32 @@ export function reportPrintLandscape(header) {
   // Five-column breakdowns remain portrait; six or more need landscape.
   return (header?.length||0)>=6;
 }
+
+const sectionRow = label => ({kind:'section',cells:['',label]});
+export function presentFinancialReportRows(reportKey, rows, breakdown=false) {
+  if(breakdown)return (rows||[]).map(cells=>({kind:reportPrintRowStyle(reportKey,cells),cells}));
+  const output=[];
+  if(reportKey==='pnl')output.push(sectionRow('Sales'));
+  if(reportKey==='balance_sheet')output.push(sectionRow('Assets'));
+  for(const cells of rows||[]) {
+    const kind=reportPrintRowStyle(reportKey,cells);
+    output.push({cells,kind});
+    const label=String(cells?.[1]||'');
+    if(reportKey==='pnl') {
+      if(label==='Total Sales') {
+        const hasCogs=(rows||[]).some(row=>row[1]==='Total COGS');
+        output.push(sectionRow(hasCogs?'Cost of Goods Sold':'Expenses'));
+      } else if(label==='Gross Profit')output.push(sectionRow('Expenses'));
+    }
+    if(reportKey==='balance_sheet'){
+      if(label==='Total Assets')output.push(sectionRow('Liabilities'));
+      if(label==='Total Liabilities')output.push(sectionRow('Equity'));
+    }
+    if(reportKey==='cash_flow'){
+      if(label==='OPERATING ACTIVITIES')output.push(sectionRow('Sales'));
+      if(label==='Total Sales')output.push(sectionRow('Purchases'));
+      if(label==='Total Purchases')output.push(sectionRow('Payroll'));
+    }
+  }
+  return output;
+}
