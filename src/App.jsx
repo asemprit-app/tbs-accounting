@@ -2,6 +2,7 @@ import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
 import { inferCreditCardSourceSigns } from './tbsCreditCardStatementSigns.js';
+import { financialReportMoney, reportPrintRowStyle, reportPrintCell, reportPrintNumeric, reportPrintLandscape } from './tbsFinancialReportPresentation.js';
 import { createPortal } from 'react-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Check, Printer, X, AlertCircle, BookOpen, ListChecks, Landmark, Wallet, Package, DollarSign } from 'lucide-react';
@@ -6491,7 +6492,6 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       const rows = [
         ...revenueRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ...(invoiceRevenueInPeriod !== 0 ? [['', 'Invoicing (Service Revenue)', invoiceRevenueInPeriod]] : []),
-        ...(invoiceReimbursableInPeriod !== 0 ? [['', 'Reimbursable Expenses (excluded from income)', invoiceReimbursableInPeriod]] : []),
         ['', 'Total Sales', totalRevenue],
         ...(cogsRows.length > 0 ? [
           ...cogsRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
@@ -6512,8 +6512,9 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ...liabilityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
         ['', 'Total Liabilities', totalLiabilities],
         ...equityRows.filter(r => r.value !== 0).map(r => [r.code, r.name, r.value]),
-        ['', 'Accumulated Income', accumulatedIncome],
+        ['', 'Accumulated income through ending date', accumulatedIncome],
         ['', 'Total Equity', totalEquity],
+        ['', 'Liabilities + Equity', totalLiabilities + totalEquity],
         ['', 'Balance Check (Assets - Liabilities - Equity)', balanceSheetDifference],
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
