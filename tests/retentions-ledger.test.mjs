@@ -12,7 +12,7 @@ const input={
   {id:'r2',payDate:'2026-10-30',status:'DRAFT'}
  ],
  payrollLines:[
-  {id:'l1',payrollRunId:'r1',prIncomeTax:80.01,federalIncomeTax:5,socialSecurity:62,medicare:14.5,sinot:2.1},
+  {id:'l1',payrollRunId:'r1',gross:1000,prIncomeTax:80.01,federalIncomeTax:5,socialSecurity:62,medicare:14.5,sinot:2.1},
   {id:'l2',payrollRunId:'r2',prIncomeTax:1000,socialSecurity:999},
  ]};
 test('only finalized pay dates generate obligations with separate tax categories',()=>{
@@ -24,7 +24,10 @@ test('only finalized pay dates generate obligations with separate tax categories
  assert.equal(m.get('payroll_ss|2026-10'),6200);
  assert.equal(m.get('payroll_medicare|2026-10'),1450);
  assert.equal(m.get('payroll_sinot|2026-10'),210);
- assert.equal(m.size,7);
+ assert.equal(m.get('employer_ss|2026-10'),6200);
+ assert.equal(m.get('employer_medicare|2026-10'),1450);
+ assert.equal(m.get('employer_sinot|2026-10'),210);
+ assert.equal(m.size,10);
 });
 test('payments allocate to specific tax month, partial payments preserve payable',()=>{
  const report=retentionBalances(input,[
@@ -47,4 +50,28 @@ test('payments do not become new expenses and no employee net pay is modified',(
  retentionBalances(input,[{category:'payroll_ss',tax_period:'2026-10',amount:10}]);
  assert.equal(JSON.stringify(input),original);
  assert.equal(isRetentionCategory('made_up_category'),false);
+});
+
+test('unemployment/CFSE depend on explicit assessments, never invent rates from gross pay',()=>{
+ const assessment={...input,assessments:[
+   {category:'employer_unemployment_pr',tax_period:'2026-09',amount:135.20},
+   {category:'employer_cfse',tax_period:'2026-07',amount:950},
+ ]};
+ const report=retentionBalances(assessment,[{category:'employer_cfse',tax_period:'2026-07',amount:300}]);
+ assert.equal(report.rows.find(r=>r.category==='employer_unemployment_pr').pending,135.20);
+ const cfse=report.rows.find(r=>r.category==='employer_cfse');
+ assert.equal(cfse.accrued,950);assert.equal(cfse.pending,650);
+ assert.ok(!report.rows.some(r=>r.category==='employer_unemployment_futa'));
+});
+
+test('official employer SINOT/FICA assessments override calculated amounts instead of doubling them',()=>{
+ const modified={...input,assessments:[
+  {category:'employer_sinot',tax_period:'2026-10',amount:8.75},
+  {category:'employer_ss',tax_period:'2026-10',amount:61.80},
+  {category:'employer_medicare',tax_period:'2026-10',amount:14.50}
+ ]};
+ const x=retentionBalances(modified,[]);
+ assert.equal(x.rows.find(r=>r.category==='employer_sinot').accrued,8.75);
+ assert.equal(x.rows.find(r=>r.category==='employer_ss').accrued,61.8);
+ assert.equal(x.rows.find(r=>r.category==='employer_medicare').accrued,14.5);
 });
