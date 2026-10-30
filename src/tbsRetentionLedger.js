@@ -15,6 +15,10 @@ export const RETENTION_CATEGORIES = Object.freeze([
  {id:'employer_unemployment_futa',label:'Patronal · Desempleo federal (FUTA)',group:'Patronal',calculation:'assessment'},
  {id:'employer_unemployment_special',label:'Patronal · Aportación especial DTRH',group:'Patronal',calculation:'assessment'},
  {id:'employer_cfse',label:'Patronal · CFSE / Fondo del Seguro del Estado',group:'Patronal',calculation:'assessment'},
+ {id:'employer_other',label:'Patronal · Otras obligaciones (especificar en notas)',group:'Patronal',calculation:'assessment'},
+ {id:'fica_remittance',label:'Pago combinado · FICA empleado y patronal',group:'Pagos combinados'},
+ {id:'sinot_remittance',label:'Pago combinado · SINOT empleado y patronal',group:'Pagos combinados'},
+ {id:'services_remittance',label:'Pago combinado · Retenciones Services',group:'Pagos combinados'},
 ]);
 // UI-only FICA rollups. Keep the original Social Security and Medicare
 // ledgers untouched so previous remittances and agency-level audit remain valid.
