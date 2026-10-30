@@ -32,10 +32,12 @@ export default function TBSFinancialReportPrint({
     '@media print {',
     ' @page { size: '+(landscape?'letter landscape':'letter portrait')+'; margin: 0.55in; }',
     ' html, body, #root { height: auto !important; min-height: 0 !important; overflow: visible !important; }',
-    ' body * { visibility: hidden !important; }',
-    ' .tbs-report-preview-overlay, .tbs-report-preview-overlay * { visibility: visible !important; }',
-    ' .tbs-report-preview-overlay { position: static !important; display: block !important; inset: auto !important; overflow: visible !important; padding: 0 !important; background: transparent !important; }',
-    ' .tbs-report-print-area { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }',
+    // The preview is portaled directly into <body>; remove the app root from
+    // the print flow instead of just hiding it (hidden nodes still generate
+    // ghost pages when the report spans more than one sheet).
+    ' body > *:not(.tbs-report-preview-overlay) { display: none !important; }',
+    ' .tbs-report-preview-overlay { position: static !important; display: block !important; inset: auto !important; width:100% !important; height:auto !important; overflow: visible !important; padding: 0 !important; background: transparent !important; }',
+    ' .tbs-report-print-area { position: static !important; inset: auto !important; width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border: 0 !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }',
     ' .tbs-report-print-actions { display: none !important; }',
     ' .tbs-report-page { break-inside: auto !important; page-break-inside: auto !important; }',
     ' .tbs-report-page + .tbs-report-page { break-before: page !important; page-break-before: always !important; }',
