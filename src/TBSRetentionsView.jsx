@@ -331,13 +331,14 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       </div>
       <div style={surface}>
         <h3 style={{margin:'0 0 8px',fontSize:17}}>
-          {editingAssessmentId?'Editar obligación determinada':'Registrar obligaciones patronales (DTRH / FUTA / CFSE)'}
+          {editingAssessmentId?'Editar obligación determinada':'Registrar obligación / importe patronal confirmado'}
         </h3>
         <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
-          Registra el importe determinado en la planilla de desempleo, aportación especial o
-          notificación de la CFSE. En aportaciones trimestrales utiliza el mes de cierre del
-          trimestre como referencia; para CFSE usa el mes inicial de la póliza y anota su
-          período de cobertura. No se estima automáticamente una tasa sin la determinación.
+          Registra desempleo, aportación especial, FUTA y CFSE según la planilla o póliza.
+          Para FICA y SINOT, si tienes el importe patronal oficial, introdúcelo aquí:
+          sustituirá el cálculo de referencia del mismo período sin duplicarlo.
+          Las obligaciones trimestrales utilizan como referencia el mes de cierre del
+          trimestre; para CFSE documenta la vigencia de la póliza en las notas.
         </p>
         <form onSubmit={saveAssessment}>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12}}>
@@ -452,8 +453,8 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       </div>
       <div style={{fontSize:12,color:'#64748B',lineHeight:1.5,marginBottom:14}}>
         <strong>Alcance y verificación:</strong> FICA patronal y SINOT patronal muestran cálculos de
-        referencia basados en Payroll FINAL. Valida salarios sujetos, topes anuales,
-        exenciones y aportación patronal real antes de radicar o pagar. Las obligaciones
+        referencia basados en Payroll FINAL, reemplazables por un importe oficial confirmado.
+        Valida salarios sujetos, topes anuales, exenciones y aportación patronal real antes de radicar o pagar. Las obligaciones
         de desempleo y CFSE se registran según las planillas o pólizas oficiales.
         No se generan Journal Entries ni se aplican pagos a otro período automáticamente.
         Los pagos previamente contabilizados deben registrarse aquí para descontarlos del control.
