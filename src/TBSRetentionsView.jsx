@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
-import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,retentionBalances,validPeriod,asMoney,cents,payrollGrossByPeriod,retentionPivot} from './tbsRetentionLedger.js';
+import {RETENTION_CATEGORIES,ASSESSMENT_CATEGORIES,FICA_DETAIL_GROUPS,FICA_ROLLUP_LABELS,retentionDisplayRows,retentionBalances,validPeriod,asMoney,cents,payrollGrossByPeriod,retentionPivot} from './tbsRetentionLedger.js';
 
 const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 const getDate=()=>new Date().toISOString().slice(0,10);
@@ -11,7 +11,7 @@ const field={border:'1px solid #CBD5E1',borderRadius:5,padding:'8px 9px',maxWidt
 const btn={border:'1px solid #CBD5E1',background:'#fff',color:'#17365D',borderRadius:5,padding:'7px 11px',cursor:'pointer'};
 const cell={borderBottom:'1px solid #E9EDF2',padding:'8px 7px',textAlign:'left'};
 const label={fontSize:12,color:'#475569',display:'block',marginBottom:4};
-const catLabel=id=>RETENTION_CATEGORIES.find(c=>c.id===id)?.label||id;
+const catLabel=id=>FICA_ROLLUP_LABELS[id]||RETENTION_CATEGORIES.find(c=>c.id===id)?.label||id;
 
 export default function RetentionsView({clientId,services,payrollRuns,payrollLines,businessName}) {
   const [payments,setPayments]=useState([]);
@@ -64,10 +64,16 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
   const months=useMemo(()=>Array.from(new Set([
     ...summary.rows.map(r=>r.period),...payments.map(p=>p.tax_period),...assessments.map(a=>a.tax_period)
   ])).sort().reverse(),[summary.rows,payments,assessments]);
-  const fits=(cat,period)=>(groupFilter==='all'||RETENTION_CATEGORIES.some(x=>
-    x.id===cat && (groupFilter===x.group || groupFilter===cat))) &&
+  const fits=(cat,period)=>(groupFilter==='all'||
+    (groupFilter==='payroll_fica'&&FICA_DETAIL_GROUPS.payroll_fica.includes(cat))||
+    (groupFilter==='employer_fica'&&FICA_DETAIL_GROUPS.employer_fica.includes(cat))||
+    RETENTION_CATEGORIES.some(x=>
+      x.id===cat && (groupFilter===x.group || groupFilter===cat))) &&
     (periodFilter==='all'||period===periodFilter);
-  const summaryRows=summary.rows.filter(r=>fits(r.category,r.period));
+  const rawSummaryRows=summary.rows.filter(r=>fits(r.category,r.period));
+  const subcategoryOnly=['payroll_ss','payroll_medicare','employer_ss','employer_medicare']
+    .includes(groupFilter);
+  const summaryRows=subcategoryOnly?rawSummaryRows:retentionDisplayRows(rawSummaryRows);
   const visiblePayments=payments.filter(p=>fits(p.category,p.tax_period));
   const visibleAssessments=assessments.filter(a=>fits(a.category,a.tax_period));
   const grossMonths=useMemo(()=>payrollGrossByPeriod(payrollRuns,payrollLines),
@@ -86,6 +92,12 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     accrued:a.accrued+cents(r.accrued),paid:a.paid+cents(r.paid),
     pending:a.pending+cents(r.pending),overpaid:a.overpaid+cents(r.overpaid),
   }),{accrued:0,paid:0,pending:0,overpaid:0});
+  const ficaShareTotals=retentionDisplayRows(rawSummaryRows);
+  const ficaWithheld=ficaShareTotals.filter(r=>r.category==='payroll_fica')
+    .reduce((sum,r)=>sum+cents(r.accrued),0);
+  const ficaEmployer=ficaShareTotals.filter(r=>r.category==='employer_fica')
+    .reduce((sum,r)=>sum+cents(r.accrued),0);
+  const ficaTotal=asMoney(ficaWithheld+ficaEmployer);
   const total=(type)=>fmt(asMoney(totals[type]));
   const change=(name,val)=>setForm(f=>({...f,[name]:val}));
 
@@ -219,17 +231,23 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
     const columns=[['Período','Categoría','Obligación','Pagado','Pendiente','A favor'],
       ...summaryRows.map(r=>[r.period,catLabel(r.category),
         r.accrued.toFixed(2),r.paid.toFixed(2),r.pending.toFixed(2),r.overpaid.toFixed(2)])];
+    const ficaBreakdown=[['Período','Detalle FICA','Obligación','Pagado','Pendiente','A favor'],
+      ...rawSummaryRows.filter(r=>['payroll_ss','payroll_medicare','employer_ss','employer_medicare']
+        .includes(r.category)).map(r=>[r.period,catLabel(r.category),r.accrued.toFixed(2),
+        r.paid.toFixed(2),r.pending.toFixed(2),r.overpaid.toFixed(2)])];
     const detail=[['Fecha de pago','Período aplicado','Categoría','Cantidad','Referencia','Notas'],
       ...visiblePayments.map(p=>[p.paid_date,p.tax_period,catLabel(p.category),
         Number(p.amount).toFixed(2),p.reference,p.notes])];
-    const pivot=[['Período','Gross Pay','Retenciones empleado/servicios','Patronal','Pagos','Pendiente','Pagos en exceso'],
-      ...pivotRows.map(r=>[r.period,...['gross','retained','employer','paid','pending','overpaid']
-        .map(key=>Number(r[key]).toFixed(2))])];
+    const pivot=[['Período','Gross Pay','FICA retenido (SS + Medicare)','FICA patronal (SS + Medicare)','FICA total',
+      'Retenciones empleado/servicios','Patronal','Pagos','Pendiente','Pagos en exceso'],
+      ...pivotRows.map(r=>[r.period,...['gross','ficaEmployee','ficaEmployer','ficaTotal',
+        'retained','employer','paid','pending','overpaid'].map(key=>Number(r[key]).toFixed(2))])];
     const assessed=[['Período','Obligación patronal','Total determinado','Vencimiento','Referencia','Notas'],
       ...visibleAssessments.map(a=>[a.tax_period,catLabel(a.category),Number(a.amount).toFixed(2),
         a.due_date||'',a.reference,a.notes])];
     const csv=[...pivot.map(row=>row.map(quote).join(',')),'',
       ...columns.map(row=>row.map(quote).join(',')),'',
+      ...ficaBreakdown.map(row=>row.map(quote).join(',')),'',
       ...detail.map(row=>row.map(quote).join(',')),'',
       ...assessed.map(row=>row.map(quote).join(','))].join('\r\n');
     const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
@@ -263,6 +281,8 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
               <option value="Payroll">Retenciones de Payroll</option>
               <option value="Services">Retenciones de Services</option>
               <option value="Patronal">Obligaciones patronales</option>
+              <option value="payroll_fica">FICA retenido (Seguro Social + Medicare)</option>
+              <option value="employer_fica">FICA patronal (Seguro Social + Medicare)</option>
               {RETENTION_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
             </select></div>
           <button style={btn} onClick={exportCSV}>Exportar CSV</button>
@@ -271,6 +291,7 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10,marginBottom:16}}>
         {[
           ['Obligaciones acumuladas',total('accrued'),'#17365D'],
+          ['FICA total (retenido + patronal)',fmt(ficaTotal),'#17365D'],
           ['Pagos registrados',total('paid'),'#0F6E56'],
           ['Pendiente de pagar',total('pending'),'#A16207'],
           ['Pagos en exceso',total('overpaid'),'#475569'],
@@ -292,18 +313,21 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
         <p style={{fontSize:12,color:'#64748B',margin:'0 0 12px',lineHeight:1.5}}>
           Gross Pay es el total bruto de Payroll FINAL, agrupado por fecha de pago.
           Las retenciones y la participación patronal se muestran separadas.
+          FICA = Seguro Social + Medicare. FICA total incluye ambas porciones, retenida y patronal,
+          y es un subtotal de referencia; no se vuelve a sumar a las obligaciones.
           Gross Pay no equivale necesariamente a salarios tributables para FICA, SINOT,
           desempleo ni a la nómina cubierta por CFSE; verifica los topes y las planillas oficiales.
         </p>
         <div style={{overflowX:'auto'}}>
           <table style={{borderCollapse:'collapse',width:'100%',fontSize:12.5}}>
             <thead><tr style={{background:'#F5F7FA'}}>
-              {['Período','Gross Pay','Retenciones','Patronal','Pagos','Pendiente','A favor'].map(t=>
+              {['Período','Gross Pay','FICA retenido','FICA patronal','FICA total',
+                'Retenciones','Patronal','Pagos','Pendiente','A favor'].map(t=>
                 <th key={t} style={cell}>{t}</th>)}
             </tr></thead>
             <tbody>{pivotRows.map(row=><tr key={row.period}>
               <td style={cell}><strong>{row.period}</strong></td>
-              {['gross','retained','employer','paid','pending','overpaid'].map(name=>
+              {['gross','ficaEmployee','ficaEmployer','ficaTotal','retained','employer','paid','pending','overpaid'].map(name=>
                 <td key={name} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>
                   {fmt(row[name])}
                 </td>)}
@@ -320,7 +344,15 @@ export default function RetentionsView({clientId,services,payrollRuns,payrollLin
               <th key={x} style={cell}>{x}</th>)}
           </tr></thead>
           <tbody>{summaryRows.map(r=><tr key={r.category+'|'+r.period}>
-            <td style={cell}>{r.period}</td><td style={cell}>{catLabel(r.category)}</td>
+            <td style={cell}>{r.period}</td>
+            <td style={cell}>{catLabel(r.category)}
+              {r.isFicaRollup&&<details style={{marginTop:4,fontSize:11,color:'#64748B'}}>
+                <summary>Ver desglose de Seguro Social y Medicare</summary>
+                {r.components.map((part,i)=><div key={i} style={{margin:'4px 0 0 4px'}}>
+                  {catLabel(part.category)}: {fmt(part.accrued)} · Pagado {fmt(part.paid)}
+                </div>)}
+              </details>}
+            </td>
             {['accrued','paid','pending','overpaid'].map(key=>
               <td key={key} style={{...cell,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{fmt(r[key])}</td>)}
             <td style={cell}><strong style={{color:r.pending>0.009?'#A16207':r.overpaid>0.009?'#475569':'#0F6E56'}}>
