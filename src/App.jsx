@@ -1,3 +1,4 @@
+import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
 import { jsPDF } from 'jspdf';
 import { drawInvoiceEmailPdf } from './tbsInvoiceEmailPdf.js';
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
@@ -176,16 +177,6 @@ function DecimalInput({ value, defaultValue, onChange, onFocus, onBlur, ...props
   />;
 }
 
-function loadHtml2Pdf() {
-  return new Promise((resolve, reject) => {
-    if (window.html2pdf) { resolve(window.html2pdf); return; }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = () => resolve(window.html2pdf);
-    script.onerror = () => reject(new Error('Could not load the PDF library.'));
-    document.head.appendChild(script);
-  });
-}
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -194,102 +185,35 @@ function blobToBase64(blob) {
     reader.readAsDataURL(blob);
   });
 }
-async function generatePdfBase64FromElement(elementId, filename) {
-  const html2pdf = await loadHtml2Pdf();
-  const el = document.getElementById(elementId);
-  if (!el) throw new Error('Nothing to convert to PDF.');
-  const blob = await html2pdf().from(el).set({
-    margin: 10,
-    filename: filename || 'document.pdf',
-    html2canvas: { scale: 2, useCORS: true },
-    jsPDF: { unit: 'pt', format: 'letter', orientation: 'portrait' },
-  }).output('blob');
-  return blobToBase64(blob);
-}
-
-async function generatePdfBase64FromDetachedClone(elementId, filename, widthPx = 720) {
-  const html2pdf = await loadHtml2Pdf();
+function registerPdfFromElement(elementId, filename) {
   const source = document.getElementById(elementId);
   if (!source) throw new Error('Nothing to convert to PDF.');
-
-  // html2canvas can sometimes capture a blank document when the source lives
-  // inside a fixed modal / scrolling container. Render a clean detached copy.
-  const host = document.createElement('div');
-  host.setAttribute('data-pdf-render-host', 'true');
-  Object.assign(host.style, {
-    position: 'fixed',
-    left: '0',
-    top: '0',
-    width: `${widthPx}px`,
-    minHeight: '1px',
-    background: '#ffffff',
-    zIndex: '-2147483647',
-    overflow: 'visible',
-    visibility: 'visible',
-    opacity: '1',
-    pointerEvents: 'none',
-    padding: '0',
-    margin: '0',
-  });
-
-  const clone = source.cloneNode(true);
-  clone.removeAttribute('id');
-  Object.assign(clone.style, {
-    width: '100%',
-    maxWidth: 'none',
-    minWidth: '0',
-    height: 'auto',
-    maxHeight: 'none',
-    overflow: 'visible',
-    background: '#ffffff',
-    color: '#1F2933',
-    visibility: 'visible',
-    opacity: '1',
-    boxSizing: 'border-box',
-  });
-
-  // Make every cloned descendant visible regardless of modal/print styling.
-  clone.querySelectorAll('*').forEach(node => {
-    node.style.visibility = 'visible';
-    if (node.classList?.contains('print-hide')) node.style.display = 'none';
-  });
-
-  host.appendChild(clone);
-  document.body.appendChild(host);
-
+  const tables = Array.from(source.querySelectorAll('table')).map(table => ({
+    headers: Array.from(table.querySelectorAll('thead tr:last-child th')).map(cell => cell.innerText.trim()),
+    rows: Array.from(table.querySelectorAll('tbody tr, tfoot tr')).map(row =>
+      Array.from(row.cells).flatMap(cell => [cell.innerText.trim(), ...Array(Math.max(0, cell.colSpan - 1)).fill('')]))
+  }));
+  const headingCopy = source.cloneNode(true);
+  headingCopy.querySelectorAll('table, img, style, .print-hide').forEach(node => node.remove());
+  const headings = Array.from(headingCopy.children).map(node => node.textContent.trim()).filter(Boolean);
+  return assertNonblankPdfPages(drawRegisterPdf(jsPDF, { title: filename.replace(/\.pdf$/i, ''), headings, tables }));
+}
+async function generatePdfBase64FromElement(elementId, filename) {
+  return blobToBase64(registerPdfFromElement(elementId, filename).output('blob'));
+}
+function previewNativePdf(makeDoc, filename, onError) {
+  const preview = window.open('about:blank', '_blank');
+  if (preview) { preview.opener = null; preview.document.body.textContent = 'Preparing PDF…'; }
   try {
-    // Give the browser one frame to lay out the detached copy before capture.
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-    const rect = clone.getBoundingClientRect();
-    if (!rect.width || !rect.height) {
-      throw new Error('Statement PDF could not be rendered.');
+    const doc = assertNonblankPdfPages(makeDoc());
+    const url = URL.createObjectURL(doc.output('blob'));
+    if (preview && !preview.closed) preview.location.replace(url);
+    else {
+      const link = document.createElement('a'); link.href = url; link.download = filename;
+      document.body.appendChild(link); link.click(); link.remove();
     }
-
-    const blob = await html2pdf().from(clone).set({
-      margin: [18, 18, 18, 18],
-      filename: filename || 'document.pdf',
-      pagebreak: { mode: ['css', 'legacy'] },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        scrollX: 0,
-        scrollY: 0,
-        windowWidth: widthPx,
-      },
-      jsPDF: { unit: 'pt', format: 'letter', orientation: 'portrait' },
-    }).output('blob');
-
-    if (!blob || blob.size < 500) {
-      throw new Error('Statement PDF was generated empty.');
-    }
-
-    return await blobToBase64(blob);
-  } finally {
-    host.remove();
-  }
+    window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+  } catch (error) { if (preview && !preview.closed) preview.close(); onError(error.message); }
 }
 
 async function loadJsPdf() {
@@ -304,6 +228,7 @@ async function generatePersonalPaymentPdfBase64(model) {
   if (doc.getNumberOfPages() !== 1) {
     throw new Error('Payment PDF has an unexpected page count; email was not sent.');
   }
+  assertNonblankPdfPages(doc);
   const blob = doc.output('blob');
   if (!blob || blob.size < 950) {
     throw new Error('Payment PDF is empty; email was not sent.');
@@ -4019,7 +3944,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt Register</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => rows.length ? window.print() : setSendMsg('No service entries match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => rows.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Receipt_Register.pdf'), 'Receipt_Register.pdf', setSendMsg) : setSendMsg('No service entries match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -5486,7 +5411,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
     setSendMsg('');
     try {
       const invoicePdf = drawInvoiceEmailPdf(await loadJsPdf(), { inv, total, businessName, businessPhone, logoDataUri, labels: t });
-      const pdfBase64 = await blobToBase64(invoicePdf.output('blob'));
+      const pdfBase64 = await blobToBase64(assertNonblankPdfPages(invoicePdf).output('blob'));
       const text = `Hi ${inv.client},\n\nHere's Invoice ${inv.number} for the amount of ${money(total)}.\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
@@ -5524,7 +5449,7 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
             <button onClick={handleSendInvoice} disabled={sending} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: sending ? 'default' : 'pointer', fontSize: 13 }}>
               {sending ? 'Sending…' : 'Send Invoice'}
             </button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={() => previewNativePdf(() => drawInvoiceEmailPdf(jsPDF, { inv, total, businessName, businessPhone, logoDataUri, labels: t }), `Invoice_${inv.number}.pdf`, setSendMsg)} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -10451,7 +10376,17 @@ function BulkPayrollStubsModal({ run, lines, employees, businessName, logoDataUr
 
   function printBulk() {
     if (!selectedLines.length) { setProgress('Select at least one employee.'); return; }
-    window.print();
+    previewNativePdf(() => {
+      let doc;
+      selectedLines.forEach((line, index) => {
+        if (index) doc.addPage();
+        doc = drawSinglePagePaymentPdf(jsPDF, payStubPdfModel({
+          line, run, employee: employees.find(e => e.id === line.employeeId), businessName, logoDataUri,
+          hourRows: payrollStubHourRows(line, employees.find(e => e.id === line.employeeId)), totalHours: lineTotalHours(line),
+        }), doc);
+      });
+      return doc;
+    }, `PayStubs_${run.payDate}.pdf`, setProgress);
   }
 
   async function emailBulk() {
@@ -10611,7 +10546,7 @@ function PayStubModal({ line, run, employees, businessName, logoDataUri, sending
               {sending ? 'Sending…' : 'Send Pay Stub'}
             </button>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => window.print()} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
+            <button onClick={() => previewNativePdf(() => drawSinglePagePaymentPdf(jsPDF, payStubPdfModel({ line, run, employee: emp, businessName, logoDataUri, hourRows, totalHours: lineTotalHours(line) })), `PayStub_${run.payDate}.pdf`, setSendMsg)} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Save as PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -10794,7 +10729,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <div style={{ fontWeight: 700, fontSize: 18 }}>Payroll Register</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => lines.length ? window.print() : setSendMsg('No payroll lines match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => lines.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Payroll_Register.pdf'), 'Payroll_Register.pdf', setSendMsg) : setSendMsg('No payroll lines match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
