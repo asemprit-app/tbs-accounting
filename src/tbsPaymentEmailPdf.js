@@ -75,13 +75,14 @@ export function payStubPdfModel({ line, run, employee, businessName, logoDataUri
   };
 }
 
-export function drawSinglePagePaymentPdf(jsPDF, model) {
+export function drawSinglePagePaymentPdf(jsPDF, model, existingDoc) {
   if (!model || !['service','paystub'].includes(model.kind) ||
       !String(model.recipientName || '').trim() || !String(model.documentDate || '').trim() ||
       !Number.isFinite(Number(model.netAmount))) {
     throw new Error('Incomplete payment document; nothing was emailed.');
   }
-  const doc = new jsPDF({ orientation:'portrait', unit:'pt', format:'letter', compress:false });
+  const doc = existingDoc || new jsPDF({ orientation:'portrait', unit:'pt', format:'letter', compress:false });
+  const startingPages = doc.getNumberOfPages();
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const x = 44, right = pageWidth - x;
@@ -152,6 +153,6 @@ export function drawSinglePagePaymentPdf(jsPDF, model) {
   doc.setFontSize(14);
   doc.text(pdfText(model.netLabel || 'NET PAY'),x,y);
   doc.text(currency(model.netAmount),right,y,{align:'right'});
-  if (doc.getNumberOfPages() !== 1) throw new Error('Unexpected extra PDF page; email was not sent.');
+  if (doc.getNumberOfPages() !== startingPages) throw new Error('Unexpected extra PDF page; email was not sent.');
   return doc;
 }
