@@ -1,3 +1,5 @@
+import { jsPDF } from 'jspdf';
+import { drawInvoiceEmailPdf } from './tbsInvoiceEmailPdf.js';
 import { incomeThroughDate } from './tbsBalanceSheetIncome.js';
 import { drawSinglePagePaymentPdf, payStubPdfModel, serviceReceiptPdfModel } from './tbsPaymentEmailPdf.js';
 import { cardAwareTransactionPostings, potentiallyUnmatchedCardTransfers } from './tbsCardPaymentAccounting.js';
@@ -291,26 +293,7 @@ async function generatePdfBase64FromDetachedClone(elementId, filename, widthPx =
 }
 
 async function loadJsPdf() {
-  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
-
-  await new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-tbs-jspdf="true"]');
-    if (existing) {
-      if (window.jspdf?.jsPDF) { resolve(); return; }
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', () => reject(new Error('Could not load jsPDF.')), { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    script.setAttribute('data-tbs-jspdf', 'true');
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('Could not load jsPDF.'));
-    document.head.appendChild(script);
-  });
-
-  if (!window.jspdf?.jsPDF) throw new Error('jsPDF is unavailable.');
-  return window.jspdf.jsPDF;
+  return jsPDF;
 }
 
 // Personal payment documents use jsPDF text rather than a screenshot of a
@@ -5502,7 +5485,8 @@ function InvoicePrintModal({ inv, total, onClose, businessName, customers, sendi
     setSending(true);
     setSendMsg('');
     try {
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Invoice_${inv.number}.pdf`);
+      const invoicePdf = drawInvoiceEmailPdf(await loadJsPdf(), { inv, total, businessName, businessPhone, logoDataUri, labels: t });
+      const pdfBase64 = await blobToBase64(invoicePdf.output('blob'));
       const text = `Hi ${inv.client},\n\nHere's Invoice ${inv.number} for the amount of ${money(total)}.\n\nIf you have any questions, feel free to reach out.\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
