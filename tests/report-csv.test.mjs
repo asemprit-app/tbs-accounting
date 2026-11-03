@@ -8,7 +8,7 @@ test('preserves numeric signs and two-decimal values without currency strings', 
   assert.match(csv, /"Zero","0"/);
 });
 test('quotes commas, quotes, linebreaks and neutralizes spreadsheet formulas in text', () => {
-  const csv = financialReportCsv(['Description'],[['Vendor, "Inc"'],['=HYPERLINK("https://example.com")'],['+SUM(1,2)'],['line\nbreak']]);
+  assert.ok(csv.includes("\"'+SUM(1,2)\""));
   assert.match(csv, /"Vendor, ""Inc"""/);
   assert.match(csv, /"'=HYPERLINK/);
   assert.match(csv, /"'+SUM/);
