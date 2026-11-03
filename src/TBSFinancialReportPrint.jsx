@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { downloadReportCsv } from './tbsReportCsv.js';
 import { createPortal } from 'react-dom';
 import {
   reportPrintCell, reportPrintNumeric, reportPrintLandscape, presentFinancialReportRows,
@@ -61,6 +62,9 @@ export default function TBSFinancialReportPrint({
           color:'#1B2333',fontSize:12}}>
         <div className="tbs-report-print-actions" style={{display:'flex',alignItems:'center',
           justifyContent:'flex-end',gap:10,marginBottom:18}}>
+          <button type="button" onClick={()=>downloadReportCsv({header,rows,businessName,title})}
+            style={{background:'#fff',color:'#17365D',border:'1px solid #D2D9E1',
+              borderRadius:5,padding:'9px 15px',cursor:'pointer'}}>Download CSV</button>
           <button type="button" onClick={()=>window.print()}
             style={{background:'#17365D',color:'#fff',border:'none',borderRadius:5,
               padding:'9px 15px',fontWeight:600,cursor:'pointer'}}>Print / Save PDF</button>
