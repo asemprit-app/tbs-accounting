@@ -1,3 +1,4 @@
+import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
 import { jsPDF } from 'jspdf';
 import { drawInvoiceEmailPdf } from './tbsInvoiceEmailPdf.js';
@@ -6668,19 +6669,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
     </div>
   );
 
-  const monthYearOptions = useMemo(() => {
-    const months = new Set();
-    transactions.forEach(t => months.add(t.date.slice(0, 7)));
-    invoices.forEach(inv => months.add(inv.date.slice(0, 7)));
-    return Array.from(months).sort().reverse().map(m => {
-      const [y, mo] = m.split('-');
-      const label = new Date(Number(y), Number(mo) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' });
-      const first = `${m}-01`;
-      const lastDay = new Date(Number(y), Number(mo), 0).getDate();
-      const last = `${m}-${String(lastDay).padStart(2, '0')}`;
-      return { value: m, label, first, last };
-    });
-  }, [transactions, invoices]);
+  const monthYearOptions = useMemo(() => reportMonthOptions({ transactions, invoices, journalEntries }), [transactions, invoices, journalEntries]);
   function applyMonthYear(value) {
     if (!value) return;
     const opt = monthYearOptions.find(o => o.value === value);
