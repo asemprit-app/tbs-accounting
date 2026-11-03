@@ -186,7 +186,7 @@ function blobToBase64(blob) {
     reader.readAsDataURL(blob);
   });
 }
-function registerPdfFromElement(elementId, filename) {
+function registerPdfFromElement(elementId, filename, details = {}) {
   const source = document.getElementById(elementId);
   if (!source) throw new Error('Nothing to convert to PDF.');
   const tables = Array.from(source.querySelectorAll('table')).map(table => ({
@@ -197,10 +197,10 @@ function registerPdfFromElement(elementId, filename) {
   const headingCopy = source.cloneNode(true);
   headingCopy.querySelectorAll('table, img, style, .print-hide').forEach(node => node.remove());
   const headings = Array.from(headingCopy.children).map(node => node.textContent.trim()).filter(Boolean);
-  return assertNonblankPdfPages(drawRegisterPdf(jsPDF, { title: filename.replace(/\.pdf$/i, ''), headings, tables }));
+  return assertNonblankPdfPages(drawRegisterPdf(jsPDF, { title: filename.replace(/\.pdf$/i, ''), headings, tables, ...details }));
 }
-async function generatePdfBase64FromElement(elementId, filename) {
-  return blobToBase64(registerPdfFromElement(elementId, filename).output('blob'));
+async function generatePdfBase64FromElement(elementId, filename, details = {}) {
+  return blobToBase64(registerPdfFromElement(elementId, filename, details).output('blob'));
 }
 function previewNativePdf(makeDoc, filename, onError) {
   const preview = window.open('about:blank', '_blank');
@@ -3898,7 +3898,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
     setSendMsg('');
     try {
       const filePeriod = `${dateFrom || 'all'}_${dateTo || 'all'}`;
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_Register_${filePeriod}.pdf`);
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Receipt_Register_${filePeriod}.pdf`, { businessName, periodLabel });
       const text = `Hi,\n\nAttached is the Receipt Register for ${periodLabel}.\n\nEntries: ${rows.length}\nTotal Net Pay: ${money(totals.netPay)}\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
@@ -3945,7 +3945,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           <div style={{ fontWeight: 700, fontSize: 18 }}>Receipt Register</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => rows.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Receipt_Register.pdf'), 'Receipt_Register.pdf', setSendMsg) : setSendMsg('No service entries match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => rows.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Receipt_Register.pdf', { businessName, periodLabel }), 'Receipt_Register.pdf', setSendMsg) : setSendMsg('No service entries match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -3987,7 +3987,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
           {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
-        <div id="invoice-content-only">
+        <div id="invoice-content-only" className="tbs-register-document">
         <ReportHeader businessName={businessName} reportName="Receipt Register" periodStart={dateFrom || rows[0]?.date} periodEnd={dateTo || rows[rows.length - 1]?.date} logoUrl={null} />
         <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse', marginBottom: 16 }}>
           <thead><tr style={{ borderBottom: '1px solid #999', textAlign: 'left' }}>
@@ -4053,7 +4053,7 @@ function ReceiptRegisterModal({ services, businessName, sendingEmail, replyToEma
         {rows.length === 0 && <div style={{ padding: 14, color: '#6B7280', fontSize: 13 }}>No service entries match the selected period.</div>}
         </div>
       </div>
-      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+      <style>{`.tbs-register-document table { border-collapse: collapse; width: 100%; } .tbs-register-document table thead tr { background: #3B3F45; color: #fff; border-bottom: 0 !important; } .tbs-register-document table thead th { padding: 10px 6px !important; font-weight: 700; } .tbs-register-document table tbody tr:nth-child(even) { background: #F7F9FB; } .tbs-register-document table tbody td { padding: 7px 6px !important; border-bottom: 1px solid #E6EAF0; } .tbs-register-document table tfoot tr { background: #E8EEF5; color: #17365D; } .tbs-register-document table tfoot td { padding: 10px 6px !important; font-weight: 700; } @media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }
@@ -10653,7 +10653,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
     setSendMsg('');
     try {
       const filePeriod = `${dateFrom || 'all'}_${dateTo || 'all'}`;
-      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Payroll_Register_${filePeriod}.pdf`);
+      const pdfBase64 = await generatePdfBase64FromElement('invoice-content-only', `Payroll_Register_${filePeriod}.pdf`, { businessName, periodLabel });
       const text = `Hi,\n\nAttached is the Payroll Register for ${periodLabel}.\n\nPayroll runs included: ${selectedRuns.length}\nEmployees/lines: ${lines.length}\nTotal Net Pay: ${money(totals.net)}\n\nThank you,\n\n${businessName}`;
       const from = sendingEmail ? `${businessName} <${sendingEmail}>` : undefined;
       const replyTo = replyToEmail || undefined;
@@ -10718,7 +10718,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           <div style={{ fontWeight: 700, fontSize: 18 }}>Payroll Register</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button onClick={exportCSV} style={iconBtn}>Export CSV</button>
-            <button onClick={() => lines.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Payroll_Register.pdf'), 'Payroll_Register.pdf', setSendMsg) : setSendMsg('No payroll lines match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
+            <button onClick={() => lines.length ? previewNativePdf(() => registerPdfFromElement('invoice-content-only', 'Payroll_Register.pdf', { businessName, periodLabel }), 'Payroll_Register.pdf', setSendMsg) : setSendMsg('No payroll lines match the selected period.')} style={{ ...iconBtn, display: 'flex', gap: 6 }}><Printer size={14} /> Print / PDF</button>
             <button onClick={onClose} style={iconBtn}><X size={14} /></button>
           </div>
         </div>
@@ -10762,7 +10762,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           {sendMsg && <span style={{ fontSize: 12, color: (sendMsg.startsWith('Sent') || sendMsg.startsWith('Accepted')) ? '#0F6E56' : '#B00020' }}>{sendMsg}</span>}
         </div>
 
-        <div id="invoice-content-only">
+        <div id="invoice-content-only" className="tbs-register-document">
         <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={dateFrom || selectedRuns[0]?.periodStart} periodEnd={dateTo || selectedRuns[selectedRuns.length - 1]?.periodEnd} logoUrl={null} />
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
           Payroll runs included: <strong>{selectedRuns.length}</strong>
@@ -10825,7 +10825,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         {lines.length === 0 && <div style={{ padding: 14, color: '#6B7280', fontSize: 13 }}>No payroll lines match the selected period.</div>}
         </div>
       </div>
-      <style>{`@media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
+      <style>{`.tbs-register-document table { border-collapse: collapse; width: 100%; } .tbs-register-document table thead tr { background: #3B3F45; color: #fff; border-bottom: 0 !important; } .tbs-register-document table thead th { padding: 10px 6px !important; font-weight: 700; } .tbs-register-document table tbody tr:nth-child(even) { background: #F7F9FB; } .tbs-register-document table tbody td { padding: 7px 6px !important; border-bottom: 1px solid #E6EAF0; } .tbs-register-document table tfoot tr { background: #E8EEF5; color: #17365D; } .tbs-register-document table tfoot td { padding: 10px 6px !important; font-weight: 700; } @media print { .no-print-overlay { position: static !important; background: none !important; } .print-hide { display: none !important; } body * { visibility: hidden; } #invoice-print-area, #invoice-print-area * { visibility: visible; } #invoice-print-area { position: absolute; left: 0; top: 0; width: 100%; } }`}</style>
     </div>
   );
 }

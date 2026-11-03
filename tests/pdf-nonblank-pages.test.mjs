@@ -38,3 +38,18 @@ test('register emails and payment print buttons bypass HTML screenshot and full 
   const component=app.slice(app.indexOf(start),app.indexOf(end));assert.ok(!component.includes('window.print()'));assert.ok(component.includes('previewNativePdf('));
  }
 });
+
+test('register PDF presents corporate title, totals and repeated dark table header',()=>{
+ const rows=Array.from({length:70},(_,i)=>['Employee '+i,'2026-11-03','40.00','$15.00','$600.00']);
+ rows.push(['Total (70)','','2800.00','','$42,000.00']);
+ const doc=drawRegisterPdf(jsPDF,{title:'Payroll_Register.pdf',businessName:'Example Business LLC',periodLabel:'2026-11-01 to 2026-11-30',tables:[{headers:['Employee','Pay Date','Hours','Pay Rate','Net Pay'],rows}]});
+ assert.ok(doc.getNumberOfPages()>1);
+ assertNonblankPdfPages(doc);
+ const first=doc.internal.pages[1].join('\\n');
+ assert.ok(first.includes('Example Business LLC'));
+ assert.ok(first.includes('PAYROLL REGISTER'));
+ assert.ok(first.includes('Period')||first.includes('2026-11-01'));
+ const last=doc.internal.pages[doc.getNumberOfPages()].join('\\n');
+ assert.ok(last.includes('Total'));
+ assert.ok(last.includes('Page '));
+});
