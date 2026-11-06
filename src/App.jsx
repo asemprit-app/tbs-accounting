@@ -10676,7 +10676,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
 
   function exportCSV() {
     if (lines.length === 0) { setSendMsg('No payroll lines match the selected period.'); return; }
-    let csv = 'Period Start,Period End,Pay Date,Employee,Hours,Pay Rate,Gross,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
+    let csv = 'Period Start,Period End,Pay Date,Employee,Hours,Pay Rate,Gross,Federal Tax,PR Tax,Social Security,Medicare,FICA,SINOT,Other Deductions,Reimbursement,Net Pay\n';
     const esc = v => `"${String(v).replace(/"/g, '""')}"`;
     lines.forEach(l => {
       const fica = (Number(l.socialSecurity) || 0) + (Number(l.medicare) || 0);
@@ -10688,6 +10688,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         lineTotalHours(l).toFixed(2),
         (Number(l.employee?.rate) || 0).toFixed(2),
         (Number(l.gross) || 0).toFixed(2),
+        (Number(l.federalIncomeTax) || 0).toFixed(2),
         (Number(l.prIncomeTax) || 0).toFixed(2),
         (Number(l.socialSecurity) || 0).toFixed(2),
         (Number(l.medicare) || 0).toFixed(2),
@@ -10699,7 +10700,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
       ].join(',') + '\n';
     });
     const totalFica = totals.ss + totals.medicare;
-    csv += `TOTAL,,,,${totals.hours.toFixed(2)},,${totals.gross.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
+    csv += `PERIOD TOTAL,,,,${totals.hours.toFixed(2)},,${totals.gross.toFixed(2)},${totals.federal.toFixed(2)},${totals.pr.toFixed(2)},${totals.ss.toFixed(2)},${totals.medicare.toFixed(2)},${totalFica.toFixed(2)},${totals.sinot.toFixed(2)},${totals.other.toFixed(2)},${totals.reimbursement.toFixed(2)},${totals.net.toFixed(2)}\n`;
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -10763,6 +10764,17 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
         </div>
 
         <div id="invoice-content-only" className="tbs-register-document">
+        <div style={{ border: '1px solid #D9E2EE', borderLeft: '4px solid #17365D', background: '#F6F8FB', padding: '12px 16px', marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#17365D', letterSpacing: '.06em', marginBottom: 8 }}>PERIOD TOTALS — {periodLabel}</div>
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12 }}>
+            <span><strong>Hours:</strong> {totals.hours.toFixed(2)}</span>
+            <span><strong>Gross Pay:</strong> {money(totals.gross)}</span>
+            <span><strong>Federal Tax:</strong> {money(totals.federal)}</span>
+            <span><strong>PR Tax:</strong> {money(totals.pr)}</span>
+            <span><strong>FICA:</strong> {money(totals.ss + totals.medicare)}</span>
+            <span><strong>Net Pay:</strong> {money(totals.net)}</span>
+          </div>
+        </div>
         <ReportHeader businessName={businessName} reportName="Payroll Register" periodStart={dateFrom || selectedRuns[0]?.periodStart} periodEnd={dateTo || selectedRuns[selectedRuns.length - 1]?.periodEnd} logoUrl={null} />
         <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
           Payroll runs included: <strong>{selectedRuns.length}</strong>
@@ -10774,6 +10786,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             <th style={{ padding: '4px', textAlign: 'right' }}>Hours</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Pay Rate</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Gross</th>
+            <th style={{ padding: '4px', textAlign: 'right' }}>Federal Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>PR Tax</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Soc. Sec.</th>
             <th style={{ padding: '4px', textAlign: 'right' }}>Medicare</th>
@@ -10791,6 +10804,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
                 <td style={{ padding: '4px', textAlign: 'right' }}>{lineTotalHours(l).toFixed(2)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.employee?.rate || 0)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.gross)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.federalIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.prIncomeTax)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.socialSecurity)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(l.medicare)}</td>
@@ -10805,11 +10819,12 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
           {lines.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
-                <td style={{ padding: '4px 4px' }}>Total ({lines.length})</td>
+                <td style={{ padding: '4px 4px' }}>PERIOD TOTAL ({lines.length})</td>
                 <td></td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{totals.hours.toFixed(2)}</td>
-                <td></td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>—</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.gross)}</td>
+                <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.federal)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.pr)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.ss)}</td>
                 <td style={{ padding: '4px', textAlign: 'right' }}>{money(totals.medicare)}</td>
@@ -10822,6 +10837,7 @@ function PayrollRegisterModal({ runId, payrollRuns, payrollLines, employees, bus
             </tfoot>
           )}
         </table>
+        {lines.length > 0 && <div style={{ fontSize: 11, color: '#64748B', marginBottom: 10 }}>Totals reflect all payroll lines in the selected period. Pay Rate is not totaled because individual employee rates are not additive; FICA is the sum of Social Security and Medicare.</div>}
         {lines.length === 0 && <div style={{ padding: 14, color: '#6B7280', fontSize: 13 }}>No payroll lines match the selected period.</div>}
         </div>
       </div>
