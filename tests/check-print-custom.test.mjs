@@ -13,8 +13,8 @@ const modal = app.slice(modalStart, modalEnd);
 
 test('Custom check template is shared by Payroll and Services and uses client-scoped calibration', () => {
   assert.match(modal, /label: 'Custom — Name, Amount, Memo & Date'/);
-  assert.equal((app.match(/<CheckPrintModal/g) || []).length, 2);
-  assert.equal((app.match(/<CheckPrintModal\s+clientId=\{clientId\}/g) || []).length, 2);
+  assert.equal((app.match(/<CheckPrintModal/g) || []).length, 3);
+  assert.equal((app.match(/<CheckPrintModal\s+clientId=\{clientId\}/g) || []).length, 3);
   assert.match(app, /amount=\{lineNet\(line\)\}/);
   assert.match(app, /amount=\{serviceCalc\(s\)\.netPay\}/);
   assert.match(modal, /customProfilesStorageKey/);
