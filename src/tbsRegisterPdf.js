@@ -69,7 +69,7 @@ export function drawRegisterPdf(JsPdf, { title, headings = [], tables = [], busi
     paintHeader();
     let stripe=0;
     for(const row of table.rows) {
-      const total=/^total(?:\s|\(|$)/i.test(sanitize(row[0]));
+      const total=/^(?:period\s+)?total(?:\s|\(|$)/i.test(sanitize(row[0]));
       const segments=wrap(row);
       const max=Math.max(1,...segments.map(s=>s.length));
       let offset=0;
