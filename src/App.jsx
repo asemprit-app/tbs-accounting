@@ -1,3 +1,4 @@
+import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
 import { jsPDF } from 'jspdf';
@@ -3214,6 +3215,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
   const [sort, setSort] = useState({ column: null, dir: 'asc' });
   const [receiptId, setReceiptId] = useState(null);
   const [checkServiceId, setCheckServiceId] = useState(null);
+  const [showConsolidatedCheck, setShowConsolidatedCheck] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [servicePeriodPreset, setServicePeriodPreset] = useState('all');
   const [serviceCustomFrom, setServiceCustomFrom] = useState('');
@@ -3446,7 +3448,10 @@ function ServicesView({ clientId, services, setServices, employees, businessName
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Services</h2>
-        <button onClick={() => setShowRegister(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Receipt Register</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowConsolidatedCheck(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Check for Multiple Invoices</button>
+          <button onClick={() => setShowRegister(true)} style={{ ...iconBtn, display: 'flex', alignItems: 'center', gap: 6 }}><Printer size={14} /> Receipt Register</button>
+        </div>
       </div>
 
       <Card style={{ marginBottom: 16 }}>
@@ -3815,9 +3820,103 @@ function ServicesView({ clientId, services, setServices, employees, businessName
           />
         );
       })()}
+      {showConsolidatedCheck && (
+        <ConsolidatedServiceCheckModal clientId={clientId} services={services} businessName={businessName} onClose={() => setShowConsolidatedCheck(false)} />
+      )}
       {showRegister && (
         <ReceiptRegisterModal services={services} businessName={businessName} sendingEmail={sendingEmail} replyToEmail={replyToEmail} onClose={() => setShowRegister(false)} />
       )}
+    </div>
+  );
+}
+
+function ConsolidatedServiceCheckModal({ clientId, services, businessName, onClose }) {
+  const available = useMemo(() => eligibleSupplierInvoices(services).map(s=>({
+    ...s, netPay:serviceCalc(s).netPay,
+  })).filter(s=>s.netPay>0),[services]);
+  const suppliers = useMemo(()=>Array.from(new Set(available.map(s=>s.employeeName.trim()))).sort((a,b)=>a.localeCompare(b)),[available]);
+  const [supplier, setSupplier] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [checkReady, setCheckReady] = useState(false);
+  const [error, setError] = useState('');
+  const invoices = available.filter(s=>s.employeeName.trim()===supplier)
+    .sort((a,b)=>a.date.localeCompare(b.date) || a.invoiceNumber.localeCompare(b.invoiceNumber));
+  const selected = invoices.filter(s=>selectedIds.includes(s.id));
+  const selectedTotal = selected.reduce((total,s)=>total+Math.round(s.netPay*100),0)/100;
+  const chooseSupplier = value => {setSupplier(value);setSelectedIds([]);setError('');};
+  const toggle = id => {setSelectedIds(ids=>ids.includes(id)?ids.filter(v=>v!==id):[...ids,id]);setError('');};
+  function prepareCheck() {
+    try {
+      consolidateSupplierInvoices(selected,supplier);
+      setError('');
+      setCheckReady(true);
+    } catch(e) {setError(e.message);}
+  }
+  if(checkReady) {
+    let check;
+    try {check=consolidateSupplierInvoices(selected,supplier);}
+    catch(e) {return <div style={{position:'fixed',inset:0,zIndex:65,background:'#fff',padding:30}}><p>{e.message}</p><button onClick={()=>setCheckReady(false)}>Back</button></div>;}
+    return <CheckPrintModal
+      clientId={clientId}
+      businessName={businessName}
+      payee={check.payee}
+      defaultDate={todayStr()}
+      amount={check.amount}
+      memo={check.memo}
+      voucherDetail={check.voucherDetail}
+      onClose={()=>setCheckReady(false)}
+    />;
+  }
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:63,display:'flex',justifyContent:'center',alignItems:'center',padding:16}}>
+      <Card style={{width:800,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',padding:24}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,marginBottom:16}}>
+          <div>
+            <div style={{fontSize:19,fontWeight:700}}>One Check for Multiple Invoices</div>
+            <div style={{fontSize:12,color:'#64748B',marginTop:4}}>Select FINAL invoices for one supplier. One check will show the combined net amount.</div>
+          </div>
+          <button type="button" onClick={onClose} style={iconBtn}><X size={16}/></button>
+        </div>
+        <label style={{display:'block',fontWeight:600,fontSize:13,marginBottom:5}}>Supplier / Contractor</label>
+        <select style={{width:'100%',padding:9,marginBottom:16,border:'1px solid #CBD5E1',borderRadius:6}} value={supplier} onChange={e=>chooseSupplier(e.target.value)}>
+          <option value="">Select supplier</option>
+          {suppliers.map(name=><option key={name} value={name}>{name}</option>)}
+        </select>
+        {supplier && <>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <strong style={{fontSize:13}}>Available invoices</strong>
+            <button style={iconBtn} onClick={()=>setSelectedIds(selectedIds.length===invoices.length?[]:invoices.map(s=>s.id))}>{selectedIds.length===invoices.length?'Clear selection':'Select all'}</button>
+          </div>
+          <div style={{overflowX:'auto',border:'1px solid #E2E8F0',borderRadius:6}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead><tr style={{background:'#17365D',color:'#fff',textAlign:'left'}}>
+                <th style={{padding:9}}>Select</th><th style={{padding:9}}>Invoice #</th><th style={{padding:9}}>Date</th>
+                <th style={{padding:9,textAlign:'right'}}>Gross</th><th style={{padding:9,textAlign:'right'}}>Retention</th>
+                <th style={{padding:9,textAlign:'right'}}>Net Payment</th>
+              </tr></thead>
+              <tbody>{invoices.map(s=><tr key={s.id} style={{borderBottom:'1px solid #E2E8F0'}}>
+                <td style={{padding:9}}><input type="checkbox" checked={selectedIds.includes(s.id)} onChange={()=>toggle(s.id)}/></td>
+                <td style={{padding:9}}>{s.invoiceNumber}</td><td style={{padding:9}}>{s.date}</td>
+                <td style={{padding:9,textAlign:'right'}}>{money(serviceCalc(s).gross)}</td>
+                <td style={{padding:9,textAlign:'right'}}>{money(s.retentionAmount)}</td>
+                <td style={{padding:9,textAlign:'right',fontWeight:600}}>{money(s.netPay)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <div style={{background:'#F2F5FA',padding:14,marginTop:14,borderRadius:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span>{selected.length} invoices selected</span><strong style={{fontSize:18,color:'#17365D'}}>Check total: {money(selectedTotal)}</strong>
+          </div>
+        </>}
+        {!suppliers.length && <div style={{fontSize:13,color:'#6B7280'}}>There are no FINAL supplier invoices with an invoice number and positive balance to select.</div>}
+        <p style={{fontSize:12,color:'#64748B',lineHeight:1.5}}>
+          Printing does not mark invoices as paid or create a bank transaction. Record the actual check payment separately to avoid duplicate accounting entries.
+        </p>
+        {error && <div style={{fontSize:12,color:'#B91C1C',marginBottom:10}}>{error}</div>}
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button style={iconBtn} onClick={onClose}>Cancel</button>
+          <button style={{padding:'9px 16px',border:0,borderRadius:6,color:'#fff',background:selected.length>=2?'#17365D':'#94A3B8',cursor:selected.length>=2?'pointer':'default'}} disabled={selected.length<2} onClick={prepareCheck}>Create Consolidated Check</button>
+        </div>
+      </Card>
     </div>
   );
 }
