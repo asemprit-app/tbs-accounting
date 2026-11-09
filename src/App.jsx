@@ -7578,9 +7578,10 @@ function JournalEntriesView({ journalEntries, setJournalEntries, confirmJournalI
   function removeLine(i) { setForm(f => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) })); }
 
   const { totalDebit, totalCredit, remaining, missingSide, balanced } = journalEntryBalance(form.lines);
+  const canSaveEntry = balanced && form.lines.length >= 2 && form.lines.every(l => Boolean(l.gl));
 
   function saveJE() {
-    if (form.lines.some(l => !l.gl)) { setError('Each line needs an account.'); return; }
+    if (form.lines.length < 2 || form.lines.some(l => !l.gl)) { setError('Enter at least two lines and select an account for each line.'); return; }
     if (!balanced) {
       const nextAction = missingSide === 'credit' ? 'Add to Credit' : missingSide === 'debit' ? 'Add to Debit' : 'Enter amounts on both sides';
       setError(`The entry does not balance. ${nextAction}${missingSide ? ` — ${money(remaining)} remaining.` : '.'}`);
@@ -7743,8 +7744,9 @@ function JournalEntriesView({ journalEntries, setJournalEntries, confirmJournalI
             <span style={{ color: balanced ? '#0F6E56' : '#B00020', fontWeight: 600 }}>{balanced ? "Balanced" : "Doesn't balance"}</span>
           </div>
           {error && <div style={{ color: '#B00020', fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} />{error}</div>}
+          {!canSaveEntry && <div style={{ color: '#9B3A25', fontSize: 12, marginBottom: 10 }} role="alert">Save Entry is locked until Debits equal Credits and each line has an account.</div>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={saveJE} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>
+            <button type="button" onClick={saveJE} disabled={!canSaveEntry} title={!balanced ? 'Total Debit must equal Total Credit before saving.' : !canSaveEntry ? 'Assign an account to each line before saving.' : 'Save balanced journal entry'} style={{ background: canSaveEntry ? '#17365D' : '#A9B4C2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: canSaveEntry ? 'pointer' : 'not-allowed', opacity: canSaveEntry ? 1 : 0.75 }}>
               {editingId ? 'Update entry' : copiedFromId ? 'Save copy' : 'Save entry'}
             </button>
             {(editingId || copiedFromId) && <button onClick={cancelForm} style={iconBtn}>Cancel</button>}
