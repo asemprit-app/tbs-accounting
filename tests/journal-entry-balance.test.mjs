@@ -71,3 +71,18 @@ test('new, edit and copied journal entries share one live indicator and save val
   assert.match(editor, /Total debit: <strong>\{money\(totalDebit\)\}/);
   assert.match(editor, /Total credit: <strong>\{money\(totalCredit\)\}/);
 });
+
+test('Save, Update and Save copy are disabled until the journal entry balances', () => {
+  assert.match(editor, /const canSaveEntry = balanced && form\.lines\.length >= 2/);
+  assert.match(editor, /disabled=\{!canSaveEntry\}/);
+  assert.match(editor, /onClick=\{saveJE\}/);
+  assert.match(editor, /if \(!balanced\)/);
+  assert.match(editor, /Save Entry is locked until Debits equal Credits/);
+  for (const label of ['Update entry', 'Save copy', 'Save entry']) assert.ok(editor.includes(label));
+});
+
+test('unbalanced journal entries remain invalid even with valid accounts', () => {
+  for (const [debit,credit] of [[100,99.99],[0,0],[100,101.25]]) {
+    assert.equal(journalEntryBalance([{gl:'5000',debit,credit:''},{gl:'2000',debit:'',credit}]).balanced,false);
+  }
+});
