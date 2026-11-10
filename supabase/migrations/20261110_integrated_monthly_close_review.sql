@@ -138,7 +138,7 @@ begin
      'Statement through '||r.period_end::text||'; status '||r.status||'; difference '||r.difference::text,'HIGH'
    from public.reconciliations r where r.client_id=p_client and r.period_end between p_period and v_end
      and (r.status<>'PASS' or abs(r.difference)>0.005)
- end loop
+ loop
    insert into public.tbs_review_queue(client_id,period_start,source_type,source_id,title,description,priority,status,created_by)
      values(p_client,p_period,'AUTO',rec.key,rec.title,rec.description,rec.priority,'OPEN',auth.uid())
    on conflict (client_id,period_start,source_type,source_id) where source_type='AUTO' and source_id is not null do nothing;
