@@ -18,7 +18,7 @@ const panel={background:'#fff',padding:18,border:'1px solid #dde3eb',borderRadiu
 const btn={background:'#17365D',color:'#fff',border:0,borderRadius:6,padding:'9px 14px',cursor:'pointer'};
 const field={padding:8,border:'1px solid #CBD5E1',borderRadius:5,minWidth:0};
 const get=result=>{if(result.error)throw result.error;return result.data};
-const currentMonth=()=>new Date().toLocaleDateString('en-CA',{year:'numeric',month:'2-digit'}).slice(0,7);
+const currentMonth=()=>{const d=new Date();return String(d.getFullYear())+'-'+String(d.getMonth()+1).padStart(2,'0');};
 const endOfMonth=m=>new Date(Date.UTC(Number(m.slice(0,4)),Number(m.slice(5,7)),0)).toISOString().slice(0,10);
 const dateOnly=v=>v||null;
 function Status({value}){return <span style={{fontSize:11,fontWeight:700,color:['OPEN','HIGH','URGENT','BLOCKED'].includes(value)?'#9B3A25':'#17365D'}}>{value}</span>;}
