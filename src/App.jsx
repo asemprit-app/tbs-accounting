@@ -1,3 +1,4 @@
+import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
@@ -7284,12 +7285,24 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
               type: posting.source });
           });
         }
-        items.sort((a, b) => a.date.localeCompare(b.date));
-        const total = items.reduce((s, i) => s + i.amount, 0);
+        // "Period" activity carries the closing balance from the day before
+        // the selected period. "As of" starts with zero and includes all
+        // postings through the closing date. Both match report calculations.
+        const openingBalance = mode === 'period'
+          ? gl === '__invoices__'
+            ? invoices.filter(inv => inv.date < from).reduce((sum, inv) => sum + invoiceRevenueSubtotal(inv), 0)
+            : postings.filter(p => p.gl === gl && p.date < from).reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+          : 0;
+        const running = accountRunningBalance(items, openingBalance);
+        const detailedItems = running.rows;
+        const total = running.periodActivity;
         function exportDrillDownCSV() {
-          let csv = 'Date,Description,Type,Amount\n';
+          let csv = 'Date,Description,Source,Amount,Running Balance\n';
           const escape = v => `"${String(v).replace(/"/g, '""')}"`;
-          items.forEach(i => { csv += [i.date, escape(i.description), i.type, i.amount.toFixed(2)].join(',') + '\n'; });
+          csv += [escape('Opening balance'), '', '', '', running.openingBalance.toFixed(2)].join(',') + '\n';
+          detailedItems.forEach(i => { csv += [escape(i.date), escape(i.description), escape(i.type), Number(i.amount).toFixed(2), i.runningBalance.toFixed(2)].join(',') + '\n'; });
+          csv += [escape('Period activity'), '', '', running.periodActivity.toFixed(2), ''].join(',') + '\n';
+          csv += [escape('Ending balance'), '', '', '', running.endingBalance.toFixed(2)].join(',') + '\n';
           const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -7313,21 +7326,28 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
                 <thead><tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
                   <th style={{ padding: '4px' }}>Date</th><th style={{ padding: '4px' }}>Description</th>
                   <th style={{ padding: '4px' }}>Source</th><th style={{ padding: '4px', textAlign: 'right' }}>Amount</th>
+                  <th style={{ padding: '4px', textAlign: 'right', whiteSpace: 'nowrap' }}>Running Balance</th>
                 </tr></thead>
                 <tbody>
-                  {items.map(i => (
-                    <tr key={i.id} style={{ borderBottom: '1px solid #F0F1F3' }}>
+                  <tr style={{ background: '#F1F5F9', fontWeight: 600 }}>
+                    <td style={{ padding: '5px 4px' }} colSpan={4}>Opening balance {mode === 'period' ? `before ${from}` : '(full history)'}</td>
+                    <td style={{ padding: '5px 4px', textAlign: 'right', whiteSpace: 'nowrap' }}>{money(running.openingBalance)}</td>
+                  </tr>
+                  {detailedItems.map((i, index) => (
+                    <tr key={i.id + '-' + index} style={{ borderBottom: '1px solid #F0F1F3' }}>
                       <td style={{ padding: '4px' }}>{i.date}</td>
                       <td style={{ padding: '4px' }}>{i.description}</td>
                       <td style={{ padding: '4px' }}>{i.type}</td>
-                      <td style={{ padding: '4px', textAlign: 'right' }}>{money(i.amount)}</td>
+                      <td style={{ padding: '4px', textAlign: 'right', whiteSpace: 'nowrap' }}>{money(i.amount)}</td>
+                      <td style={{ padding: '4px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>{money(i.runningBalance)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {items.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions or journal entries behind this number.</div>}
-              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 10, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 14 }}>
-                <span>Total</span><span>{money(total)}</span>
+              <div style={{ borderTop: '1px solid #E2E5E9', marginTop: 10, paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6, fontWeight: 700, fontSize: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Period activity</span><span>{money(total)}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#17365D' }}><span>Ending account balance as of {to}</span><span>{money(running.endingBalance)}</span></div>
               </div>
             </Card>
           </div>
