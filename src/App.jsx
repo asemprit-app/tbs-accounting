@@ -1,3 +1,4 @@
+import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
@@ -11093,6 +11094,32 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     return [...tx, ...je].sort((a, b) => a.date.localeCompare(b.date));
   }
 
+  // Historical verified IDs may represent either a whole-to-date bank feed
+  // or only one statement period. Aggregate all previous approvals and carry
+  // unchecked items forward until a later statement explicitly verifies them.
+  function reconciliationReviewState(r, overrideVerifiedIds = r.verifiedIds || []) {
+    const previous=previousPassedReconciliation(r.gl,r.periodEnd,r.id);
+    const approvedBefore=new Set(reconciliations.filter(x=>
+      x.gl===r.gl && x.status==='PASS' && x.periodEnd<r.periodEnd && x.id!==r.id
+    ).flatMap(x=>x.verifiedIds||[]));
+    const allPostings=[
+      ...transactions.filter(t=>t.sourceGL===r.gl && t.date<=r.periodEnd).map(t=>({
+        ...t,amount:sourceAccountAmount(r.gl,t.amount),rawAmount:t.amount,
+      })),
+      ...jePostingsFor(r.gl,r.periodEnd),
+    ].sort((a,b)=>a.date.localeCompare(b.date));
+    const periodPostings=allPostings.filter(p=>!approvedBefore.has(p.id));
+    const ids=new Set(periodPostings.map(p=>p.id));
+    const checked=(overrideVerifiedIds||[]).filter(id=>ids.has(id));
+    const snapshot=clearedReconciliationSnapshot({
+      openingBalance:previous?.statementBalance||0,
+      postings:periodPostings,
+      verifiedIds:checked,
+      statementBalance:r.statementBalance,
+    });
+    return {...snapshot,previous,periodPostings,checked};
+  }
+
   function nsmLedgerFor(gl, periodEnd, excludeId = null) {
     const previous = previousPassedReconciliation(gl, periodEnd, excludeId);
     const openingBalance = previous ? Number(previous.statementBalance) || 0 : 0;
@@ -11108,10 +11135,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
 
   function reconciliationCurrentVariance(r) {
     // Preserve the approved historical snapshot, but never misrepresent it as current.
-    const live = usePreviousStatementOpening(r.gl)
-      ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance
-      : ledgerBalanceFor(r.gl,r.periodEnd);
-    return Number((Number(r.statementBalance)-live).toFixed(2));
+    return reconciliationReviewState(r).difference;
   }
 
   function runReconciliation() {
@@ -11142,26 +11166,18 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     if (status !== 'PASS') openReview(newId);
   }
 
-  function refreshReconciliation(r, ledgerBalanceOverride, verifiedIdsOverride) {
-    const defaultLedger = usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl, r.periodEnd, r.id).ledgerBalance : ledgerBalanceFor(r.gl, r.periodEnd);
-    const ledgerBalance = ledgerBalanceOverride !== undefined ? ledgerBalanceOverride : defaultLedger;
-    const difference = Number((r.statementBalance - ledgerBalance).toFixed(2));
-    const status = Math.abs(difference) < 0.01 ? 'PASS' : 'REVIEW';
-    setReconciliations(prev => prev.map(x => x.id === r.id ? { ...x, ledgerBalance, difference, status, verifiedIds: verifiedIdsOverride !== undefined ? verifiedIdsOverride : x.verifiedIds } : x));
+  function refreshReconciliation(r, checkedIds) {
+    const calc=reconciliationReviewState(r,checkedIds);
+    const status=calc.balanced?'PASS':'REVIEW';
+    setReconciliations(prev=>prev.map(x=>x.id===r.id?{
+      ...x,ledgerBalance:calc.clearedBalance,difference:calc.difference,status,verifiedIds:calc.checked,
+    }:x));
   }
 
   function openReview(id) {
     setReviewingId(id);
     const r = reconciliations.find(x => x.id === id);
-    // Para NSM se conservan solamente marcas que realmente pertenecen al período actual.
-    // Esto evita contadores imposibles como "33 of 32 verified" por IDs arrastrados.
-    if (r && usePreviousStatementOpening(r.gl)) {
-      const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
-      const validIds = new Set(calc.periodPostings.map(p => p.id));
-      setVerified((r.verifiedIds || []).filter(id => validIds.has(id)));
-    } else {
-      setVerified(r?.verifiedIds || []);
-    }
+    setVerified(r?reconciliationReviewState(r).checked:[]);
     setVerifiedHistory([]);
     setReviewSort({ column: null, dir: 'asc' });
     setReviewFilters({ dateFrom: '', dateTo: '', description: '', amount: '' });
@@ -11261,15 +11277,16 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
                 <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
-                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current calculated book balance; review and recalculate to save.' : ''}>
-                  {money(r.status === 'PASS' ? r.ledgerBalance : (usePreviousStatementOpening(r.gl)
-                    ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance : ledgerBalanceFor(r.gl,r.periodEnd)))}
+                <td style={{ padding: '6px 4px' }} title="Cleared balance from verified transactions (not every bank/card feed row)">
+                  {money(reconciliationReviewState(r).clearedBalance)}
+                  {reconciliationReviewState(r).outstandingCount > 0 &&
+                    <div style={{fontSize:10,color:'#64748B'}}>{reconciliationReviewState(r).outstandingCount} uncleared · {money(reconciliationReviewState(r).outstandingAmount)}</div>}
                 </td>
                 <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current difference; reconciliation remains pending until review is saved.' : ''}>
                   {money(reconciliationCurrentVariance(r))}
                 </td>
                 <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) < .01 ? '#0F6E56' : '#B00020', fontWeight: 700, fontSize: 12 }}>
-                  {r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) >= .01 ? 'OUT OF SYNC — review required' : r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}
+                  {r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) >= .01 ? 'CLEARED BALANCE CHANGED — review required' : r.status === 'PASS' ? 'APPROVED' : Math.abs(reconciliationCurrentVariance(r)) < .01 ? 'BALANCED — save review' : 'PENDING REVIEW'}
                 </span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
                   {(r.status !== 'PASS' || Math.abs(reconciliationCurrentVariance(r)) >= .01) && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
@@ -11285,26 +11302,9 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
       {reviewingId && (() => {
         const r = reconciliations.find(x => x.id === reviewingId);
         if (!r) return null;
-        let openingBalance = 0;
-        let periodTx = [];
-
-        if (usePreviousStatementOpening(r.gl)) {
-          const calc = nsmLedgerFor(r.gl, r.periodEnd, r.id);
-          openingBalance = calc.openingBalance;
-          periodTx = calc.periodPostings;
-        } else {
-          const priorApprovedVerified = new Set();
-          reconciliations.filter(x => x.gl === r.gl && x.status === 'PASS' && x.periodEnd < r.periodEnd && x.id !== r.id)
-            .forEach(x => (x.verifiedIds || []).forEach(id => priorApprovedVerified.add(id)));
-          const allMatching = [
-            ...transactions
-              .filter(t => t.sourceGL === r.gl && t.date <= r.periodEnd)
-              .map(t => ({ ...t, amount: sourceAccountAmount(r.gl, t.amount), rawAmount: t.amount })),
-            ...jePostingsFor(r.gl, r.periodEnd),
-          ];
-          openingBalance = allMatching.filter(t => priorApprovedVerified.has(t.id)).reduce((s, t) => s + t.amount, 0);
-          periodTx = allMatching.filter(t => !priorApprovedVerified.has(t.id)).sort((a, b) => a.date.localeCompare(b.date));
-        }
+        const reviewState=reconciliationReviewState(r,verified);
+        const openingBalance=reviewState.openingBalance;
+        const periodTx=reviewState.periodPostings;
         const availableDates = Array.from(new Set(periodTx.map(t => t.date))).sort();
         const filteredPeriodTxUnsorted = periodTx.filter(t => {
           if (reviewFilters.dateFrom && t.date < reviewFilters.dateFrom) return false;
@@ -11327,10 +11327,10 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const periodIds = new Set(periodTx.map(t => t.id));
         const currentVerified = verified.filter(id => periodIds.has(id));
         const verifiedTx = periodTx.filter(t => currentVerified.includes(t.id));
-        const liveLedger = openingBalance + verifiedTx.reduce((s, t) => s + t.amount, 0);
+        const liveLedger = reviewState.clearedBalance;
         const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
         const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
-        const liveDiff = Number((r.statementBalance - liveLedger).toFixed(2));
+        const liveDiff = reviewState.difference;
         const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amount.trim() || reviewSign || reviewDates.length > 0;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
@@ -11348,7 +11348,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 {usePreviousStatementOpening(r.gl) && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
-                <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified</span>
+                <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified · {reviewState.outstandingCount} outstanding</span>
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 12 }}>
                 {accounts.find(a => a.code === r.gl)?.type === 'Liability' ? (
@@ -11364,10 +11364,14 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 )}
               </div>
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
-                {accounts.find(a => a.code === r.gl)?.type === 'Liability'
-                  ? 'For credit cards and other liabilities, purchases increase the balance and payments reduce it. Check off each transaction that matches the statement, then click Recalculate to save.'
-                  : 'Check off each transaction that matches your bank statement exactly — only checked transactions count toward "Book" below. Edit the date, amount, or account on any that don\'t match, then check it once it\'s correct, and click Recalculate to save.'}
+                Mark only the transactions appearing on this statement. Unchecked entries are carried forward as outstanding,
+                not included in the cleared balance. A $0.00 difference means the selected transactions balance;
+                use Recalculate to save their verification and approval. Do not mark outstanding entries just to clear the list.
               </div>
+              {reviewState.outstandingCount>0 && <div style={{background:'#FFF8E8',padding:9,marginBottom:10,fontSize:12,borderRadius:6,color:'#805500'}}>
+                {reviewState.outstandingCount} outstanding transaction(s), net {money(reviewState.outstandingAmount)}.
+                Full ledger including outstanding: {money(reviewState.fullLedgerBalance)}.
+              </div>}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
                 <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
                   <input style={{ width: 180 }} value={reviewFilters.description} onChange={e => setReviewFilters(f => ({ ...f, description: e.target.value }))} /></div>
@@ -11450,7 +11454,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               {periodTx.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No transactions found for this account and period.</div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
                 <button onClick={() => setReviewingId(null)} style={iconBtn}>Close</button>
-                <button onClick={() => { refreshReconciliation(r, liveLedger, usePreviousStatementOpening(r.gl) ? currentVerified : verified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>Recalculate</button>
+                <button onClick={() => { refreshReconciliation(r, currentVerified); setReviewingId(null); }} style={{ background: '#17365D', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', cursor: 'pointer' }}>{Math.abs(liveDiff)<.01?'Save balanced review':'Save pending review'}</button>
               </div>
             </Card>
           </div>
