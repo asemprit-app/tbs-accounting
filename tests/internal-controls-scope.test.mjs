@@ -14,7 +14,8 @@ test('Client Requests are included by explicit owner approval; Health Score stay
  assert.doesNotMatch(app,/TBSClientHealthScore/);
  assert.doesNotMatch(center,/TBSClientRequests|TBSClientHealthScore/);
 });
-test('no final close or accounting certification is implied',()=>{
- assert.match(center,/Final period locking and approval are not enabled/);
- assert.match(center,/does not automatically validate accounting balances/);
+test('monthly close approval only locks workflow and does not imply accounting certification',()=>{
+ assert.match(center,/Accounting transactions are NOT locked/);
+ assert.match(center,/does not lock transactions or certify audited financial statements/);
+ assert.match(center,/not an automatic balance validation/);
 });
