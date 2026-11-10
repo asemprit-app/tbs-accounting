@@ -19,6 +19,11 @@ export function bankReconciliationDrift(reconciliations=[],postings=[],accounts=
 export function receivableLedgerBridge({invoices=[],invoiceTotal,postings=[],transactions=[],arCode,asOf=''}) {
   if(!arCode)return null;
   const issued=invoices.filter(i=>i.date && i.date<=asOf);
+  // No invoice subledger exists for this cutoff. A/R might legitimately be
+  // maintained by opening balances or manual journal entries (e.g. CEnergyS).
+  // Zero invoices is missing evidence, NOT a subledger balance of $0 to
+  // compare against the general ledger. Do not fabricate a discrepancy.
+  if (issued.length === 0) return null;
   const subledger=round(issued.reduce((sum,i)=>sum+(Number(invoiceTotal(i))||0)-invoicePaidAsOfDate(i,asOf),0));
   const generalLedger=round(postings.filter(p=>p.gl===arCode&&p.date<=asOf).reduce((s,p)=>s+(Number(p.amount)||0),0));
   const linked=linkedInvoiceTransactionIds(invoices);
