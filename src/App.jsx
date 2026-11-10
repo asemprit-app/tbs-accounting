@@ -1,3 +1,4 @@
+import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
@@ -6411,6 +6412,10 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
   const accumulatedIncome = incomeThroughDate(postings, accounts, invoices, invoiceRevenueSubtotal, to);
   const totalEquity = equityRows.reduce((s, r) => s + r.value, 0) + accumulatedIncome;
   const balanceSheetDifference = Number((totalAssets - totalLiabilities - totalEquity).toFixed(2));
+  const reconciliationDrift = bankReconciliationDrift(reconciliations, postings, accounts, to);
+  const receivableBridge = receivableLedgerBridge({ invoices, invoiceTotal, postings, transactions, arCode: tradeReceivableGL, asOf: to });
+  const receivableMismatch = receivableBridge && Math.abs(receivableBridge.variance) >= .01;
+
 
   const cashRows = cashAccts.map(a => ({ ...a, change: activityInPeriod(a.code, from, to) }));
   const netCashChange = cashRows.reduce((s, r) => s + r.change, 0);
@@ -6825,6 +6830,34 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           )}
         </div>
       </Card>
+
+      {(reconciliationDrift.length > 0 || receivableMismatch) && (
+        <Card style={{ marginBottom: 20, border: '1px solid #D9A441', background: '#FFFBF2' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#854F0B', marginBottom: 7 }}>
+            <AlertCircle size={17}/> Accounting validation — unresolved differences as of {to}
+          </div>
+          <p style={{ fontSize: 12, color: '#854F0B', marginTop: 0 }}>
+            A previously approved reconciliation does not match the current ledger, or the A/R general ledger differs from the invoices subledger. Do not treat this Balance Sheet as verified until the underlying transactions and journal entries are reviewed.
+          </p>
+          {reconciliationDrift.map(r => (
+            <div key={r.gl} style={{ fontSize: 13, marginBottom: 8 }}>
+              <strong>{r.gl} — {r.name}</strong>: Approved statement {money(r.statement)} · Current ledger {money(r.live)} ·
+              <strong style={{ color: '#B00020' }}> Difference {money(r.variance)}</strong>
+            </div>
+          ))}
+          {receivableMismatch && (
+            <div style={{ fontSize: 13 }}>
+              <strong>{tradeReceivableGL} — A/R</strong>: Invoices outstanding {money(receivableBridge.subledger)} ·
+              Ledger {money(receivableBridge.generalLedger)} ·
+              <strong style={{ color: '#B00020' }}> Difference {money(receivableBridge.variance)}</strong>
+              {receivableBridge.unmatchedCount > 0 && <div style={{ fontSize: 12, marginTop: 5 }}>
+                {receivableBridge.unmatchedCount} bank transaction(s), total {money(receivableBridge.unmatchedAmount)},
+                categorized to A/R without a recorded invoice-payment link. Inspect imported/legacy invoices before changing any ledger entry.
+              </div>}
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Reports using selected period</div>
@@ -11069,6 +11102,14 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
     };
   }
 
+  function reconciliationCurrentVariance(r) {
+    // Preserve the approved historical snapshot, but never misrepresent it as current.
+    const live = usePreviousStatementOpening(r.gl)
+      ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance
+      : ledgerBalanceFor(r.gl,r.periodEnd);
+    return Number((Number(r.statementBalance)-live).toFixed(2));
+  }
+
   function runReconciliation() {
     if (!form.gl || !form.statementBalance) { setError('Select the account and enter the statement balance.'); return; }
     setError('');
@@ -11221,13 +11262,13 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                     ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance : ledgerBalanceFor(r.gl,r.periodEnd)))}
                 </td>
                 <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current difference; reconciliation remains pending until review is saved.' : ''}>
-                  {money(r.status === 'PASS' ? r.difference : Number((r.statementBalance -
-                    (usePreviousStatementOpening(r.gl) ? nsmLedgerFor(r.gl,r.periodEnd,r.id).ledgerBalance
-                      : ledgerBalanceFor(r.gl,r.periodEnd))).toFixed(2)))}
+                  {money(reconciliationCurrentVariance(r))}
                 </td>
-                <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' ? '#0F6E56' : '#A16207', fontWeight: 700, fontSize: 12 }}>{r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}</span></td>
+                <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) < .01 ? '#0F6E56' : '#B00020', fontWeight: 700, fontSize: 12 }}>
+                  {r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) >= .01 ? 'OUT OF SYNC — review required' : r.status === 'PASS' ? 'APPROVED' : 'PENDING REVIEW'}
+                </span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
-                  {r.status !== 'PASS' && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
+                  {(r.status !== 'PASS' || Math.abs(reconciliationCurrentVariance(r)) >= .01) && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
                   <button onClick={() => deleteOne(r.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
