@@ -6530,6 +6530,9 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
         ['', 'Total Equity', totalEquity],
         ['', 'Liabilities + Equity', totalLiabilities + totalEquity],
         ['', 'Balance Check (Assets - Liabilities - Equity)', balanceSheetDifference],
+        ...(reconciliationDrift.length || receivableMismatch ? [['', 'ACCOUNTING VALIDATION REQUIRED — see differences below', '']] : []),
+        ...reconciliationDrift.map(r => [r.gl, `UNRESOLVED — ${r.name}: current ledger less approved statement`, r.variance]),
+        ...(receivableMismatch ? [[tradeReceivableGL, 'UNRESOLVED — A/R general ledger less invoice subledger', receivableBridge.variance]] : []),
       ];
       return { title: `Balance Sheet — as of ${to}`, header: ['Code', 'Account', 'Amount'], rows };
     }
@@ -6597,6 +6600,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       const rows = [
         ...trialRows.map(r => [r.code, r.name, r.type, r.debit || '', r.credit || '']),
         ['', 'Total', '', totalDebit, totalCredit],
+        ...(reconciliationDrift.length || receivableMismatch ? [['', 'ACCOUNTING VALIDATION REQUIRED — review bank/A/R discrepancies', '', '', '']] : []),
       ];
       return { title: `Trial Balance — as of ${to}`, header: ['Code', 'Account', 'Type', 'Debit', 'Credit'], rows };
     }
