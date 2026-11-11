@@ -165,7 +165,7 @@ export default function TBSMonthlyCloseOverview({clients=[],onOpenClient}){
             <td style={{padding:10}}>
               <button type="button" style={{background:'#17365D',color:'#fff',border:0,borderRadius:5,
                 fontSize:12,padding:'7px 9px',cursor:'pointer',whiteSpace:'nowrap'}}
-                onClick={()=>onOpenClient?.(row.clientId)}>Abrir cierre</button>
+                onClick={()=>onOpenClient?.(row.clientId,month)}>Abrir cierre</button>
             </td>
           </tr>)}</tbody>
         </table>
