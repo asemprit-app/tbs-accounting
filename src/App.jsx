@@ -1592,7 +1592,8 @@ async function fetchAllRows(table, clientId, orderCol) {
         {tab === 'client-requests' && <TBSClientRequests clientId={selectedClientId} isStaff={isStaff} />}
         {isStaff && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
         {isStaff && tab === 'monthly-close-overview' && <TBSMonthlyCloseOverview clients={clients}
-          onOpenClient={(id)=>{
+          onOpenClient={(id,period)=>{
+            window.sessionStorage.setItem('tbs_open_close_month_once',period);
             if(id===selectedClientId)setTab('monthly-close');
             else {
               window.sessionStorage.setItem('tbs_open_tab_once','monthly-close');
