@@ -20,7 +20,7 @@ function People({people,value,onChange,disabled=false,empty='Unassigned'}) {
 export default function TBSControlCenter({clientId,view='close'}){
  const [month,setMonth]=useState(()=>{
    const requested=window.sessionStorage.getItem('tbs_open_close_month_once');
-   if(requested&&/^\\d{4}-\\d{2}$/.test(requested)){
+   if(requested&&/^\d{4}-\d{2}$/.test(requested)){
      window.sessionStorage.removeItem('tbs_open_close_month_once');
      return requested;
    }
