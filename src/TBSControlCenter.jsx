@@ -1,19 +1,9 @@
 import React, {useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
-import {isCloseReadyForReview,completedCloseTaskCount,REQUIRED_CLOSE_TASK_KEYS} from './tbsCloseRules.js';
+import {CLOSE_TASKS,closeTaskCounts,REQUIRED_CLOSE_TASK_KEYS} from './tbsCloseRules.js';
 import {canRequestCloseReview,canApproveClose,reviewsForMonth,reviewCounts} from './tbsCloseReviewWorkflow.js';
 
-const defaults=[
-  ['statements','Bank statements received'],
-  ['reconciliation','Bank reconciliations verified'],
-  ['cards','Credit cards reconciled'],
-  ['uncategorized','Uncategorized transactions reviewed'],
-  ['payroll','Payroll and services verified'],
-  ['journal','Journal entries validated'],
-  ['balance','Balance Sheet validated'],
-  ['income','Profit & Loss validated'],
-  ['report','Client report delivered'],
-];
+const defaults=CLOSE_TASKS.map(task=>[task.key,task.title]);
 const panel={background:'#fff',padding:18,border:'1px solid #dde3eb',borderRadius:8,marginBottom:16};
 const btn={background:'#17365D',color:'#fff',border:0,borderRadius:6,padding:'9px 14px',cursor:'pointer'};
 const field={padding:8,border:'1px solid #CBD5E1',borderRadius:5,minWidth:0};
@@ -21,7 +11,7 @@ const get=result=>{if(result.error)throw result.error;return result.data};
 const currentMonth=()=>{const d=new Date();return String(d.getFullYear())+'-'+String(d.getMonth()+1).padStart(2,'0');};
 const endOfMonth=m=>new Date(Date.UTC(Number(m.slice(0,4)),Number(m.slice(5,7)),0)).toISOString().slice(0,10);
 const dateOnly=v=>v||null;
-function Status({value}){return <span style={{fontSize:11,fontWeight:700,color:['OPEN','HIGH','URGENT','BLOCKED'].includes(value)?'#9B3A25':'#17365D'}}>{value}</span>;}
+function Status({value}){const label=value==='NOT_APPLICABLE'?'No aplica':value;return <span style={{fontSize:11,fontWeight:700,color:['OPEN','HIGH','URGENT','BLOCKED'].includes(value)?'#9B3A25':'#17365D'}}>{label}</span>;}
 function People({people,value,onChange,disabled=false,empty='Unassigned'}) {
  return <select style={{...field,width:'100%'}} value={value||''} disabled={disabled} onChange={e=>onChange(e.target.value||null)}>
   <option value="">{empty}</option>{people.map(p=><option key={p.id} value={p.id}>{p.email}</option>)}
@@ -39,6 +29,7 @@ export default function TBSControlCenter({clientId,view='close'}){
  const start=month+'-01',end=endOfMonth(month);
  const periodReviews=useMemo(()=>reviewsForMonth(reviews,month),[reviews,month]);
  const counts=reviewCounts(periodReviews);
+ const taskSummary=closeTaskCounts(tasks);
  const locked=close?.status==='CLOSED';
 
  async function load({scan=true}={}){
@@ -100,21 +91,21 @@ export default function TBSControlCenter({clientId,view='close'}){
      const {data:{user}}=await supabase.auth.getUser();
      const next={...patch};
      if(Object.hasOwn(patch,'status')){
-       next.completed_by=patch.status==='DONE'?user?.id:null;
-       next.completed_at=patch.status==='DONE'?new Date().toISOString():null;
+       next.completed_by=['DONE','NOT_APPLICABLE'].includes(patch.status)?user?.id:null;
+       next.completed_at=['DONE','NOT_APPLICABLE'].includes(patch.status)?new Date().toISOString():null;
      }
      get(await supabase.from('tbs_close_tasks').update(next).eq('close_id',close.id).eq('id',t.id));
    });
  }
  async function markReady(){
    if(!close||!canRequestCloseReview(tasks,periodReviews)){
-     setError('Finish all nine tasks and resolve HIGH/URGENT items for this period first.');return;
+     setError('Complete all ten tasks as DONE or N/A and resolve HIGH/URGENT items for this period first.');return;
    }
    await updateClose({status:'READY_FOR_REVIEW'});
  }
  async function approveClose(){
    if(!canApproveClose(close,tasks,periodReviews,actorId)){
-     setError('Approval requires nine completed tasks, no critical issues and a supervisor different from the assigned preparer.');return;
+     setError('Approval requires ten tasks DONE or N/A, no critical issues and a supervisor different from the assigned preparer.');return;
    }
    if(!window.confirm('Approve the monthly close? The checklist will be locked and this action is audited. Accounting transactions are NOT locked.'))return;
    await updateClose({status:'CLOSED'});
@@ -164,11 +155,11 @@ export default function TBSControlCenter({clientId,view='close'}){
   {error&&<div role="alert" style={{...panel,color:'#B91C1C'}}>{error}</div>}
   {notice&&<p style={{color:'#166534'}}>{notice}</p>}
   {view==='close'?<>
-    <p style={{fontSize:13,color:'#475569'}}>Checklist of nine activities, with responsibility and deadlines. Completing a task is a manual attestation, not an automatic balance validation.</p>
+    <p style={{fontSize:13,color:'#475569'}}>Checklist of ten activities in the same order for every client. Mark DONE when verified or N/A when not applicable. Completing a task is a manual attestation, not an automatic balance validation.</p>
     {!close&&<button style={btn} disabled={busy} onClick={initialize}>Create monthly close</button>}
     {close&&<div style={panel}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-        <h3 style={{margin:0}}>Monthly Close: {completedCloseTaskCount(tasks)}/{REQUIRED_CLOSE_TASK_KEYS.length}</h3>
+        <h3 style={{margin:0}}>Monthly Close: {taskSummary.completed}/{REQUIRED_CLOSE_TASK_KEYS.length} · DONE: {taskSummary.done} · N/A: {taskSummary.notApplicable}</h3>
         <button style={{...btn,background:'#64748b'}} disabled={busy||locked} onClick={initialize}>Add missing tasks</button>
       </div>
       <label style={{display:'block',fontSize:13,marginTop:15,marginBottom:12}}>Preparer / Responsible
@@ -176,16 +167,58 @@ export default function TBSControlCenter({clientId,view='close'}){
       </label>
       <div style={{overflowX:'auto'}}>
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-          <thead><tr style={{background:'#F1F5F9'}}><th style={{padding:8,textAlign:'left'}}>Done</th><th style={{padding:8,textAlign:'left'}}>Close task</th><th style={{padding:8,textAlign:'left'}}>Responsible</th><th style={{padding:8,textAlign:'left'}}>Due date</th><th style={{padding:8,textAlign:'left'}}>Status</th></tr></thead>
-          <tbody>{tasks.map(t=><tr key={t.id} style={{borderBottom:'1px solid #E2E8F0'}}>
-            <td style={{padding:8}}><input aria-label={'Mark '+t.title+' complete'} type="checkbox" checked={t.status==='DONE'} disabled={busy||locked} onChange={e=>updateTask(t,{status:e.target.checked?'DONE':'PENDING'})}/></td>
-            <td style={{padding:8,minWidth:185}}>{t.title}</td>
-            <td style={{padding:8,minWidth:165}}><People people={people} disabled={busy||locked} value={t.assigned_to} onChange={id=>updateTask(t,{assigned_to:id})}/></td>
-            <td style={{padding:8}}><input type="date" style={field} defaultValue={t.due_date||''} key={t.id+'date'+(t.due_date||'')} disabled={busy||locked} onBlur={e=>{if((t.due_date||'')!==e.target.value)updateTask(t,{due_date:dateOnly(e.target.value)})}}/></td>
-            <td style={{padding:8}}><Status value={t.status}/>{t.completed_at&&<div style={{color:'#64748b',fontSize:10}}>{new Date(t.completed_at).toLocaleDateString()}</div>}</td>
-          </tr>)}</tbody>
+          <thead><tr style={{background:'#F1F5F9'}}>
+            <th style={{padding:8,textAlign:'left'}}>#</th>
+            <th style={{padding:8,textAlign:'left'}}>Monthly close task</th>
+            <th style={{padding:8,textAlign:'left'}}>Status (DONE / N/A)</th>
+            <th style={{padding:8,textAlign:'left'}}>Responsible</th>
+            <th style={{padding:8,textAlign:'left'}}>Due date</th>
+            <th style={{padding:8,textAlign:'left'}}>Verified by / date</th>
+          </tr></thead>
+          <tbody>{CLOSE_TASKS.map((definition,index)=>{
+            const t=tasks.find(item=>item.task_key===definition.key);
+            return <tr key={definition.key} style={{borderBottom:'1px solid #E2E8F0',
+              background:t?.status==='NOT_APPLICABLE'?'#F8FAFC':'transparent'}}>
+              <td style={{padding:8,color:'#64748B'}}>{index+1}</td>
+              <td style={{padding:8,minWidth:185,fontWeight:600}}>{definition.title}
+                {t?.status==='NOT_APPLICABLE'&&<div style={{marginTop:4,color:'#64748B',fontSize:11}}>No aplica a este cliente / período</div>}
+              </td>
+              <td style={{padding:8,minWidth:145}}>
+                {t?<select aria-label={`Status: ${definition.title}`} style={{...field,width:'100%',
+                  color:t.status==='NOT_APPLICABLE'?'#475569':'#17365D'}}
+                  value={t.status} disabled={busy||locked} onChange={e=>updateTask(t,{status:e.target.value})}>
+                  <option value="PENDING">Pending</option>
+                  <option value="IN_PROGRESS">In progress</option>
+                  <option value="DONE">Done</option>
+                  <option value="NOT_APPLICABLE">N/A — No aplica</option>
+                  <option value="BLOCKED">Blocked</option>
+                </select>:<span style={{color:'#B91C1C'}}>Not created — use Add missing tasks</span>}
+                {t?.status==='NOT_APPLICABLE'&&<input aria-label={`N/A reason: ${definition.title}`}
+                  style={{...field,width:'100%',marginTop:5,fontSize:11}} placeholder="N/A reason (optional)"
+                  key={t.id+'-na-'+(t.notes||'')} defaultValue={t.notes||''} disabled={busy||locked}
+                  onBlur={e=>{if((t.notes||'')!==e.target.value)updateTask(t,{notes:e.target.value})}}/>}
+              </td>
+              <td style={{padding:8,minWidth:165}}>
+                {t&&<People people={people} disabled={busy||locked} value={t.assigned_to}
+                  onChange={id=>updateTask(t,{assigned_to:id})}/>}
+              </td>
+              <td style={{padding:8}}>
+                {t&&<input type="date" style={field} defaultValue={t.due_date||''}
+                  key={t.id+'date'+(t.due_date||'')} disabled={busy||locked}
+                  onBlur={e=>{if((t.due_date||'')!==e.target.value)updateTask(t,{due_date:dateOnly(e.target.value)})}}/>}
+              </td>
+              <td style={{padding:8,color:'#64748B',fontSize:11}}>
+                {t&&<><Status value={t.status}/>
+                  {t.completed_at&&<div>{getPerson(t.completed_by)} · {new Date(t.completed_at).toLocaleDateString()}</div>}
+                </>}
+              </td>
+            </tr>;
+          })}</tbody>
         </table>
       </div>
+      {taskSummary.pending>0&&<p style={{fontSize:12,color:'#805500'}}>
+        {taskSummary.pending} task(s) pending. DONE and N/A both count toward Ready for review.
+      </p>}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginTop:18}}>
         <button style={{...btn,background:canRequestCloseReview(tasks,periodReviews)?'#17365D':'#94A3B8'}} disabled={busy||locked||!canRequestCloseReview(tasks,periodReviews)} onClick={markReady}>Ready for review</button>
         <button style={{...btn,background:canApproveClose(close,tasks,periodReviews,actorId)?'#0F6E56':'#94A3B8'}} disabled={busy||!canApproveClose(close,tasks,periodReviews,actorId)} onClick={approveClose}>Supervisor: Approve close</button>
