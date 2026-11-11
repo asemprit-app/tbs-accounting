@@ -6,12 +6,12 @@ import {
 
 const full=()=>REQUIRED_CLOSE_TASK_KEYS.map(task_key=>({task_key,status:'DONE'}));
 
-test('Nine distinct required tasks are needed; no partial checklist can pass',()=>{
-  assert.equal(REQUIRED_CLOSE_TASK_KEYS.length,9);
+test('Ten distinct required tasks are needed; no partial checklist can pass',()=>{
+  assert.equal(REQUIRED_CLOSE_TASK_KEYS.length,10);
   for(let i=0;i<REQUIRED_CLOSE_TASK_KEYS.length;i++){
     const list=full().filter((_,index)=>index!==i);
     assert.equal(isCloseReadyForReview(list),false,REQUIRED_CLOSE_TASK_KEYS[i]);
-    assert.equal(completedCloseTaskCount(list),8);
+    assert.equal(completedCloseTaskCount(list),9);
   }
 });
 test('Every required task done passes once, even if extra tasks are present',()=>{
@@ -22,10 +22,14 @@ test('Duplicated task rows cannot replace a missing mandatory task',()=>{
   assert.equal(isCloseReadyForReview([...full().slice(0,8),full()[0]]),false);
 });
 test('Unrecognized or incomplete statuses do not count as completed',()=>{
-  for(const status of ['PENDING','IN_PROGRESS','BLOCKED','NOT_APPLICABLE','COMPLETED',undefined]){
+  for(const status of ['PENDING','IN_PROGRESS','BLOCKED','COMPLETED',undefined]){
     const list=full();list[2]={task_key:list[2].task_key,status};
     assert.equal(isCloseReadyForReview(list),false,String(status));
   }
+});
+test('N/A is a valid completed status',()=>{
+  const tasks=full();tasks[2].status='NOT_APPLICABLE';
+  assert.equal(isCloseReadyForReview(tasks),true);
 });
 test('Missing, malformed or empty task collections fail safely',()=>{
   assert.equal(isCloseReadyForReview(),false);

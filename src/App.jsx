@@ -17,6 +17,7 @@ import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Che
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
+import TBSMonthlyCloseOverview from './TBSMonthlyCloseOverview.jsx';
 import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import TBSRetentionsView from './TBSRetentionsView.jsx';
@@ -946,7 +947,15 @@ function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClien
   const portalLimited = accessRole !== 'staff';
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [tab, setTab] = useState(portalLimited ? 'payroll' : 'dashboard');
+  const [tab, setTab] = useState(()=>{
+    if(portalLimited)return 'payroll';
+    const requested=window.sessionStorage.getItem('tbs_open_tab_once');
+    if(requested==='monthly-close'){
+      window.sessionStorage.removeItem('tbs_open_tab_once');
+      return requested;
+    }
+    return 'dashboard';
+  });
   const [transactions, setTransactionsRaw] = useState([]);
   const [invoices, setInvoicesRaw] = useState([]);
   const [customers, setCustomersRaw] = useState([]);
@@ -1582,6 +1591,15 @@ async function fetchAllRows(table, clientId, orderCol) {
         <>
         {tab === 'client-requests' && <TBSClientRequests clientId={selectedClientId} isStaff={isStaff} />}
         {isStaff && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
+        {isStaff && tab === 'monthly-close-overview' && <TBSMonthlyCloseOverview clients={clients}
+          onOpenClient={(id,period)=>{
+            window.sessionStorage.setItem('tbs_open_close_month_once',period);
+            if(id===selectedClientId)setTab('monthly-close');
+            else {
+              window.sessionStorage.setItem('tbs_open_tab_once','monthly-close');
+              onSwitchClient(id);
+            }
+          }}/>}
         {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin clients={clients} selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
@@ -1771,6 +1789,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     ...(isStaff ? [{ id: 'retentions', label: 'Retenciones / Retentions', icon: ListChecks }] : []),
     ...(isStaff ? [
       { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
+      { id: 'monthly-close-overview', label: 'CFO Close Overview', icon: LayoutDashboard },
       { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle },
       { id: 'check-templates', label: 'Check Templates', icon: Printer }
     ] : []),
