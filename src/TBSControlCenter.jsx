@@ -18,7 +18,14 @@ function People({people,value,onChange,disabled=false,empty='Unassigned'}) {
  </select>;
 }
 export default function TBSControlCenter({clientId,view='close'}){
- const [month,setMonth]=useState(currentMonth);
+ const [month,setMonth]=useState(()=>{
+   const requested=window.sessionStorage.getItem('tbs_open_close_month_once');
+   if(requested&&/^\\d{4}-\\d{2}$/.test(requested)){
+     window.sessionStorage.removeItem('tbs_open_close_month_once');
+     return requested;
+   }
+   return currentMonth();
+ });
  const [close,setClose]=useState(null),[tasks,setTasks]=useState([]),[reviews,setReviews]=useState([]);
  const [people,setPeople]=useState([]),[actorId,setActorId]=useState(null);
  const [title,setTitle]=useState(''),[description,setDescription]=useState(''),[priority,setPriority]=useState('NORMAL');
