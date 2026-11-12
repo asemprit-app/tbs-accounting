@@ -9,6 +9,8 @@ import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from 
 import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 import {monthlySalesSeries} from './tbsExecutiveMonthlySales.js';
 import TBSMonthlySalesVisual from './TBSMonthlySalesVisual.jsx';
+import {fiveLargestExpenses} from './tbsExecutiveExpenseFocus.js';
+import {BarChart as VerticalBarChart,Bar,XAxis,YAxis,CartesianGrid,ResponsiveContainer,Tooltip,ReferenceLine,Cell} from 'recharts';
 
 const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[],clientSections:[...DEFAULT_CLIENT_SECTIONS]});
 const field={width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #CBD5E1',borderRadius:6,fontSize:13};
@@ -24,19 +26,24 @@ function List({entries,empty='Sin hallazgos adicionales respaldados por el perí
  </ul>:<p style={{fontSize:12,color:'#64748B'}}>{empty}</p>;
 }
 function BarChart({title,items}){
- const max=Math.max(1,...items.map(o=>Math.max(0,Number(o.value)||0)));
- return <div style={{border:'1px solid #E0E8F0',borderRadius:7,padding:13}}>
-  <strong style={{color:'#17365D',fontSize:13}}>{title}</strong>
-  {items.map((entry,i)=><div key={entry.label} style={{marginTop:11}}>
-   <div style={{fontSize:11,display:'flex',justifyContent:'space-between',gap:7}}>
-    <span>{entry.label}</span><strong>{entry.value==null?'N/D':money(entry.value)}</strong>
-   </div>
-   <div style={{height:9,background:'#E8EEF4',borderRadius:4,overflow:'hidden',marginTop:4}}>
-    <div style={{background:i===2?'#819FBD':i===1?'#4D7CA5':'#17365D',height:'100%',
-      width:(Math.max(0,Number(entry.value)||0)/max*100)+'%'}}/>
-   </div>
-  </div>)}
-  <div style={{color:'#64748B',fontSize:10,marginTop:10}}>Las barras muestran magnitudes positivas; los números negativos mantienen su signo.</div>
+ const input=items.map((item,index)=>({label:item.label,value:Number(item.value)||0,index}));
+ const colors=['#3C78AC','#D1A354','#237B70','#7795B0'];
+ return <div style={{border:'1px solid #DEE6EF',borderRadius:7,padding:12,minWidth:0}}>
+  <strong style={{fontSize:13,color:'#17365D'}}>{title}</strong>
+  <div style={{width:'100%',height:236,marginTop:10}}>
+   <ResponsiveContainer width="100%" height="100%">
+    <VerticalBarChart data={input} margin={{top:8,bottom:30,left:1,right:8}}>
+     <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+     <XAxis dataKey="label" interval={0} tick={{fontSize:10}} height={43}/>
+     <YAxis width={55} tick={{fontSize:10}} tickFormatter={v=>new Intl.NumberFormat('en-US',{notation:'compact'}).format(v)}/>
+     <Tooltip formatter={v=>money(v)}/>
+     <ReferenceLine y={0} stroke="#566A7B"/>
+     <Bar dataKey="value" name="Importe" maxBarSize={51} isAnimationActive={false}>
+      {input.map(r=><Cell key={r.label} fill={r.value<0?'#AE5045':colors[r.index%colors.length]}/>)}
+     </Bar>
+    </VerticalBarChart>
+   </ResponsiveContainer>
+  </div>
  </div>;
 }
 export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose}){
@@ -76,7 +83,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  const monthlyKpis=buildMonthKpiRows(selected,monthlyRows);
  const monthlyFindings=monthlyComparisonFindings(monthlyRows);
  let monthlySales={rows:[],totalSales:0,error:''};
- try{monthlySales=monthlySalesSeries(from,to,financialsForRange);}catch(e){monthlySales={rows:[],totalSales:0,error:e.message||String(e)};}
+ try{monthlySales=monthlySalesSeries(from,to,financialsForRange);}catch(e){monthlySales={rows:[],totalSales:0,totalExpenses:0,totalNet:0,error:e.message||String(e)};}
+ const topExpenses=fiveLargestExpenses(financials.expenseRows,financials.expenses);
  const exportError=loading?'Espera a que cargue el reporte.':
    !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
    notes.clientSections.includes('monthlySales')&&monthlySales.error?monthlySales.error:
@@ -89,7 +97,9 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      financials,narrative,notes,clientSections:normalizeClientSections(notes.clientSections),
      comparisonPeriod,comparison,comparisonHasActivity,
      monthlyRows,monthlyKpis,monthlyFindings,
-     monthlySalesRows:monthlySales.rows,monthlySalesTotal:monthlySales.totalSales};
+     monthlySalesRows:monthlySales.rows,monthlySalesTotal:monthlySales.totalSales,
+     monthlyExpenseTotal:monthlySales.totalExpenses,monthlyNetTotal:monthlySales.totalNet,
+     topExpenses};
  }
 
 
@@ -431,13 +441,36 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    </div>
    {trend!==null&&<p style={{fontSize:12,color:'#64748B'}}>Variación de ventas frente al período seleccionado: <strong>{trend>0?'+':''}{trend.toFixed(1)}%</strong>. No es una comparación contra el mercado.</p>}
   </>)}
-  {section('Ventas mensuales — gráfica y tabla',monthlySales.error?
+  {section('Resultados mensuales — gráfica de barras verticales y tabla',monthlySales.error?
     <p style={{color:'#B91C1C',fontSize:12}}>{monthlySales.error}</p>:
     <TBSMonthlySalesVisual data={monthlySales} from={from} to={to}/>)}
   {section('Gráficas para la reunión',<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(290px,1fr))',gap:12}}>
    <BarChart title="Ingresos, gastos y ganancia neta" items={[{label:'Ventas',value:metrics.revenue},{label:'Gastos',value:metrics.expenses},{label:'Ganancia neta',value:metrics.net_income}]}/>
    <BarChart title="Balances contables al cierre" items={[{label:'Efectivo',value:metrics.cash},{label:'A/R',value:metrics.receivables},{label:'Pasivos',value:metrics.liabilities}]}/>
   </div>)}
+  {section('Cinco gastos principales del período',<>
+    <p style={{fontSize:12,color:'#64748B'}}>
+      Las cuentas se ordenan según su importe de gasto registrado entre {from} y {to},
+      incluyendo costos de ventas. Se muestran solo gastos positivos; los créditos
+      o ajustes negativos no se presentan como categorías principales.
+    </p>
+    {topExpenses.rows.length>0?<div style={{overflowX:'auto'}}>
+     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+      <thead><tr style={{background:'#EDF3F8',color:'#17365D'}}>
+       <th style={{padding:9,textAlign:'left'}}>Cuenta de gasto</th>
+       <th style={{padding:9,textAlign:'right'}}>Importe</th>
+       <th style={{padding:9,textAlign:'right'}}>% del total de gastos</th>
+      </tr></thead>
+      <tbody>{topExpenses.rows.map(r=><tr key={r.code} style={{borderBottom:'1px solid #E2E8F0'}}>
+       <td style={{padding:8}}>{r.code} · {r.name}{r.isCogs?' (Costo de ventas)':''}</td>
+       <td style={{padding:8,textAlign:'right'}}>{money(r.amount)}</td>
+       <td style={{padding:8,textAlign:'right'}}>{r.percent===null?'N/D':r.percent.toFixed(1)+'%'}</td>
+      </tr>)}</tbody>
+     </table>
+    </div>:<p style={{fontSize:12,color:'#64748B'}}>No hay cuentas de gasto positivo que analizar en este período.</p>}
+    <strong style={{fontSize:13,color:'#17365D'}}>Hallazgos y prioridades</strong>
+    <List entries={topExpenses.findings}/>
+   </>)}
   {section('Hallazgos — interpretación sencilla',<List entries={narrative.findings}/>)}
   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(290px,1fr))',gap:13,marginTop:14}}>
    <div style={{...panel,marginTop:0}}><h3 style={{color:'#17365D',marginTop:0}}>Oportunidades</h3><List entries={narrative.opportunities}/></div>

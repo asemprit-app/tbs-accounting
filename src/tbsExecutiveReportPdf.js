@@ -78,16 +78,28 @@ export function createExecutivePdf(payload){
  }
  function bars(title,entries){
   heading(title);
-  const max=Math.max(1,...entries.map(item=>Math.max(0,Number(item.value)||0)));
-  for(const item of entries){
-   ensure(39);
-   text(item.label,{size:8.5,after:2});
-   const width=Math.max(0,Math.min(1,(Number(item.value)||0)/max))*maxW*.68;
-   doc.setFillColor(231,238,244);doc.rect(left,y,maxW*.7,9,'F');
-   doc.setFillColor(71,112,157);if(width>0)doc.rect(left,y,width,9,'F');
-   font(8,true);doc.text(money(item.value),right,y+8,{align:'right'});
-   y+=21;
+  ensure(210);
+  const chartTop=y+11,chartHeight=142,baseX=left+38,chartWidth=maxW-43;
+  const vals=entries.map(e=>Number(e.value)||0),top=Math.max(0,...vals),bot=Math.min(0,...vals);
+  const high=top===bot?top+1:top,low=top===bot?bot-1:bot;
+  const yFor=n=>chartTop+(high-n)/(high-low)*chartHeight;
+  doc.setDrawColor(220,230,239);
+  for(let k=0;k<=4;k++){
+    const yy=chartTop+chartHeight*k/4;
+    doc.line(baseX,yy,baseX+chartWidth,yy);
   }
+  const baseline=yFor(0);
+  doc.setDrawColor(75,94,112);doc.line(baseX,baseline,baseX+chartWidth,baseline);
+  const slot=chartWidth/entries.length;
+  for(let i=0;i<entries.length;i++){
+    const entry=entries[i],value=vals[i],py=yFor(value);
+    const bw=Math.min(53,slot*.55),x=baseX+(i+.5)*slot-bw/2;
+    doc.setFillColor(...(value<0?[183,75,71]:i===0?[60,120,172]:i===1?[209,163,84]:[35,123,112]));
+    if(value!==0)doc.rect(x,Math.min(py,baseline),bw,Math.max(.6,Math.abs(py-baseline)),'F');
+    font(8,false,grey);doc.text(normalize(entry.label).slice(0,22),baseX+(i+.5)*slot,chartTop+chartHeight+16,{align:'center'});
+    font(8,true);doc.text(money(value),baseX+(i+.5)*slot,chartTop+chartHeight+27,{align:'center'});
+  }
+  y=chartTop+chartHeight+43;
  }
  function writeSection(title,content){heading(title);items(content);}
  font(9,true);doc.text('TWELVE BUSINESS STRATEGIES LLC',left,y);
@@ -150,33 +162,63 @@ export function createExecutivePdf(payload){
      r.changePercent!==null?r.changePercent.toFixed(1)+'%':money(r.delta),
   ]),[180,115,115,maxW-410]);
  }
- if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length>0){
-  const monthly=payload.monthlySalesRows;
-  heading('Ventas mensuales - grafica de barras');
-  const largest=Math.max(1,...monthly.map(r=>Math.abs(Number(r.sales)||0)));
-  for(const row of monthly){
-    ensure(32);
-    font(8.5,true);doc.text(normalize(row.label+(row.partialMonth?' *':'')),left,y);y+=10;
-    doc.setFillColor(232,239,246);doc.rect(left,y,maxW*.73,10,'F');
-    const length=Math.max(0,Math.min(1,Math.abs(Number(row.sales)||0)/largest))*maxW*.73;
-    if(length>0){
-      doc.setFillColor(...(row.sales<0?[175,78,67]:[61,110,162]));
-      doc.rect(left,y,length,10,'F');
+ if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length){
+  const months=payload.monthlySalesRows;
+  const palette=[[60,120,172],[209,163,84],[35,123,112]];
+  heading('Ventas, gastos y ganancia neta - barras verticales por mes');
+  for(let start=0;start<months.length;start+=6){
+    const group=months.slice(start,start+6);
+    ensure(295);
+    const names=['Ventas','Gastos','Ganancia neta'];
+    const fields=['sales','expenses','netIncome'];
+    let lx=left;
+    for(let k=0;k<names.length;k++){
+      doc.setFillColor(...palette[k]);doc.rect(lx,y-8,9,9,'F');
+      font(8,false,grey);doc.text(names[k],lx+13,y);
+      lx+=k===2?92:k===1?96:80;
     }
-    font(8,false);doc.text(money(row.sales),right,y+9,{align:'right'});
-    y+=20;
+    y+=19;
+    const plotTop=y+18,plotH=176;
+    const plotX=left+48,plotW=maxW-59;
+    const values=group.flatMap(row=>fields.map(key=>Number(row[key])||0));
+    const upper=Math.max(0,...values),lower=Math.min(0,...values);
+    const hi=upper===lower?upper+1:upper,lo=upper===lower?lower-1:lower;
+    const scale=v=>plotTop+(hi-v)/(hi-lo)*plotH;
+    doc.setDrawColor(222,229,236);
+    for(let k=0;k<=4;k++){
+      const yy=plotTop+k*plotH/4;
+      doc.line(plotX,yy,plotX+plotW,yy);
+      const tick=hi-(hi-lo)*k/4;
+      font(7,false,grey);
+      doc.text(tick.toLocaleString('en-US',{notation:'compact',maximumFractionDigits:1}),plotX-5,yy+2,{align:'right'});
+    }
+    const zero=scale(0);
+    doc.setDrawColor(90,104,119);doc.line(plotX,zero,plotX+plotW,zero);
+    const slotW=plotW/group.length,barW=Math.min(17,(slotW-12)/3);
+    for(let i=0;i<group.length;i++){
+      const row=group[i],center=plotX+(i+.5)*slotW;
+      for(let k=0;k<3;k++){
+        const v=Number(row[fields[k]])||0,py=scale(v);
+        const x=center+(k-1.5)*barW+2;
+        doc.setFillColor(...(k===2&&v<0?[183,75,71]:palette[k]));
+        if(Math.abs(v)>0)doc.rect(x,Math.min(py,zero),Math.max(2,barW-2),Math.max(.7,Math.abs(py-zero)),'F');
+      }
+      font(7.5,false,grey);
+      doc.text(String(row.label)+(row.partialMonth?' *':''),center,plotTop+plotH+14,{align:'center'});
+    }
+    y=plotTop+plotH+36;
+    if(start+group.length<months.length)text('Continuacion de las barras mensuales en el siguiente bloque.',{size:8,color:grey});
   }
-  heading('Tabla de ventas mensuales');
-  const details=monthly.map(row=>[
-    row.label+(row.partialMonth?' *':''),
-    money(row.sales),
-    row.change===null?'-':(row.change>0?'+':'')+money(row.change),
+  heading('Tabla mensual de ventas, gastos y ganancia neta');
+  const tableRows=months.map(row=>[
+    row.label+(row.partialMonth?' *':''),money(row.sales),money(row.expenses),
+    money(row.netIncome),
     row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
   ]);
-  details.push(['TOTAL',money(payload.monthlySalesTotal),'-','-']);
-  table(['Mes','Ventas','Cambio USD','Cambio %'],details,[132,141,122,maxW-395]);
-  if(monthly.some(row=>row.partialMonth))text('* Mes parcial: solamente los dias dentro del periodo seleccionado.',{size:8,color:grey});
-  text('Variacion porcentual N/D cuando el mes previo tiene ventas cero o negativas. La barra roja indica ventas netas negativas.',{size:8,color:grey});
+  tableRows.push(['TOTAL',money(payload.monthlySalesTotal),money(payload.monthlyExpenseTotal),money(payload.monthlyNetTotal),'-']);
+  table(['Mes','Ventas','Gastos','Neto','Cambio ventas'],tableRows,[88,103,103,103,maxW-397]);
+  if(months.some(row=>row.partialMonth))text('* Mes parcial: solo los dias dentro del periodo seleccionado.',{size:8,color:grey});
+  text('Gastos incluye costo de ventas. Las barras bajo cero representan saldos negativos; rojo significa perdida neta. El cambio en ventas es N/D cuando la base es cero o negativa.',{size:8,color:grey});
  }
  if(include('charts')){
  bars('Ventas, gastos y ganancia neta',[
@@ -185,6 +227,15 @@ export function createExecutivePdf(payload){
  bars('Principales balances al cierre',[
   {label:'Efectivo',value:m.cash},{label:'Cuentas por cobrar',value:m.receivables},{label:'Pasivos',value:m.liabilities},
  ]);
+ }
+ if(include('topExpenses')&&payload.topExpenses?.rows?.length){
+  heading('Cinco gastos principales del periodo');
+  const focus=payload.topExpenses;
+  table(['Cuenta de gasto','Importe','% de gastos'],focus.rows.map(item=>[
+    (item.code?item.code+' - ':'')+item.name+(item.isCogs?' (COGS)':''),
+    money(item.amount),item.percent===null?'N/D':item.percent.toFixed(1)+'%',
+  ]),[maxW-190,100,90]);
+  writeSection('Hallazgos de gastos principales',focus.findings);
  }
  if(include('findings'))writeSection('Hallazgos',n.findings);
  if(include('opportunities'))writeSection('Oportunidades',n.opportunities);

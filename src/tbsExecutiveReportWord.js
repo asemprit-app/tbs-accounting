@@ -2,9 +2,10 @@
 // Loaded on demand so accounting pages do not download the Word library.
 import {metricDisplay,executivePdfFilename} from './tbsExecutiveReportPdf.js';
 import {includeExecutiveSection,simpleExecutiveSummary} from './tbsExecutiveSections.js';
+import {verticalReportChartPng} from './tbsExecutiveChartCanvas.js';
 const str=v=>String(v??'');
 export async function buildExecutiveWord(payload){
- const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,HeadingLevel}=await import('docx');
+ const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,HeadingLevel,ImageRun}=await import('docx');
  const p=(text,options={})=>new Paragraph({children:[new TextRun({text:str(text),bold:Boolean(options.bold),
    color:options.color||'26394D',size:options.size||22,font:'Calibri'})],spacing:{after:100}});
  const title=(text)=>new Paragraph({text:str(text),heading:HeadingLevel.HEADING_1,
@@ -76,49 +77,75 @@ export async function buildExecutiveWord(payload){
       x.changePercent!==null?x.changePercent.toFixed(2)+'%':metricDisplay(x.key,x.delta)])));
  }
  if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length){
-  const monthly=payload.monthlySalesRows;
-  contents.push(title('Ventas mensuales - grafica y tabla'));
-  const maximum=Math.max(1,...monthly.map(row=>Math.abs(Number(row.sales)||0)));
-  contents.push(p('Grafica de barras: ventas por mes',{bold:true,size:20}));
-  contents.push(table(['Mes','Barra de ventas','Importe'],monthly.map(row=>[
-    row.label+(row.partialMonth?' *':''),
-    (row.sales<0?'- ':'')+'■'.repeat(Math.round(Math.abs(Number(row.sales)||0)/maximum*20)),
-    metricDisplay('revenue',row.sales),
-  ])));
-  contents.push(p('Tabla de ventas mensuales y variaciones',{bold:true,size:20}));
-  contents.push(table(['Mes','Ventas','Cambio','Variacion'],[
-    ...monthly.map(row=>[
+  const months=payload.monthlySalesRows;
+  contents.push(title('Ventas, gastos y ganancia neta - barras verticales por mes'));
+  for(let i=0;i<months.length;i+=6){
+    const group=months.slice(i,i+6);
+    const png=verticalReportChartPng(group,{
+      keys:['sales','expenses','netIncome'],
+      labels:['Ventas','Gastos','Ganancia neta'],
+      colors:['#3C78AC','#D1A354','#237B70']
+    });
+    if(png){
+      contents.push(new Paragraph({children:[new ImageRun({
+        data:png,type:'png',transformation:{width:485,height:208},
+        altText:{title:'Resultados mensuales',description:'Grafica de barras verticales de ventas, gastos y ganancia neta',name:'Resultados por mes'}
+      })],spacing:{before:130,after:120}}));
+    }else{
+      // Node-based regression runs without a browser canvas. Word export from
+      // the real browser inserts vertical chart images here.
+      contents.push(p('Grafica de barras verticales: '+group.map(r=>r.label).join(', '),{bold:true,size:19}));
+    }
+  }
+  contents.push(p('Azul: ventas; dorado: gastos (incluyendo costo de ventas); verde: ganancia; rojo: perdida neta.',{size:18}));
+  contents.push(title('Tabla mensual de ventas, gastos y ganancia neta'));
+  contents.push(table(['Mes','Ventas','Gastos','Ganancia neta','Var. ventas'],[
+    ...months.map(row=>[
       row.label+(row.partialMonth?' *':''),
       metricDisplay('revenue',row.sales),
-      row.change===null?'-':(row.change>0?'+':'')+metricDisplay('revenue',row.change),
+      metricDisplay('expenses',row.expenses),
+      metricDisplay('net_income',row.netIncome),
       row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
     ]),
-    ['TOTAL',metricDisplay('revenue',payload.monthlySalesTotal),'-','-'],
+    ['TOTAL',metricDisplay('revenue',payload.monthlySalesTotal),
+      metricDisplay('expenses',payload.monthlyExpenseTotal),
+      metricDisplay('net_income',payload.monthlyNetTotal),'-'],
   ]));
-  if(monthly.some(row=>row.partialMonth))contents.push(p('* Mes parcial: solo los dias incluidos en el periodo seleccionado.',{size:18}));
-  contents.push(p('Variacion porcentual N/D cuando las ventas del mes previo son cero o negativas.',{size:18}));
+  if(months.some(row=>row.partialMonth))
+    contents.push(p('* Mes parcial: solo los dias dentro del periodo seleccionado.',{size:18}));
+  contents.push(p('Los gastos incluyen costo de ventas. La variacion % es N/D si el mes anterior registra ventas cero o negativas.',{size:18}));
  }
  if(include('charts')){
-  contents.push(title('Graficas financieras'));
+  contents.push(title('Graficas financieras - barras verticales'));
   const charts=[
-   ['Ventas, gastos y ganancia neta',[
-     ['Ventas',numbers.revenue],['Gastos',numbers.expenses],['Ganancia neta',numbers.net_income],
-   ]],
-   ['Principales saldos al cierre',[
-     ['Efectivo contable',numbers.cash],['Cuentas por cobrar',numbers.receivables],['Pasivos',numbers.liabilities],
-   ]],
+    ['Ventas, gastos y ganancia neta',[
+      {label:'Ventas',value:numbers.revenue},{label:'Gastos',value:numbers.expenses},{label:'Neto',value:numbers.net_income}
+    ]],
+    ['Principales saldos al cierre',[
+      {label:'Efectivo',value:numbers.cash},{label:'A/R',value:numbers.receivables},{label:'Pasivos',value:numbers.liabilities}
+    ]],
   ];
   for(const [chartTitle,values] of charts){
-   contents.push(p(chartTitle,{bold:true,size:20}));
-   const maximum=Math.max(1,...values.map(entry=>Math.max(0,Number(entry[1])||0)));
-   contents.push(table(['Concepto','Grafica de barras','Importe'],values.map(([label,value])=>[
-    label, '■'.repeat(Math.round(Math.max(0,Number(value)||0)/maximum*20))||' ',
-    metricDisplay('cash',value),
-   ])));
+    contents.push(p(chartTitle,{bold:true,size:20}));
+    const png=verticalReportChartPng(values,{keys:['value'],labels:['Importe'],colors:['#3C78AC']});
+    if(png)contents.push(new Paragraph({children:[new ImageRun({
+      data:png,type:'png',transformation:{width:485,height:208},
+      altText:{title:chartTitle,description:'Grafica de barras verticales',name:chartTitle}
+    })]}));
+    contents.push(table(['Concepto','Importe'],values.map(row=>[row.label,metricDisplay('cash',row.value)])));
   }
-  contents.push(p('Las barras representan importes positivos; los saldos negativos se muestran con su signo.',{size:18}));
  }
  const n=payload.narrative||{},notes=payload.notes||{};
+ if(include('topExpenses')&&payload.topExpenses?.rows?.length){
+  contents.push(title('Cinco gastos principales del periodo'));
+  const ranked=payload.topExpenses;
+  contents.push(table(['Cuenta de gasto','Importe','% de gastos'],ranked.rows.map(row=>[
+    (row.code?row.code+' - ':'')+row.name+(row.isCogs?' (Costo de ventas)':''),
+    metricDisplay('expenses',row.amount),
+    row.percent===null?'N/D':row.percent.toFixed(1)+'%',
+  ])));
+  add('Hallazgos sobre los gastos principales',ranked.findings);
+ }
  if(include('findings'))add('Hallazgos financieros',n.findings);
  if(include('opportunities'))add('Oportunidades',n.opportunities);
  if(include('risks'))add('Amenazas y riesgos',n.risks);

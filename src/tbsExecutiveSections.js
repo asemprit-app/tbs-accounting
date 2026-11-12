@@ -4,7 +4,8 @@ export const EXECUTIVE_SECTIONS=Object.freeze([
  {key:'summary',label:'Resumen ejecutivo sencillo',description:'Resultado del período y prioridades principales'},
  {key:'indicators',label:'Indicadores financieros',description:'Valores y explicación de cada indicador'},
  {key:'comparison',label:'Comparaciones de meses y períodos',description:'Meses seleccionados o comparación personalizada'},
- {key:'monthlySales',label:'Ventas mensuales: gráfica y tabla',description:'Ventas de cada mes del período principal, variaciones y total'},
+ {key:'monthlySales',label:'Resultados mensuales: gráfica y tabla',description:'Barras verticales de ventas, gastos y ganancia neta por mes'},
+ {key:'topExpenses',label:'Cinco gastos principales',description:'Cuentas de gasto más altas, participación y recomendaciones'},
  {key:'charts',label:'Gráficas financieras',description:'Ventas, gastos, ganancia y principales balances'},
  {key:'findings',label:'Hallazgos financieros',description:'Interpretación de los resultados'},
  {key:'opportunities',label:'Oportunidades',description:'Oportunidades apoyadas por los datos'},
@@ -16,7 +17,7 @@ export const EXECUTIVE_SECTIONS=Object.freeze([
  {key:'meetingNotes',label:'Minuta y acuerdos internos',description:'Notas de TBS y responsables; excluida por defecto',confidential:true},
 ]);
 export const DEFAULT_CLIENT_SECTIONS=Object.freeze([
- 'summary','indicators','comparison','monthlySales','charts','findings',
+ 'summary','indicators','comparison','monthlySales','topExpenses','charts','findings',
  'opportunities','risks','shortTerm','mediumTerm',
 ]);
 const allowed=new Set(EXECUTIVE_SECTIONS.map(s=>s.key));
