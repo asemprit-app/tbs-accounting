@@ -6909,6 +6909,8 @@ function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, i
       {showExecutiveReport ? <TBSExecutiveFinancialReport
         clientId={clientId} businessName={businessName} from={from} to={to}
         financials={executiveFinancials} prior={priorFinancial}
+        comparisonSource={{postings,accounts,invoices,invoiceRevenueSubtotal,
+          tradeReceivableGL,incomeThroughDate}}
         onClose={()=>setShowExecutiveReport(false)}
       /> : <>
 
