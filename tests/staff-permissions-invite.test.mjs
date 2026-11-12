@@ -35,7 +35,7 @@ test('Staff password link opens the actual production application, not localhost
 test('App handles the one-time verification before login and password update',()=>{
  const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
  const setup=readFileSync(new URL('../src/TBSStaffPasswordSetup.jsx',import.meta.url),'utf8');
- assert.ok(app.indexOf('if (requiresPasswordSetup)') < app.indexOf('if (!session)'));
+ assert.ok(app.indexOf('if (requiresPasswordSetup)') < app.indexOf('if (!session) {\n    return ('));
  assert.match(setup,/auth\.verifyOtp\(\{ token_hash: setupLink\.tokenHash, type: setupLink\.type \}\)/);
  assert.match(setup,/role !== 'staff'/);
  assert.match(setup,/access_level !== 'admin'/);
