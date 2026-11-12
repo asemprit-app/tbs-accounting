@@ -150,6 +150,82 @@ export function createExecutivePdf(payload){
      r.changePercent!==null?r.changePercent.toFixed(1)+'%':money(r.delta),
   ]),[180,115,115,maxW-410]);
  }
+ if(include('monthlySales')&&(payload.monthlySalesRows||[]).length){
+  const rows=payload.monthlySalesRows;
+  heading('Ventas mensuales - grafica de barras');
+  const maxSales=Math.max(1,...rows.map(r=>Math.abs(Number(r.sales)||0)));
+  for(const row of rows){
+   ensure(32);
+   const label=row.label+(row.partialMonth?' *':'');
+   font(8.5,true);doc.text(normalize(label),left,y);y+=10;
+   doc.setFillColor(232,239,246);doc.rect(left,y,maxW*.73,10,'F');
+   const width=Math.min(1,Math.abs(Number(row.sales)||0)/maxSales)*maxW*.73;
+   if(width>0){
+    doc.setFillColor(...(row.sales<0?[173,76,66]:[61,110,162]));
+    doc.rect(left,y,width,10,'F');
+   }
+   font(8,false);doc.text(money(row.sales),right,y+9,{align:'right'});y+=20;
+  }
+  heading('Tabla de ventas mensuales');
+  const tableRows=rows.map(r=>[
+   r.label+(r.partialMonth?' *':''),
+   money(r.sales),
+   r.change===null?'-':(r.change>0?'+':'')+money(r.change),
+   r.changePercent===null?'N/D':(r.changePercent>0?'+':'')+r.changePercent.toFixed(1)+'%',
+  ]);
+  tableRows.push(['TOTAL',money(payload.monthlySalesTotal),'-','-']);
+  table(['Mes','Ventas','Cambio 
+  {label:'Ventas',value:m.revenue},{label:'Gastos',value:m.expenses},{label:'Ganancia neta',value:m.net_income},
+ ]);
+ bars('Principales balances al cierre',[
+  {label:'Efectivo',value:m.cash},{label:'Cuentas por cobrar',value:m.receivables},{label:'Pasivos',value:m.liabilities},
+ ]);
+ }
+ if(include('findings'))writeSection('Hallazgos',n.findings);
+ if(include('opportunities'))writeSection('Oportunidades',n.opportunities);
+ if(include('risks'))writeSection('Amenazas y riesgos',n.risks);
+ if(include('market')){
+ heading('Mercado e industria - informacion para verificar');
+ text('Oportunidad: '+(n.sectorOpportunities||'Por evaluar.'));
+ text('Amenaza: '+(n.sectorThreats||'Por evaluar.'));
+ text('Contexto informado por la gerencia: '+(notes.marketContext||'Sin observaciones adicionales.'));
+ text('Fuente: '+(notes.marketSource||'No informada')+(notes.marketSourceDate?', fecha '+notes.marketSourceDate:'')+'.',{size:8.5,color:grey});
+ text('Los puntos sectoriales no constituyen hechos de mercado verificados automaticamente.',{size:8.5,color:grey});
+ }
+ if(include('shortTerm'))writeSection('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
+ if(include('mediumTerm'))writeSection('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
+ if(include('questions'))writeSection('Preguntas para conversar con el dueno del negocio',n.questions);
+ if(include('meetingNotes')){
+ heading('Notas y decisiones de la reunion');
+ text(notes.ownerDiscussion||'Pendiente de documentar.');
+ text('Acuerdos, responsables y fechas: '+(notes.agreements||'Pendiente de documentar.'));
+ text('Proxima revision: '+(notes.followupDate||'Por definir'));
+ }
+ const pages=doc.getNumberOfPages();
+ for(let p=1;p<=pages;p++){
+  doc.setPage(p);doc.setDrawColor(211,221,231);doc.line(left,h-42,right,h-42);
+  font(7,false,grey);doc.text('TBS Accounting Engine | Informe gerencial - no auditado',left,h-27);
+  doc.text('Pagina '+p+' de '+pages,right,h-27,{align:'right'});
+ }
+ return assertNonblankPdfPages(doc);
+}
+export function executivePdfBlob(payload){
+ const doc=createExecutivePdf(payload);
+ const blob=doc.output('blob');
+ if(blob.size<1600)throw Error('Se detecto un PDF vacio; el envio fue cancelado.');
+ return blob;
+}
+export function blobToPdfBase64(blob){
+ return new Promise((resolve,reject)=>{
+  const r=new FileReader();r.onerror=()=>reject(new Error('No se pudo leer el PDF.'));
+  r.onload=()=>resolve(String(r.result||'').split(',')[1]||'');
+  r.readAsDataURL(blob);
+ });
+}
+,'Cambio %'],tableRows,[130,137,126,maxW-393]);
+  if(rows.some(r=>r.partialMonth))text('* Mes parcial: solo los dias incluidos en el periodo seleccionado.',{size:8,color:grey});
+  text('La variacion % no se calcula cuando el mes anterior tiene ventas cero o negativas. Las barras rojas representan ventas netas negativas.',{size:8,color:grey});
+ }
  if(include('charts')){
  bars('Ventas, gastos y ganancia neta',[
   {label:'Ventas',value:m.revenue},{label:'Gastos',value:m.expenses},{label:'Ganancia neta',value:m.net_income},
