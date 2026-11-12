@@ -41,6 +41,7 @@ const SECTOR_SIGNALS=Object.freeze({
  solar:['Medir margen por instalación, cartera de proyectos y plazo de cobro.','Validar costos de equipos, financiamiento disponible y tiempos de permisos.'],
 });
 const round2=x=>Math.round((Number(x)||0)*100)/100;
+const usd=x=>Number(x).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 export function previousComparablePeriod(from,to){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(from||'')||!/^\d{4}-\d{2}-\d{2}$/.test(to||'')||from>to)return null;
  const fromD=new Date(from+'T00:00:00Z'),toD=new Date(to+'T00:00:00Z');
@@ -79,7 +80,7 @@ export function executiveNarrative(financials={},prior={},sector='general'){
   findings.push('No se identificaron movimientos de ingresos o gastos registrados en el período seleccionado. Antes de interpretar la rentabilidad, confirmar que la contabilidad del período esté completa.');
   shortTerm.push('Confirmar que estados bancarios, facturas, gastos y asientos del período estén registrados.');
  }else{
-  findings.push('Se registraron ventas de '+String(current.revenue)+' y una ganancia neta de '+String(current.net_income)+' en el período. Ambos importes provienen del P&L calculado por TBS.');
+  findings.push('Se registraron ventas de '+usd(current.revenue)+' y '+(current.net_income<0?'una pérdida neta de '+usd(Math.abs(current.net_income)):'una ganancia neta de '+usd(current.net_income))+' en el período. Ambos importes provienen del P&L calculado por TBS.');
   if(current.net_margin!==null) findings.push('El margen neto del período es '+current.net_margin+'%: esta cifra indica qué proporción de ventas permanece después de los gastos registrados.');
   if(current.net_income<0){
    risks.push('El período registra pérdida neta. Confirmar si hay cargos extraordinarios y revisar el punto de equilibrio antes de ampliar compromisos.');
@@ -105,7 +106,7 @@ export function executiveNarrative(financials={},prior={},sector='general'){
    .filter(item=>(Number(item.value)||0)>0)
    .sort((a,b)=>Number(b.value)-Number(a.value))[0];
   if(largest){
-   findings.push('La cuenta de gasto con mayor importe registrado es '+largest.name+' ('+round2(largest.value)+'). Confirmar si corresponde al nivel de actividad del período.');
+   findings.push('La cuenta de gasto con mayor importe registrado es '+largest.name+' ('+usd(largest.value)+'). Confirmar si corresponde al nivel de actividad del período.');
    shortTerm.push('Evaluar los componentes de '+largest.name+' y negociar o ajustar los costos que puedan controlarse sin afectar el servicio.');
   }
  }
