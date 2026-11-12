@@ -184,7 +184,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    if(exportError){setError(exportError);return;}
    setEmailSubject(executiveEmailSubject(businessName,from,to));
    setEmailMessage(executiveEmailMessage(businessName,from,to,
-     notes.comparisonMode==='months'?normalizeSelectedMonths(notes.selectedMonths):[]));
+     notes.comparisonMode==='months'?normalizeSelectedMonths(notes.selectedMonths):[],
+     normalizeClientSections(notes.clientSections)));
    setEmailTo('');setConfirmRecipient(false);setEmailOpen(true);setError('');setNotice('');
  }
  async function sendReportEmail(){
