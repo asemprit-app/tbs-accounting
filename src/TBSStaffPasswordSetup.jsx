@@ -14,7 +14,7 @@ export default function TBSStaffPasswordSetup({ onComplete }) {
     }
     setBusy(true);
     setMessage('');
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    const { error } = await supabase.auth.updateUser({ password: newPassword, data: { tbs_staff_setup: false } });
     setBusy(false);
     if (error) { setMessage(error.message); return; }
     const url = new URL(window.location.href);
