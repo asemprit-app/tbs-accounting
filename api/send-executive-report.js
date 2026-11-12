@@ -47,11 +47,11 @@ export default async function handler(req,res){
   if(!auth.ok)return respond(res,401,{error:'Your session has expired.'});
   const user=await auth.json();
   if(!user?.id)return respond(res,401,{error:'Invalid session.'});
-  const profileRes=await fetch(url+'/rest/v1/profiles?select=role&id=eq.'+encodeURIComponent(user.id)+'&limit=1',{headers});
+  const profileRes=await fetch(url+'/rest/v1/profiles?select=role,access_level&id=eq.'+encodeURIComponent(user.id)+'&limit=1',{headers});
   if(!profileRes.ok)return respond(res,503,{error:'Could not verify staff permissions.'});
   const profiles=await profileRes.json();
-  if(!Array.isArray(profiles)||profiles[0]?.role!=='staff')
-   return respond(res,403,{error:'Only authorized TBS staff may email executive reports.'});
+  if(!Array.isArray(profiles)||profiles[0]?.role!=='staff'||profiles[0]?.access_level!=='supervisor')
+   return respond(res,403,{error:'Only an authorized TBS supervisor may email executive reports.'});
   const clientRes=await fetch(url+'/rest/v1/clients?select=id,name&id=eq.'+
     encodeURIComponent(body.clientId)+'&limit=1',{headers});
   if(!clientRes.ok)return respond(res,503,{error:'Could not verify client scope.'});
