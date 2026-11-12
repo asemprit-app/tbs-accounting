@@ -28,7 +28,7 @@ test('Staff password link opens the actual production application, not localhost
  const hash='a'.repeat(64);
  const link=staffSetupLink(hash,'recovery');
  assert.equal(link,'https://tbs-accounting.vercel.app/?setup=staff#token_hash='+hash+'&type=recovery');
- assert.doesNotMatch(link,/localhost|supabase\\.co\\/auth\\/v1\\/verify/);
+ assert.doesNotMatch(link,/localhost|supabase\.co\/auth\/v1\/verify/);
  assert.throws(()=>staffSetupLink('tiny','recovery'));
  assert.throws(()=>staffSetupLink(hash,'other'));
 });
@@ -36,8 +36,8 @@ test('App handles the one-time verification before login and password update',()
  const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
  const setup=readFileSync(new URL('../src/TBSStaffPasswordSetup.jsx',import.meta.url),'utf8');
  assert.ok(app.indexOf('if (requiresPasswordSetup)') < app.indexOf('if (!session)'));
- assert.match(setup,/auth\\.verifyOtp\\(\\{ token_hash: setupLink\\.tokenHash, type: setupLink\\.type \\}\\)/);
+ assert.match(setup,/auth\.verifyOtp\(\{ token_hash: setupLink\.tokenHash, type: setupLink\.type \}\)/);
  assert.match(setup,/role !== 'staff'/);
  assert.match(setup,/access_level !== 'admin'/);
- assert.match(setup,/auth\\.updateUser\\(\\{ password: newPassword/);
+ assert.match(setup,/auth\.updateUser\(\{ password: newPassword/);
 });
