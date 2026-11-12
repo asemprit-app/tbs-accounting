@@ -75,95 +75,28 @@ export async function buildExecutiveWord(payload){
       x.delta===null?'N/D':x.changePoints!==null?x.changePoints.toFixed(2)+' pp':
       x.changePercent!==null?x.changePercent.toFixed(2)+'%':metricDisplay(x.key,x.delta)])));
  }
- if(include('monthlySales')&&(payload.monthlySalesRows||[]).length){
-  const rows=payload.monthlySalesRows;
+ if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length){
+  const monthly=payload.monthlySalesRows;
   contents.push(title('Ventas mensuales - grafica y tabla'));
-  const maxSales=Math.max(1,...rows.map(row=>Math.abs(Number(row.sales)||0)));
+  const maximum=Math.max(1,...monthly.map(row=>Math.abs(Number(row.sales)||0)));
   contents.push(p('Grafica de barras: ventas por mes',{bold:true,size:20}));
-  contents.push(table(['Mes','Barra de ventas','Importe'],rows.map(row=>[
+  contents.push(table(['Mes','Barra de ventas','Importe'],monthly.map(row=>[
     row.label+(row.partialMonth?' *':''),
-    (row.sales<0?'- ':'')+'■'.repeat(Math.round(Math.abs(Number(row.sales)||0)/maxSales*20)),
+    (row.sales<0?'- ':'')+'■'.repeat(Math.round(Math.abs(Number(row.sales)||0)/maximum*20)),
     metricDisplay('revenue',row.sales),
   ])));
   contents.push(p('Tabla de ventas mensuales y variaciones',{bold:true,size:20}));
-  contents.push(table(['Mes','Ventas','Cambio 
-  contents.push(title('Graficas financieras'));
-  const charts=[
-   ['Ventas, gastos y ganancia neta',[
-     ['Ventas',numbers.revenue],['Gastos',numbers.expenses],['Ganancia neta',numbers.net_income],
-   ]],
-   ['Principales saldos al cierre',[
-     ['Efectivo contable',numbers.cash],['Cuentas por cobrar',numbers.receivables],['Pasivos',numbers.liabilities],
-   ]],
-  ];
-  for(const [chartTitle,values] of charts){
-   contents.push(p(chartTitle,{bold:true,size:20}));
-   const maximum=Math.max(1,...values.map(entry=>Math.max(0,Number(entry[1])||0)));
-   contents.push(table(['Concepto','Grafica de barras','Importe'],values.map(([label,value])=>[
-    label, '■'.repeat(Math.round(Math.max(0,Number(value)||0)/maximum*20))||' ',
-    metricDisplay('cash',value),
-   ])));
-  }
-  contents.push(p('Las barras representan importes positivos; los saldos negativos se muestran con su signo.',{size:18}));
- }
- const n=payload.narrative||{},notes=payload.notes||{};
- if(include('findings'))add('Hallazgos financieros',n.findings);
- if(include('opportunities'))add('Oportunidades',n.opportunities);
- if(include('risks'))add('Amenazas y riesgos',n.risks);
- if(include('market')){
- contents.push(title('Analisis del mercado y sector'));
- contents.push(p('Oportunidad a estudiar: '+str(n.sectorOpportunities||'Por evaluar.')));
- contents.push(p('Amenaza por monitorear: '+str(n.sectorThreats||'Por evaluar.')));
- contents.push(p('Observaciones del mercado: '+str(notes.marketContext||'No registradas.')));
- contents.push(p('Fuente aportada: '+str(notes.marketSource||'Sin fuente registrada')+
-  (notes.marketSourceDate?' | Fecha: '+notes.marketSourceDate:'')));
- contents.push(p('Las hipotesis sectoriales no son estadisticas externas verificadas automaticamente.',{size:18}));
- }
- if(include('shortTerm'))add('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
- if(include('mediumTerm'))add('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
- if(include('questions'))add('Preguntas de discusion con los duenos',n.questions);
- if(include('meetingNotes')){
- contents.push(title('Minuta y compromisos'));
- contents.push(p('Hallazgos discutidos: '+str(notes.ownerDiscussion||'Pendiente.')));
- contents.push(p('Acuerdos, responsables y fechas: '+str(notes.agreements||'Pendiente.')));
- contents.push(p('Proxima reunion: '+str(notes.followupDate||'Por definir.')));
- }
- contents.push(p('Reporte de gestion basado en la contabilidad disponible en TBS Accounting Engine. No constituye auditoria ni garantias de resultados.',{size:18,color:'66748A'}));
- const doc=new Document({
-  creator:'Twelve Business Strategies LLC',
-  title:'Reporte Financiero Ejecutivo - '+payload.businessName,
-  subject:'Analisis financiero y estrategico',
-  sections:[{
-   properties:{page:{size:{width:12240,height:15840},margin:{top:800,bottom:800,left:800,right:800}}},
-   children:contents,
-  }],
- });
- const blob=await Packer.toBlob(doc);
- if(!blob||blob.size<1800)throw Error('Word no se genero correctamente.');
- return blob;
-}
-export async function downloadExecutiveWord(payload){
- const blob=await buildExecutiveWord(payload);
- const url=URL.createObjectURL(blob);
- const a=document.createElement('a');
- a.href=url;
- a.download=executivePdfFilename(payload).replace(/\.pdf$/i,'.docx');
- document.body.appendChild(a);
- a.click();a.remove();
- setTimeout(()=>URL.revokeObjectURL(url),5000);
- return blob.size;
-}
-,'Cambio %'],[
-   ...rows.map(row=>[
-    row.label+(row.partialMonth?' *':''),
-    metricDisplay('revenue',row.sales),
-    row.change===null?'-':(row.change>0?'+':'')+metricDisplay('revenue',row.change),
-    row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
-   ]),
-   ['TOTAL',metricDisplay('revenue',payload.monthlySalesTotal),'-','-'],
+  contents.push(table(['Mes','Ventas','Cambio','Variacion'],[
+    ...monthly.map(row=>[
+      row.label+(row.partialMonth?' *':''),
+      metricDisplay('revenue',row.sales),
+      row.change===null?'-':(row.change>0?'+':'')+metricDisplay('revenue',row.change),
+      row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
+    ]),
+    ['TOTAL',metricDisplay('revenue',payload.monthlySalesTotal),'-','-'],
   ]));
-  if(rows.some(row=>row.partialMonth))contents.push(p('* Mes parcial: solo los dias incluidos en el periodo seleccionado.',{size:18}));
-  contents.push(p('Variacion porcentual N/D cuando las ventas del mes previo son cero o negativas. El signo negativo indica ventas netas negativas.',{size:18}));
+  if(monthly.some(row=>row.partialMonth))contents.push(p('* Mes parcial: solo los dias incluidos en el periodo seleccionado.',{size:18}));
+  contents.push(p('Variacion porcentual N/D cuando las ventas del mes previo son cero o negativas.',{size:18}));
  }
  if(include('charts')){
   contents.push(title('Graficas financieras'));
