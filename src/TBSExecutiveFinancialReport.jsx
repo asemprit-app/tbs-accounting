@@ -35,11 +35,9 @@ function BarChart({title,items}){
 }
 export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,onClose}){
  const [notes,setNotes]=useState(blankNotes);
- const [comparisonError,setComparisonError]=useState('');
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
  const metrics=useMemo(()=>executiveMetrics(financials),[financials]);
- const narrative=executiveNarrative(financials,effectivePrior,notes.sector);
  const selected=KPI_OPTIONS.filter(k=>notes.selectedKpis.includes(k.key));
  const comparisonPeriod=notes.comparisonMode==='none'?null:
    notes.comparisonMode==='previous'?prior?.from&&prior?.to?{from:prior.from,to:prior.to}:null:
@@ -56,6 +54,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    ...compared,from:comparisonPeriod.from,to:comparisonPeriod.to,
    hasActivity:comparisonHasActivity,
  }: {hasActivity:false};
+ const narrative=executiveNarrative(financials,effectivePrior,notes.sector);
 
  const warnings=[];
  if(Math.abs(financials.balanceDifference||0)>=.01)warnings.push('Balance Sheet con diferencia de '+money(financials.balanceDifference));
