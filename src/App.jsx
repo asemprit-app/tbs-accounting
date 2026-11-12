@@ -22,6 +22,9 @@ import {previousComparablePeriod} from './tbsExecutiveReportRules.js';
 import TBSMonthlyCloseOverview from './TBSMonthlyCloseOverview.jsx';
 import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
+import TBSStaffInvite from './TBSStaffInvite.jsx';
+import TBSStaffPasswordSetup from './TBSStaffPasswordSetup.jsx';
+import { isSupervisor } from './tbsStaffPermissions.js';
 import TBSRetentionsView from './TBSRetentionsView.jsx';
 import { shouldPrintCheckNumber, shouldPrintMicrLine, validateCheckPrintFields } from './tbsCheckPrintOptions.js';
 import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosition, normalizeCustomCheckPositions, formatCustomCheckDate } from './tbsCustomCheckLayout.js';
@@ -794,6 +797,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authBusy, setAuthBusy] = useState(false);
+  const [requiresPasswordSetup, setRequiresPasswordSetup] = useState(() => new URLSearchParams(window.location.search).get('setup') === 'staff');
   const [addClientBusy, setAddClientBusy] = useState(false);
 
   async function addClient(name) {
@@ -923,6 +927,10 @@ export default function App() {
     );
   }
 
+  if (requiresPasswordSetup) {
+    return <TBSStaffPasswordSetup onComplete={() => setRequiresPasswordSetup(false)} />;
+  }
+
   if (!profile || !selectedClientId) {
     return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Preparing your workspace…</div>;
   }
@@ -932,6 +940,7 @@ export default function App() {
       key={selectedClientId}
       clientId={selectedClientId}
       isStaff={profile.role === 'staff'}
+      isSupervisor={isSupervisor(profile)}
       clients={clients}
       selectedClientId={selectedClientId}
       onSwitchClient={(id) => { window.localStorage.setItem('tbs_last_client_id', id); setSelectedClientId(id); }}
@@ -946,7 +955,7 @@ export default function App() {
   );
 }
 
-function Workspace({ clientId, isStaff, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, accessRole }) {
+function Workspace({ clientId, isStaff, isSupervisor, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, accessRole }) {
   const portalLimited = accessRole !== 'staff';
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -1575,7 +1584,7 @@ async function fetchAllRows(table, clientId, orderCol) {
 
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
-      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} portalLimited={portalLimited} clients={clients}
+      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} isSupervisor={isSupervisor} portalLimited={portalLimited} clients={clients}
         selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {portalLimited && (
@@ -1594,7 +1603,7 @@ async function fetchAllRows(table, clientId, orderCol) {
         <>
         {tab === 'client-requests' && <TBSClientRequests clientId={selectedClientId} isStaff={isStaff} />}
         {isStaff && tab === 'monthly-close' && <TBSControlCenter clientId={selectedClientId} view="close" />}
-        {isStaff && tab === 'monthly-close-overview' && <TBSMonthlyCloseOverview clients={clients}
+        {isSupervisor && tab === 'monthly-close-overview' && <TBSMonthlyCloseOverview clients={clients}
           onOpenClient={(id,period)=>{
             window.sessionStorage.setItem('tbs_open_close_month_once',period);
             if(id===selectedClientId)setTab('monthly-close');
@@ -1603,6 +1612,7 @@ async function fetchAllRows(table, clientId, orderCol) {
               onSwitchClient(id);
             }
           }}/>}
+        {isSupervisor && tab === 'staff-access' && <TBSStaffInvite />}
         {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin clients={clients} selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
@@ -1654,7 +1664,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             clients={clients} isStaff={isStaff} businessName={businessName}
           />
         )}
-        {!portalLimited && tab === 'reports' && <ReportsView isStaff={isStaff} clientId={clientId} transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {!portalLimited && tab === 'reports' && <ReportsView isStaff={isStaff} canExecutive={isSupervisor} clientId={clientId} transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} confirmAccountImpact={confirmAccountImpact} isMaster={businessName === 'Twelve Business Strategies'} />}
         {!portalLimited && tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} confirmJournalImpact={confirmJournalImpact} accounts={accounts} />}
@@ -1686,7 +1696,7 @@ async function fetchAllRows(table, clientId, orderCol) {
   );
 }
 
-function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, businessName }) {
+function Sidebar({ tab, setTab, reviewCount, isStaff, isSupervisor, portalLimited, clients, selectedClientId, onSwitchClient, onAddClient, onEditClient, onDeleteClient, addClientBusy, onLogout, userEmail, businessName }) {
   const [addingClient, setAddingClient] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [editingClient, setEditingClient] = useState(false);
@@ -1792,7 +1802,8 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, portalLimited, clients, se
     ...(isStaff ? [{ id: 'retentions', label: 'Retenciones / Retentions', icon: ListChecks }] : []),
     ...(isStaff ? [
       { id: 'monthly-close', label: 'Monthly Close', icon: ListChecks },
-      { id: 'monthly-close-overview', label: 'CFO Close Overview', icon: LayoutDashboard },
+      ...(isSupervisor ? [{ id: 'monthly-close-overview', label: 'CFO Close Overview', icon: LayoutDashboard },
+                         { id: 'staff-access', label: 'Staff Access', icon: Users }] : []),
       { id: 'tbs-review', label: 'TBS Review Queue', icon: AlertCircle },
       { id: 'check-templates', label: 'Check Templates', icon: Printer }
     ] : []),
@@ -6333,7 +6344,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ isStaff, clientId, transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+function ReportsView({ isStaff, canExecutive = false, clientId, transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
@@ -6922,7 +6933,7 @@ function ReportsView({ isStaff, clientId, transactions, invoices, glName, invoic
         </div>
       </Card>
 
-      <Card style={{marginBottom:20,border:'1px solid #C6D6E8',background:'#F4F8FC'}}>
+      {canExecutive && <Card style={{marginBottom:20,border:'1px solid #C6D6E8',background:'#F4F8FC'}}>
         <div style={{display:'flex',gap:14,justifyContent:'space-between',alignItems:'center',flexWrap:'wrap'}}>
           <div>
             <div style={{color:'#17365D',fontSize:16,fontWeight:700}}>Reporte Financiero Ejecutivo</div>
@@ -6937,8 +6948,8 @@ function ReportsView({ isStaff, clientId, transactions, invoices, glName, invoic
             {showExecutiveReport?'Volver a reportes contables':'Preparar reporte ejecutivo'}
           </button>
         </div>
-      </Card>
-      {showExecutiveReport ? <TBSExecutiveFinancialReport
+      </Card>}
+      {canExecutive && showExecutiveReport ? <TBSExecutiveFinancialReport
         isStaff={isStaff} clientId={clientId} businessName={businessName} from={from} to={to}
         financials={executiveFinancials} prior={priorFinancial} financialsForRange={financialsForExecutiveRange}
         onClose={()=>setShowExecutiveReport(false)}
