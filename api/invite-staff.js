@@ -15,6 +15,16 @@ export function staffInviteTarget(email) {
 export function staffSetupRedirect() {
   return APP_URL + '/?setup=staff';
 }
+export function staffSetupLink(tokenHash, verificationType) {
+  if (!/^[A-Za-z0-9_-]{24,}$/.test(String(tokenHash || ''))) {
+    throw new Error('Invalid setup token');
+  }
+  if (!['invite', 'recovery'].includes(verificationType)) {
+    throw new Error('Invalid verification type');
+  }
+  return staffSetupRedirect() + '#token_hash=' + encodeURIComponent(tokenHash) +
+    '&type=' + encodeURIComponent(verificationType);
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -76,7 +86,16 @@ export default async function handler(req, res) {
     if (profileError) {
       return reply(res, 503, { error: 'The invitation was created, but the staff role could not be saved. Please retry.' });
     }
-    const link = linkData.properties.action_link;
+    // Supabase may silently fall back to the development Site URL when the
+    // requested redirect is absent from its Auth allowlist. Use the generated
+    // one-time token hash in a fragment on our own HTTPS site instead.
+    // Fragments are never sent in HTTP requests or server logs.
+    const tokenHash = String(linkData.properties?.hashed_token || '');
+    const verificationType = existing ? 'recovery' : 'invite';
+    if (!/^[A-Za-z0-9_-]{24,}$/.test(tokenHash)) {
+      return reply(res, 502, { error: 'Supabase did not return a valid one-time setup token.' });
+    }
+    const link = staffSetupLink(tokenHash, verificationType);
     const subject = existing ? 'TBS Accounting Engine | Establecer contraseña de acceso' : 'Invitación a TBS Accounting Engine';
     const message = 'Se ha autorizado su acceso como Administrador de Twelve Business Strategies LLC.\n\n' +
       'Para establecer su contraseña personal, abra este enlace seguro:\n' + link + '\n\n' +
