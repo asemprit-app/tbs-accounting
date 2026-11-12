@@ -1,5 +1,6 @@
 import {jsPDF} from 'jspdf';
 import {assertNonblankPdfPages} from './tbsRegisterPdf.js';
+import {includeExecutiveSection,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 
 // One native, paginated PDF is used for both download and email. Never send
 // the printable HTML window: PDF bytes are validated before accepting an email.
@@ -95,22 +96,27 @@ export function createExecutivePdf(payload){
  text('Periodo principal: '+payload.from+' al '+payload.to,{size:10,color:grey,after:4});
  text('Industria: '+payload.industryLabel,{size:9,color:grey,after:10});
  const f=payload.financials||{},m=payload.metricValues||{},n=payload.narrative||{},notes=payload.notes||{};
+ const include=key=>includeExecutiveSection(payload,key);
  const problems=[];
  if(Math.abs(f.balanceDifference||0)>=.01)problems.push('Balance Sheet: diferencia '+money(f.balanceDifference));
  if(f.reconciliationAlerts>0)problems.push(f.reconciliationAlerts+' conciliaciones con advertencias');
  if(f.arMismatch)problems.push('Diferencia del mayor A/R contra submayor');
  if(f.uncategorizedCount>0)problems.push(f.uncategorizedCount+' transacciones sin categorizar');
- heading('Resumen ejecutivo');
- text('Ventas '+money(m.revenue)+', gastos '+money(m.expenses)+
-  ', ganancia neta '+money(m.net_income)+'. Resultados tomados de las cuentas del periodo en TBS.',{size:10});
+ if(include('summary')){
+  heading('Resumen ejecutivo - en palabras sencillas');
+  simpleExecutiveSummary(f,m).forEach(p=>text(p,{size:10}));
+ }
+ // Accounting validation warnings cannot be suppressed by section selection.
  text(problems.length?'Datos preliminares: '+problems.join('; ')+'.':'No se identificaron alertas especificas en esta vista; esto no certifica una auditoria.',{
   size:9,color:problems.length?orange:grey,
  });
- heading('Indicadores financieros seleccionados');
- table(['Indicador','Resultado','Que significa'],(payload.metrics||[]).map(x=>
-  [x.label,metricDisplay(x.key,m[x.key]),x.meaning]),[140,106,maxW-246]);
+ if(include('indicators')){
+  heading('Indicadores financieros seleccionados');
+  table(['Indicador','Resultado','Que significa'],(payload.metrics||[]).map(x=>
+   [x.label,metricDisplay(x.key,m[x.key]),x.meaning]),[140,106,maxW-246]);
+ }
 
- if((payload.monthlyRows||[]).length>=2){
+ if(include('comparison')&&(payload.monthlyRows||[]).length>=2){
   heading('Comparacion mes a mes - meses seleccionados');
   text(payload.monthlyRows.map(r=>r.label).join('  |  '),{size:8.5,color:grey});
   const months=payload.monthlyRows;
@@ -135,7 +141,7 @@ export function createExecutivePdf(payload){
   }
   text('Cada celda presenta el valor del mes y, despues de /, la variacion frente al mes anterior seleccionado. Los saldos patrimoniales corresponden al cierre de cada mes.',{size:8,color:grey});
   writeSection('Hallazgos mes a mes',payload.monthlyFindings||[]);
- }else if(payload.comparisonPeriod&&payload.comparison?.length){
+ }else if(include('comparison')&&payload.comparisonPeriod&&payload.comparison?.length){
   heading('Comparacion con el periodo seleccionado');
   text(payload.comparisonPeriod.from+' al '+payload.comparisonPeriod.to,{size:9,color:grey});
   table(['Indicador','Comparado','Principal','Cambio'],payload.comparison.map(r=>[
@@ -144,28 +150,34 @@ export function createExecutivePdf(payload){
      r.changePercent!==null?r.changePercent.toFixed(1)+'%':money(r.delta),
   ]),[180,115,115,maxW-410]);
  }
+ if(include('charts')){
  bars('Ventas, gastos y ganancia neta',[
   {label:'Ventas',value:m.revenue},{label:'Gastos',value:m.expenses},{label:'Ganancia neta',value:m.net_income},
  ]);
  bars('Principales balances al cierre',[
   {label:'Efectivo',value:m.cash},{label:'Cuentas por cobrar',value:m.receivables},{label:'Pasivos',value:m.liabilities},
  ]);
- writeSection('Hallazgos',n.findings);
- writeSection('Oportunidades',n.opportunities);
- writeSection('Amenazas y riesgos',n.risks);
+ }
+ if(include('findings'))writeSection('Hallazgos',n.findings);
+ if(include('opportunities'))writeSection('Oportunidades',n.opportunities);
+ if(include('risks'))writeSection('Amenazas y riesgos',n.risks);
+ if(include('market')){
  heading('Mercado e industria - informacion para verificar');
  text('Oportunidad: '+(n.sectorOpportunities||'Por evaluar.'));
  text('Amenaza: '+(n.sectorThreats||'Por evaluar.'));
  text('Contexto informado por la gerencia: '+(notes.marketContext||'Sin observaciones adicionales.'));
  text('Fuente: '+(notes.marketSource||'No informada')+(notes.marketSourceDate?', fecha '+notes.marketSourceDate:'')+'.',{size:8.5,color:grey});
  text('Los puntos sectoriales no constituyen hechos de mercado verificados automaticamente.',{size:8.5,color:grey});
- writeSection('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
- writeSection('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
- writeSection('Preguntas para conversar con el dueno del negocio',n.questions);
+ }
+ if(include('shortTerm'))writeSection('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
+ if(include('mediumTerm'))writeSection('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
+ if(include('questions'))writeSection('Preguntas para conversar con el dueno del negocio',n.questions);
+ if(include('meetingNotes')){
  heading('Notas y decisiones de la reunion');
  text(notes.ownerDiscussion||'Pendiente de documentar.');
  text('Acuerdos, responsables y fechas: '+(notes.agreements||'Pendiente de documentar.'));
  text('Proxima revision: '+(notes.followupDate||'Por definir'));
+ }
  const pages=doc.getNumberOfPages();
  for(let p=1;p<=pages;p++){
   doc.setPage(p);doc.setDrawColor(211,221,231);doc.line(left,h-42,right,h-42);
