@@ -863,6 +863,12 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (session?.user?.user_metadata?.tbs_staff_setup === true) {
+      setRequiresPasswordSetup(true);
+    }
+  }, [session?.user?.id, session?.user?.user_metadata?.tbs_staff_setup]);
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
     return () => sub.subscription.unsubscribe();
