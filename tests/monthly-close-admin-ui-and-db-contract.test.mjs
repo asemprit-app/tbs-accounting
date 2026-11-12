@@ -11,8 +11,8 @@ test('monthly close offers explicit N/A status and uses canonical order',()=>{
  assert.match(center,/notes:e\.target\.value/);
  assert.match(center,/taskSummary\.notApplicable/);
 });
-test('CFO overview is only reachable through staff-only navigation',()=>{
- assert.match(app,/isStaff && tab === 'monthly-close-overview'/);
+test('CFO overview is only reachable through supervisor-only navigation',()=>{
+ assert.match(app,/isSupervisor && tab === 'monthly-close-overview'/);
  assert.match(app,/CFO Close Overview/);
  assert.match(app,/tbs_open_tab_once/);
  assert.match(overview,/tbs_monthly_closes/);
