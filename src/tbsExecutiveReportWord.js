@@ -75,6 +75,26 @@ export async function buildExecutiveWord(payload){
       x.delta===null?'N/D':x.changePoints!==null?x.changePoints.toFixed(2)+' pp':
       x.changePercent!==null?x.changePercent.toFixed(2)+'%':metricDisplay(x.key,x.delta)])));
  }
+ if(include('charts')){
+  contents.push(title('Graficas financieras'));
+  const charts=[
+   ['Ventas, gastos y ganancia neta',[
+     ['Ventas',numbers.revenue],['Gastos',numbers.expenses],['Ganancia neta',numbers.net_income],
+   ]],
+   ['Principales saldos al cierre',[
+     ['Efectivo contable',numbers.cash],['Cuentas por cobrar',numbers.receivables],['Pasivos',numbers.liabilities],
+   ]],
+  ];
+  for(const [chartTitle,values] of charts){
+   contents.push(p(chartTitle,{bold:true,size:20}));
+   const maximum=Math.max(1,...values.map(entry=>Math.max(0,Number(entry[1])||0)));
+   contents.push(table(['Concepto','Grafica de barras','Importe'],values.map(([label,value])=>[
+    label, '■'.repeat(Math.round(Math.max(0,Number(value)||0)/maximum*20))||' ',
+    metricDisplay('cash',value),
+   ])));
+  }
+  contents.push(p('Las barras representan importes positivos; los saldos negativos se muestran con su signo.',{size:18}));
+ }
  const n=payload.narrative||{},notes=payload.notes||{};
  if(include('findings'))add('Hallazgos financieros',n.findings);
  if(include('opportunities'))add('Oportunidades',n.opportunities);
