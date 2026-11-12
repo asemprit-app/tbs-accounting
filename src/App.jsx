@@ -17,6 +17,8 @@ import { LayoutDashboard, Receipt, FileText, Users, BarChart3, Plus, Trash2, Che
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient';
 import TBSControlCenter from './TBSControlCenter';
+import TBSExecutiveFinancialReport from './TBSExecutiveFinancialReport.jsx';
+import {previousComparablePeriod} from './tbsExecutiveReportRules.js';
 import TBSMonthlyCloseOverview from './TBSMonthlyCloseOverview.jsx';
 import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
@@ -1651,7 +1653,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             clients={clients} isStaff={isStaff} businessName={businessName}
           />
         )}
-        {!portalLimited && tab === 'reports' && <ReportsView transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {!portalLimited && tab === 'reports' && <ReportsView clientId={clientId} transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} confirmAccountImpact={confirmAccountImpact} isMaster={businessName === 'Twelve Business Strategies'} />}
         {!portalLimited && tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} confirmJournalImpact={confirmJournalImpact} accounts={accounts} />}
@@ -6323,13 +6325,14 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
   const [visibleReports, setVisibleReports] = useState(['pnl', 'balance_sheet', 'cash_flow', 'ar_aging', 'ap', 'trial_balance', 'open_invoices']);
   const [breakdown, setBreakdown] = useState('none');
   const [showExportPreview, setShowExportPreview] = useState(false);
+  const [showExecutiveReport, setShowExecutiveReport] = useState(false);
   // customFrom/customTo are editable drafts. The report only recalculates after
   // both dates are valid and the user applies the custom period.
   const [customFrom, setCustomFrom] = useState(todayStr());
@@ -6499,6 +6502,37 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [transactions, from, to]);
   const uncategorizedNet = uncategorizedTransactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  // Same signed postings, invoice recognition and end date as the existing P&L and BS.
+  // Previous period uses an equal count of days; no yearly market benchmark is assumed.
+  const priorExecutivePeriod=previousComparablePeriod(from,to);
+  const pnlCodes=new Set([...revenueAccts,...expenseAccts].map(a=>a.code));
+  const periodRecordCount=postings.filter(p=>p.date>=from&&p.date<=to&&pnlCodes.has(p.gl)).length
+    +invoices.filter(inv=>inv.date>=from&&inv.date<=to).length;
+  const priorPostings=priorExecutivePeriod?postings.filter(p=>
+    p.date>=priorExecutivePeriod.from&&p.date<=priorExecutivePeriod.to):[];
+  const priorInvoices=priorExecutivePeriod?invoices.filter(inv=>
+    inv.date>=priorExecutivePeriod.from&&inv.date<=priorExecutivePeriod.to):[];
+  const priorRevenue=priorPostings.filter(p=>revenueAccts.some(a=>a.code===p.gl))
+    .reduce((sum,p)=>sum+(Number(p.amount)||0),0)
+    +priorInvoices.reduce((sum,inv)=>sum+(Number(invoiceRevenueSubtotal(inv))||0),0);
+  const priorExpenses=priorPostings.filter(p=>expenseAccts.some(a=>a.code===p.gl))
+    .reduce((sum,p)=>sum+(Number(p.amount)||0),0);
+  const priorFinancial={
+    from:priorExecutivePeriod?.from||'',to:priorExecutivePeriod?.to||'',
+    revenue:priorRevenue,expenses:priorExpenses,netIncome:priorRevenue-priorExpenses,
+    hasActivity:priorPostings.some(p=>pnlCodes.has(p.gl))||priorInvoices.length>0,
+  };
+  const executiveFinancials={
+    revenue:totalRevenue,cogs:totalCogs,hasCogs:cogsRows.length>0,
+    expenses:totalExpense,netIncome,cash:cfTotalEnding,cashMovement:netCashChange,
+    receivables:tradeReceivableGL?balanceAsOf(tradeReceivableGL,to):null,
+    liabilities:totalLiabilities,assets:totalAssets,balanceDifference:balanceSheetDifference,
+    expenseRows,periodRecords:periodRecordCount,
+    reconciliationAlerts:reconciliationDrift.length,
+    arMismatch:Boolean(receivableMismatch),
+    uncategorizedCount:uncategorizedTransactions.length,
+  };
+
 
   const REPORT_OPTIONS = [
     ['pnl', 'P&L (Income Statement)'],
@@ -6855,6 +6889,28 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           )}
         </div>
       </Card>
+
+      <Card style={{marginBottom:20,border:'1px solid #C6D6E8',background:'#F4F8FC'}}>
+        <div style={{display:'flex',gap:14,justifyContent:'space-between',alignItems:'center',flexWrap:'wrap'}}>
+          <div>
+            <div style={{color:'#17365D',fontSize:16,fontWeight:700}}>Reporte Financiero Ejecutivo</div>
+            <div style={{fontSize:12,color:'#586E85',marginTop:4}}>
+              Indicadores, hallazgos, oportunidades y amenazas, estrategias a 90 días y 3–12 meses,
+              discusión con el dueño y notas del mercado, usando exactamente el período aplicado arriba.
+            </div>
+          </div>
+          <button type="button" onClick={()=>setShowExecutiveReport(value=>!value)}
+            style={{background:'#17365D',border:0,borderRadius:6,color:'#fff',
+              padding:'11px 15px',fontWeight:700,cursor:'pointer'}}>
+            {showExecutiveReport?'Volver a reportes contables':'Preparar reporte ejecutivo'}
+          </button>
+        </div>
+      </Card>
+      {showExecutiveReport ? <TBSExecutiveFinancialReport
+        clientId={clientId} businessName={businessName} from={from} to={to}
+        financials={executiveFinancials} prior={priorFinancial}
+        onClose={()=>setShowExecutiveReport(false)}
+      /> : <>
 
       {(reconciliationDrift.length > 0 || receivableMismatch) && (
         <Card style={{ marginBottom: 20, border: '1px solid #D9A441', background: '#FFFBF2' }}>
@@ -7383,6 +7439,7 @@ function ReportsView({ transactions, invoices, glName, invoiceTotal, invoiceSubt
           selectedReport={selectedReport} breakdown={usesBreakdownPdf}
           onClose={() => setShowExportPreview(false)} />;
       })()}
+      </>}
     </div>
   );
 }
