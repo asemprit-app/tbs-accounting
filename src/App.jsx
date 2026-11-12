@@ -28,6 +28,7 @@ import { CUSTOM_CHECK_FIELDS, defaultCustomCheckPositions, updateCustomCheckPosi
 import { payrollCheckVoucher, serviceCheckVoucher, customCheckStubSlots } from './tbsCheckVoucher.js';
 import { findTradeReceivableCode, invoicePaidAsOfDate, invoiceReceivableEntries, linkedInvoiceTransactionIds, arBankCategoryPosting } from './tbsAccountsReceivable.js';
 import { journalEntryBalance } from './tbsJournalBalance.js';
+import { serviceExpenseAccountCode, serviceReimbursementAccountCode } from './tbsServiceExpenseAccount.js';
 import { impactedTransactionReconciliations, impactedJournalReconciliations, impactedAccountReconciliations, uniqueImpactedReconciliations, pendingReviewReconciliations, reconciliationImpactConfirmation } from './tbsReconciliationReview.js';
 import { formatDecimal, formatDecimalInput, formatPercentage } from './tbsNumberFormatting.js';
 import { normalizeReceiptEmail, isValidReceiptEmail, resolveReceiptEmail } from './tbsServiceReceiptEmail.js';
@@ -3340,14 +3341,21 @@ function ServicesView({ clientId, services, setServices, employees, businessName
     }
     const c = serviceCalc(s);
     const findCode = name => accounts.find(a => a.name.toLowerCase() === name.toLowerCase())?.code;
+    // Invoice > Send to Client Services and any external provider always use 5010.
+    // Employee compensation uses 5000, never the retired 6250 account.
+    const expenseCode = serviceExpenseAccountCode(s);
+    const reimbursementCode = serviceReimbursementAccountCode(s);
+    const findExpenseCode = code => accounts.find(a => a.code === code && a.type === 'Expense')?.code;
     const ACCOUNT_NAMES = {
-      wages: 'Service Wages Expense',
+      wages: expenseCode === '5000' ? 'Wages, Commissions and Employee Bonuses (5000)' : 'Professional Services Expenses (5010)',
+      reimbursement: reimbursementCode === '5980' ? 'Employee Reimbursements Expense (5980)' : 'Professional Services Expenses (5010)',
       retentionPayable: 'Income Tax Withheld Payable 10%',
       netPayPayable: 'Professional Service Payable',
       ivuPaid: 'IVU Paid / Input Tax Credit',
     };
     const codes = {
-      wages: findCode(ACCOUNT_NAMES.wages),
+      wages: findExpenseCode(expenseCode),
+      reimbursement: Number(s.reimbursement) > 0 ? findExpenseCode(reimbursementCode) : 'NOT_REQUIRED',
       retentionPayable: findCode(ACCOUNT_NAMES.retentionPayable),
       netPayPayable: findCode(ACCOUNT_NAMES.netPayPayable),
       ivuPaid: c.ivuAmount > 0 ? findCode(ACCOUNT_NAMES.ivuPaid) : 'NOT_REQUIRED',
@@ -3359,7 +3367,7 @@ function ServicesView({ clientId, services, setServices, employees, businessName
     }
     const jeLines = [{ gl: codes.wages, debit: c.gross.toFixed(2), credit: '', desc: `Service pay — ${s.employeeName}` }];
     if (Number(s.reimbursement) > 0) {
-      jeLines.push({ gl: codes.wages, debit: Number(s.reimbursement).toFixed(2), credit: '', desc: 'Reimbursement' });
+      jeLines.push({ gl: codes.reimbursement, debit: Number(s.reimbursement).toFixed(2), credit: '', desc: 'Reimbursement' });
     }
     if (c.ivuAmount > 0) {
       jeLines.push({ gl: codes.ivuPaid, debit: c.ivuAmount.toFixed(2), credit: '', desc: `IVU paid (${formatPercentage(c.ivuPct)})` });
