@@ -1,10 +1,14 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
 import {KPI_OPTIONS,DEFAULT_KPIS,INDUSTRY_OPTIONS,executiveMetrics,executiveNarrative,comparisonChange} from './tbsExecutiveReportRules.js';
-import {printExecutiveFinancialReport} from './tbsExecutiveReportPrint.js';
+import {executivePdfBlob,executivePdfFilename,blobToPdfBase64} from './tbsExecutiveReportPdf.js';
+import {downloadExecutiveWord} from './tbsExecutiveReportWord.js';
+import {executiveEmailMessage,executiveEmailSubject,validRecipientEmail} from './tbsExecutiveEmail.js';
+import {MAX_MONTHS,addSelectedMonth,normalizeSelectedMonths,buildMonthlyComparison,buildMonthKpiRows,monthlyComparisonFindings} from './tbsExecutiveMonths.js';
 import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from './tbsExecutiveComparison.js';
+import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 
-const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:''});
+const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[],clientSections:[...DEFAULT_CLIENT_SECTIONS]});
 const field={width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #CBD5E1',borderRadius:6,fontSize:13};
 const panel={background:'#fff',border:'1px solid #DFE5ED',borderRadius:9,padding:17,marginTop:14};
 const button={background:'#17365D',color:'#fff',padding:'9px 13px',border:0,borderRadius:6,cursor:'pointer',fontWeight:600};
@@ -33,13 +37,22 @@ function BarChart({title,items}){
   <div style={{color:'#64748B',fontSize:10,marginTop:10}}>Las barras muestran magnitudes positivas; los números negativos mantienen su signo.</div>
  </div>;
 }
-export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,onClose}){
+export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose}){
  const [notes,setNotes]=useState(blankNotes);
+ const [monthToAdd,setMonthToAdd]=useState('');
+ const [emailOpen,setEmailOpen]=useState(false);
+ const [emailTo,setEmailTo]=useState('');
+ const [emailSubject,setEmailSubject]=useState('');
+ const [emailMessage,setEmailMessage]=useState('');
+ const [confirmRecipient,setConfirmRecipient]=useState(false);
+ const [emailSending,setEmailSending]=useState(false);
+ const [exportingWord,setExportingWord]=useState(false);
+ const [exportingPdf,setExportingPdf]=useState(false);
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
  const metrics=useMemo(()=>executiveMetrics(financials),[financials]);
  const selected=KPI_OPTIONS.filter(k=>notes.selectedKpis.includes(k.key));
- const comparisonPeriod=notes.comparisonMode==='none'?null:
+ const comparisonPeriod=['none','months'].includes(notes.comparisonMode)?null:
    notes.comparisonMode==='previous'?prior?.from&&prior?.to?{from:prior.from,to:prior.to}:null:
    validComparisonRange(notes.comparisonFrom,notes.comparisonTo)?
      {from:notes.comparisonFrom,to:notes.comparisonTo}:null;
@@ -55,6 +68,24 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    hasActivity:comparisonHasActivity,
  }: {hasActivity:false};
  const narrative=executiveNarrative(financials,effectivePrior,notes.sector);
+ const summary=useMemo(()=>simpleExecutiveSummary(financials,metrics),[financials,metrics]);
+ const monthlyRows=notes.comparisonMode==='months'&&financialsForRange?
+   buildMonthlyComparison(notes.selectedMonths,financialsForRange):[];
+ const monthlyKpis=buildMonthKpiRows(selected,monthlyRows);
+ const monthlyFindings=monthlyComparisonFindings(monthlyRows);
+ const exportError=loading?'Espera a que cargue el reporte.':
+   !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
+   normalizeClientSections(notes.clientSections).length===0?'Selecciona al menos una sección para compartir con el cliente.':
+   ['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod?'Selecciona un período comparativo válido.':
+   notes.comparisonMode==='months'&&monthlyRows.length<2?'Selecciona al menos dos meses para la comparación mes a mes.':'';
+ function makeReportPayload(){
+   return {businessName,from,to,clientId,industryLabel:getSector(notes.sector),
+     metrics:selected,metricValues:metrics,prior:effectivePrior,
+     financials,narrative,notes,clientSections:normalizeClientSections(notes.clientSections),
+     comparisonPeriod,comparison,comparisonHasActivity,
+     monthlyRows,monthlyKpis,monthlyFindings};
+ }
+
 
  const warnings=[];
  if(Math.abs(financials.balanceDifference||0)>=.01)warnings.push('Balance Sheet con diferencia de '+money(financials.balanceDifference));
@@ -66,7 +97,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  }
  useEffect(()=>{
   let active=true;
-  setLoading(true);setError('');setNotice('');setDirty(false);setNotes(blankNotes());
+  setLoading(true);setError('');setNotice('');setDirty(false);setNotes(blankNotes());setEmailOpen(false);
   (async()=>{
    try{
     const r=await supabase.from('tbs_executive_report_notes').select('*')
@@ -82,6 +113,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
       marketSourceDate:row.market_source_date||'',ownerDiscussion:row.owner_discussion||'',
       agreements:row.agreements||'',followupDate:row.followup_date||'',
       comparisonMode:row.comparison_mode||'previous',comparisonFrom:row.comparison_from||'',comparisonTo:row.comparison_to||'',
+      selectedMonths:normalizeSelectedMonths(row.selected_months||[]),
+      clientSections:normalizeClientSections(row.client_sections),
      });
     }
    }catch(e){if(active)setError('No se pudieron recuperar las notas: '+(e.message||String(e)));}
@@ -94,6 +127,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
   if(loading||saving)return;
   if(!notes.selectedKpis.length){setError('Selecciona al menos un indicador.');return;}
   if(['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod){setError('Selecciona un período comparativo válido.');return;}
+  if(notes.comparisonMode==='months'&&monthlyRows.length<2){setError('Selecciona al menos dos meses para comparar.');return;}
   setError('');setNotice('');setSaving(true);
   try{
    const auth=await supabase.auth.getUser();
@@ -107,6 +141,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     owner_discussion:notes.ownerDiscussion.trim().slice(0,8000),
     agreements:notes.agreements.trim().slice(0,8000),
     followup_date:notes.followupDate||null,
+    selected_months:normalizeSelectedMonths(notes.selectedMonths),
+    client_sections:normalizeClientSections(notes.clientSections),
     comparison_mode:notes.comparisonMode,comparison_from:notes.comparisonFrom||null,
     comparison_to:notes.comparisonTo||null,
     updated_by:auth.data.user.id,updated_at:new Date().toISOString(),
@@ -118,16 +154,69 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
   }catch(e){setError('No se pudo guardar: '+(e.message||String(e)));}
   finally{setSaving(false);}
  }
- function printReport(){
-  if(!notes.selectedKpis.length){setError('Selecciona al menos un indicador.');return;}
-  if(['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod){setError('Selecciona un período comparativo válido.');return;}
-  try{
-   printExecutiveFinancialReport({
-    businessName,from,to,industryLabel:getSector(notes.sector),
-    metrics:selected,metricValues:metrics,prior:effectivePrior,narrative,financials,notes,
-    comparisonPeriod,comparison,comparisonHasActivity,
-   });
-  }catch(e){setError(e.message||String(e));}
+ function saveBlob(blob,filename){
+   const url=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),5000);
+ }
+ async function downloadPdf(){
+   if(exportError){setError(exportError);return;}
+   setExportingPdf(true);setError('');
+   try{
+     const payload=makeReportPayload();
+     const blob=executivePdfBlob(payload);
+     saveBlob(blob,executivePdfFilename(payload));
+     setNotice('PDF generado correctamente con los períodos y las notas actuales.');
+   }catch(e){setError('No se pudo generar el PDF: '+(e.message||String(e)));}
+   finally{setExportingPdf(false);}
+ }
+ async function downloadWord(){
+   if(exportError){setError(exportError);return;}
+   setExportingWord(true);setError('');
+   try{
+     await downloadExecutiveWord(makeReportPayload());
+     setNotice('Word editable (.docx) generado correctamente.');
+   }catch(e){setError('No se pudo generar Word: '+(e.message||String(e)));}
+   finally{setExportingWord(false);}
+ }
+ function prepareEmail(){
+   if(!isStaff){setError('Solo el personal autorizado de TBS puede enviar reportes.');return;}
+   if(exportError){setError(exportError);return;}
+   setEmailSubject(executiveEmailSubject(businessName,from,to));
+   setEmailMessage(executiveEmailMessage(businessName,from,to,
+     notes.comparisonMode==='months'?normalizeSelectedMonths(notes.selectedMonths):[],
+     normalizeClientSections(notes.clientSections)));
+   setEmailTo('');setConfirmRecipient(false);setEmailOpen(true);setError('');setNotice('');
+ }
+ async function sendReportEmail(){
+   if(!isStaff||emailSending)return;
+   if(exportError){setError(exportError);return;}
+   if(!validRecipientEmail(emailTo)){setError('Confirma un único correo electrónico válido del cliente.');return;}
+   if(!confirmRecipient){setError('Confirma que revisaste el destinatario y el reporte antes de enviarlo.');return;}
+   if(!emailSubject.trim()||!emailMessage.trim()){setError('El asunto y el mensaje son obligatorios.');return;}
+   setEmailSending(true);setError('');setNotice('');
+   try{
+     const auth=await supabase.auth.getSession();
+     const token=auth?.data?.session?.access_token;
+     if(auth.error||!token)throw Error('Tu sesión venció. Inicia sesión de nuevo.');
+     // Native jsPDF is created once per send and validated as nonblank; no HTML
+     // print window or screenshot is attached to the email.
+     const blob=executivePdfBlob(makeReportPayload());
+     const pdfBase64=await blobToPdfBase64(blob);
+     const response=await fetch('/api/send-executive-report',{
+       method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+       body:JSON.stringify({
+         clientId,from,to,toEmail:emailTo.trim(),subject:emailSubject.trim(),
+         message:emailMessage,pdfBase64,
+       }),
+     });
+     const result=await response.json().catch(()=>({}));
+     if(!response.ok||!result.accepted)throw Error(result.error||'El servicio de correo no aceptó el reporte.');
+     setEmailOpen(false);setConfirmRecipient(false);
+     setNotice('El proveedor de correo aceptó el envío del PDF a '+result.to+
+       (result.id?' (referencia '+result.id+').':'.')+' La entrega final depende del destinatario.');
+   }catch(e){setError('No se pudo enviar el reporte: '+(e.message||String(e)));}
+   finally{setEmailSending(false);}
  }
  const section=(title,content)=> <div style={panel}><h3 style={{margin:'0 0 8px',color:'#17365D',fontSize:15}}>{title}</h3>{content}</div>;
  const trend=effectivePrior?.hasActivity?comparisonChange(metrics.revenue,effectivePrior.revenue):null;
@@ -139,13 +228,15 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      <h2 style={{fontSize:22,color:'#17365D',margin:'5px 0'}}>Reporte Financiero Ejecutivo</h2>
      <div style={{fontSize:13}}><strong>{businessName}</strong> · {from} al {to}</div>
      <div style={{fontSize:12,color:'#64748B',marginTop:5}}>
-      {comparisonPeriod?'Comparación seleccionada: '+comparisonPeriod.from+' al '+comparisonPeriod.to:notes.comparisonMode==='none'?'Sin comparación':'Selecciona un período comparativo válido'}
+      {notes.comparisonMode==='months'?monthlyRows.length+' meses seleccionados para comparar':comparisonPeriod?'Comparación seleccionada: '+comparisonPeriod.from+' al '+comparisonPeriod.to:notes.comparisonMode==='none'?'Sin comparación':'Selecciona un período comparativo válido'}
      </div>
     </div>
     <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'start'}}>
      <button style={{...button,color:'#17365D',background:'#EBF0F5'}} onClick={onClose}>Volver a Reports</button>
      <button style={{...button,background:'#507290'}} disabled={loading||saving} onClick={saveNotes}>{saving?'Guardando…':'Guardar análisis'}</button>
-     <button style={button} onClick={printReport}>Imprimir / Guardar PDF</button>
+     <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
+     <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
     </div>
    </div>
    {loading&&<p style={{fontSize:12,color:'#64748B'}}>Cargando notas de este período…</p>}
@@ -158,6 +249,46 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    <List entries={warnings}/>
    <p style={{fontSize:12}}>Las conclusiones deben considerarse provisionales hasta verificar estas partidas. No se registran ajustes automáticos.</p>
   </div>}
+  {section('Resumen ejecutivo — sencillo y fácil de entender',<>
+    <p style={{fontSize:12,color:'#64748B'}}>Este texto se genera a partir de las ventas, gastos y ganancia neta del período. No utiliza conclusiones de mercado no verificadas.</p>
+    <div style={{borderLeft:'3px solid #50769B',padding:'10px 15px',background:'#F3F7FB',borderRadius:5}}>
+      {summary.map((sentence,i)=><p key={i} style={{fontSize:13,lineHeight:1.6,margin:'5px 0'}}>{sentence}</p>)}
+    </div>
+  </>)}
+  {section('Seleccionar las partes que deseas compartir con el cliente',<>
+    <p style={{fontSize:12,color:'#64748B'}}>
+      El reporte completo se conserva en TBS. Estas selecciones afectan solamente el contenido
+      de los documentos PDF y Word que descargues o envíes al cliente. Las advertencias contables
+      no se pueden ocultar cuando exista alguna validación pendiente.
+    </p>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:9}}>
+      {EXECUTIVE_SECTIONS.map(item=><label key={item.key} style={{
+        display:'flex',gap:8,padding:'10px 12px',alignItems:'start',
+        border:'1px solid #DAE4EC',borderRadius:7,cursor:'pointer',
+        background:notes.clientSections.includes(item.key)?'#EFF6FD':'#FFF'}}>
+        <input aria-label={'Compartir '+item.label} type="checkbox"
+          checked={notes.clientSections.includes(item.key)}
+          onChange={e=>change('clientSections',e.target.checked?
+            normalizeClientSections([...notes.clientSections,item.key]):
+            notes.clientSections.filter(key=>key!==item.key))}/>
+        <span>
+          <strong style={{display:'block',fontSize:12}}>{item.label}</strong>
+          <small style={{color:item.confidential?'#98521A':'#64748B',fontSize:11}}>
+            {item.confidential?'Confidencial: ':''}{item.description}
+          </small>
+        </span>
+      </label>)}
+    </div>
+    <div style={{display:'flex',gap:8,marginTop:12,alignItems:'center',flexWrap:'wrap'}}>
+      <button type="button" style={{...button,background:'#EEF3F8',color:'#17365D'}}
+        onClick={()=>change('clientSections',[...DEFAULT_CLIENT_SECTIONS])}>Restablecer selección recomendada</button>
+      <span style={{fontSize:12,color:'#64748B'}}>
+        {notes.clientSections.length} sección(es) seleccionadas.
+        {' '}Las notas y acuerdos internos están excluidos por defecto.
+      </span>
+    </div>
+    {notes.clientSections.length===0&&<p style={{color:'#B91C1C',fontSize:12}}>Selecciona al menos una sección antes de exportar o enviar.</p>}
+  </>)}
   {section('Comparar meses y períodos',<>
     <p style={{fontSize:12,color:'#64748B'}}>Elige el período de referencia. Las cuentas de resultados reflejan actividad de cada intervalo; efectivo, activos, pasivos y A/R se comparan al cierre de cada uno. No se suman balances de meses diferentes.</p>
     <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'end'}}>
@@ -166,6 +297,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
           onChange={e=>change('comparisonMode',e.target.value)}>
           <option value="previous">Período anterior equivalente</option>
           <option value="month">Mes específico</option>
+          <option value="months">Comparar varios meses seleccionados</option>
           <option value="custom">Período personalizado</option>
           <option value="none">Sin comparación</option>
         </select>
@@ -179,6 +311,28 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
             setDirty(true);
           }}/>
       </label>}
+      {notes.comparisonMode==='months'&&<div style={{minWidth:290,flex:'1 1 290px'}}>
+        <label style={{fontSize:12,display:'block'}}>Añadir mes para comparar (máximo {MAX_MONTHS})
+          <div style={{display:'flex',gap:8,marginTop:5}}>
+            <input type="month" aria-label="Añadir mes" value={monthToAdd} style={{...field,maxWidth:190}}
+              onChange={e=>setMonthToAdd(e.target.value)}/>
+            <button type="button" style={button} disabled={!monthToAdd||notes.selectedMonths.length>=MAX_MONTHS}
+              onClick={()=>{
+                const selectedMonths=addSelectedMonth(notes.selectedMonths,monthToAdd);
+                change('selectedMonths',selectedMonths);setMonthToAdd('');
+              }}>Añadir</button>
+          </div>
+        </label>
+        <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:9}}>
+          {notes.selectedMonths.map(month=><button type="button" key={month} title={'Quitar '+month}
+            onClick={()=>change('selectedMonths',notes.selectedMonths.filter(item=>item!==month))}
+            style={{border:'1px solid #C7D8E6',borderRadius:18,background:'#EEF5FC',
+              color:'#17365D',padding:'6px 9px',cursor:'pointer',fontSize:12}}>
+            {month} ×
+          </button>)}
+          {notes.selectedMonths.length===0&&<span style={{fontSize:12,color:'#64748B'}}>Todavía no hay meses seleccionados.</span>}
+        </div>
+      </div>}
       {notes.comparisonMode==='custom'&&<>
         <label style={{fontSize:12}}>Desde
           <input aria-label="Comparación desde" type="date" style={{...field,display:'block',marginTop:4}}
@@ -192,6 +346,42 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     </div>
     {['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod&&
       <p style={{color:'#B91C1C',fontSize:12}}>Selecciona un mes o intervalo válido antes de guardar o imprimir.</p>}
+    {notes.comparisonMode==='months'&&<div style={{marginTop:12}}>
+      {monthlyRows.length<2&&<p style={{color:'#B91C1C',fontSize:12}}>
+        Selecciona al menos dos meses. Puedes elegir meses no consecutivos, de diferentes años, hasta un máximo de 12.
+      </p>}
+      {monthlyRows.length>=2&&<>
+        <p style={{fontSize:12,color:'#64748B'}}>
+          Valores de cada mes elegido, ordenados cronológicamente. La cifra pequeña indica
+          el cambio respecto al mes anterior seleccionado. Los balances son al cierre de cada mes.
+        </p>
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead><tr style={{background:'#EDF3F8',color:'#17365D'}}>
+              <th style={{padding:8,textAlign:'left',position:'sticky',left:0,background:'#EDF3F8'}}>Indicador</th>
+              {monthlyRows.map(r=><th key={r.month} style={{padding:8,textAlign:'right',whiteSpace:'nowrap'}}>{r.label}</th>)}
+            </tr></thead>
+            <tbody>{monthlyKpis.map(row=><tr key={row.key} style={{borderBottom:'1px solid #E1E7EE'}}>
+              <td style={{padding:8,whiteSpace:'nowrap',fontWeight:600,position:'sticky',left:0,background:'white'}}>{row.label}</td>
+              {row.values.map((amount,i)=>{
+                const c=row.changes[i];
+                const changeLabel=!c||c.delta===null?'—':
+                  c.changePoints!==null?(c.changePoints>0?'+':'')+c.changePoints.toFixed(2)+' pp':
+                  c.changePercent!==null?(c.changePercent>0?'+':'')+c.changePercent.toFixed(1)+'%':'N/D';
+                return <td key={monthlyRows[i].month} style={{padding:8,textAlign:'right',whiteSpace:'nowrap'}}>
+                  <strong>{value(row.key,amount)}</strong>
+                  {i>0&&<div style={{fontSize:10,color:c?.delta<0?'#AB3C29':'#4D6988'}}>{changeLabel} vs anterior</div>}
+                </td>;
+              })}
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <div style={{marginTop:11}}>
+          <h4 style={{color:'#17365D',margin:'3px 0'}}>Hallazgos mes a mes</h4>
+          <List entries={monthlyFindings} empty="No hay actividad suficiente para interpretar cambios entre los meses seleccionados."/>
+        </div>
+      </>}
+    </div>}
     {comparisonPeriod&&<p style={{fontSize:12,color:'#17365D'}}>
       <strong>Período principal:</strong> {from} al {to} · <strong>Período comparado:</strong> {comparisonPeriod.from} al {comparisonPeriod.to}
       {comparisonHasActivity?'':' · Sin movimientos suficientes de ingresos/gastos en el período comparado'}
@@ -286,9 +476,57 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    </label>
    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
     <button style={button} disabled={loading||saving} onClick={saveNotes}>Guardar reunión y acuerdos</button>
-    <button style={{...button,background:'#507290'}} onClick={printReport}>Imprimir / Guardar PDF</button>
+    <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
+     <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
    </div>
   </>)}
+  {emailOpen&&isStaff&&<div role="presentation" style={{position:'fixed',inset:0,
+    background:'rgba(10,23,39,0.56)',zIndex:100,display:'flex',alignItems:'center',
+    justifyContent:'center',padding:18}}>
+    <div role="dialog" aria-modal="true" aria-label="Enviar Reporte Financiero Ejecutivo"
+      style={{background:'white',borderRadius:10,padding:22,maxWidth:650,width:'100%',
+        maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
+      <h3 style={{color:'#17365D',marginTop:0}}>Enviar Reporte Financiero Ejecutivo en PDF</h3>
+      <p style={{color:'#64748B',fontSize:12}}>
+        Revisa el destinatario, las secciones seleccionadas y el mensaje. Se adjuntará un PDF válido del reporte
+        del cliente {businessName}, desde {from} hasta {to}. No se enviará automáticamente.
+      </p>
+      <p style={{fontSize:11,background:'#EFF6FD',padding:10,borderRadius:6}}>
+        <strong>Secciones incluidas:</strong> {EXECUTIVE_SECTIONS.filter(item=>notes.clientSections.includes(item.key))
+          .map(item=>item.label).join(' · ')}
+      </p>
+      <label style={{fontSize:12,display:'block',marginBottom:11}}>Correo del cliente
+        <input type="email" aria-label="Correo del cliente" style={{...field,display:'block',marginTop:4}}
+          placeholder="correo@cliente.com" autoComplete="off" value={emailTo}
+          onChange={e=>{setEmailTo(e.target.value);setConfirmRecipient(false);}}/>
+      </label>
+      <label style={{fontSize:12,display:'block',marginBottom:11}}>Asunto
+        <input aria-label="Asunto del email" style={{...field,display:'block',marginTop:4}}
+          value={emailSubject} onChange={e=>setEmailSubject(e.target.value)}/>
+      </label>
+      <label style={{fontSize:12,display:'block',marginBottom:10}}>Mensaje editable para el cliente
+        <textarea aria-label="Mensaje del reporte" rows={10}
+          style={{...field,display:'block',marginTop:4,resize:'vertical'}}
+          value={emailMessage} onChange={e=>setEmailMessage(e.target.value)}/>
+      </label>
+      <p style={{fontSize:11,color:'#64748B'}}>
+        El mensaje incluye cómo comunicarse con Twelve Business Strategies LLC:
+        admin@twelvestrategies.com. El remitente se obtiene de la configuración segura de correo de TBS.
+      </p>
+      <label style={{fontSize:12,display:'flex',gap:8,alignItems:'start',margin:'13px 0',cursor:'pointer'}}>
+        <input type="checkbox" checked={confirmRecipient}
+          onChange={e=>setConfirmRecipient(e.target.checked)}/>
+        Confirmo que revisé el destinatario, los números y el archivo PDF antes de enviarlo.
+      </label>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:9,flexWrap:'wrap'}}>
+        <button type="button" style={{...button,background:'#E9EEF4',color:'#17365D'}}
+          disabled={emailSending} onClick={()=>{setEmailOpen(false);setConfirmRecipient(false);}}>Cancelar</button>
+        <button type="button" style={button} disabled={emailSending||!confirmRecipient||!validRecipientEmail(emailTo)}
+          onClick={sendReportEmail}>{emailSending?'Enviando…':'Enviar PDF al cliente'}</button>
+      </div>
+    </div>
+  </div>}
   <p style={{fontSize:11,lineHeight:1.5,color:'#64748B'}}>
    Fuente financiera: TBS Accounting Engine. Las cifras están sujetas a clasificaciones, conciliaciones y ajustes posteriores.
    El efectivo se identifica según el nombre de las cuentas. Las referencias de mercado son aportadas por la gerencia;
