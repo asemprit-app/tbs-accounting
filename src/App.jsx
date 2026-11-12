@@ -6522,6 +6522,30 @@ function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, i
     revenue:priorRevenue,expenses:priorExpenses,netIncome:priorRevenue-priorExpenses,
     hasActivity:priorPostings.some(p=>pnlCodes.has(p.gl))||priorInvoices.length>0,
   };
+  // Reconstruct each selected comparison range with the exact signed
+  // postings and invoice recognition used in the current report.
+  function financialsForExecutiveRange(rangeFrom,rangeTo){
+    const windowPostings=postings.filter(p=>p.date>=rangeFrom&&p.date<=rangeTo);
+    const activity=(codes)=>windowPostings.filter(p=>codes.has(p.gl))
+      .reduce((sum,p)=>sum+(Number(p.amount)||0),0);
+    const revenueCodes=new Set(revenueAccts.map(a=>a.code));
+    const expenseCodes=new Set(expenseAccts.map(a=>a.code));
+    const cogsCodes=new Set(cogsRows.map(a=>a.code));
+    const invoiceRecords=invoices.filter(i=>i.date>=rangeFrom&&i.date<=rangeTo);
+    const revenue=activity(revenueCodes)+invoiceRecords.reduce((sum,i)=>sum+(Number(invoiceRevenueSubtotal(i))||0),0);
+    const expenses=activity(expenseCodes);
+    const endingCash=cashAccts.reduce((sum,a)=>sum+balanceAsOf(a.code,rangeTo),0);
+    const beforeStart=new Date(Date.parse(rangeFrom+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+    const startingCash=cashAccts.reduce((sum,a)=>sum+balanceAsOf(a.code,beforeStart),0);
+    return {
+      revenue,expenses,netIncome:revenue-expenses,cogs:activity(cogsCodes),hasCogs:cogsRows.length>0,
+      cash:endingCash,cashMovement:endingCash-startingCash,
+      receivables:tradeReceivableGL?balanceAsOf(tradeReceivableGL,rangeTo):null,
+      assets:assetAccts.reduce((sum,a)=>sum+balanceAsOf(a.code,rangeTo),0),
+      liabilities:liabilityAccts.reduce((sum,a)=>sum+balanceAsOf(a.code,rangeTo),0),
+      periodRecords:windowPostings.some(p=>revenueCodes.has(p.gl)||expenseCodes.has(p.gl))||invoiceRecords.length>0,
+    };
+  }
   const executiveFinancials={
     revenue:totalRevenue,cogs:totalCogs,hasCogs:cogsRows.length>0,
     expenses:totalExpense,netIncome,cash:cfTotalEnding,cashMovement:netCashChange,
@@ -6908,7 +6932,7 @@ function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, i
       </Card>
       {showExecutiveReport ? <TBSExecutiveFinancialReport
         clientId={clientId} businessName={businessName} from={from} to={to}
-        financials={executiveFinancials} prior={priorFinancial}
+        financials={executiveFinancials} prior={priorFinancial} financialsForRange={financialsForExecutiveRange}
         onClose={()=>setShowExecutiveReport(false)}
       /> : <>
 
