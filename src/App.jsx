@@ -913,6 +913,10 @@ export default function App() {
     return <div style={{ padding: 40, fontFamily: 'system-ui, sans-serif', color: '#6B7280' }}>Loading…</div>;
   }
 
+  if (requiresPasswordSetup) {
+    return <TBSStaffPasswordSetup onComplete={() => setRequiresPasswordSetup(false)} />;
+  }
+
   if (!session) {
     return (
       <div style={{ minHeight: '640px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8' }}>
@@ -931,10 +935,6 @@ export default function App() {
         </div>
       </div>
     );
-  }
-
-  if (requiresPasswordSetup) {
-    return <TBSStaffPasswordSetup onComplete={() => setRequiresPasswordSetup(false)} />;
   }
 
   if (!profile || !selectedClientId) {
