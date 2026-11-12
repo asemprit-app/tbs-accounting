@@ -6,8 +6,9 @@ import {downloadExecutiveWord} from './tbsExecutiveReportWord.js';
 import {executiveEmailMessage,executiveEmailSubject,validRecipientEmail} from './tbsExecutiveEmail.js';
 import {MAX_MONTHS,addSelectedMonth,normalizeSelectedMonths,buildMonthlyComparison,buildMonthKpiRows,monthlyComparisonFindings} from './tbsExecutiveMonths.js';
 import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from './tbsExecutiveComparison.js';
+import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 
-const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[]});
+const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[],clientSections:[...DEFAULT_CLIENT_SECTIONS]});
 const field={width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #CBD5E1',borderRadius:6,fontSize:13};
 const panel={background:'#fff',border:'1px solid #DFE5ED',borderRadius:9,padding:17,marginTop:14};
 const button={background:'#17365D',color:'#fff',padding:'9px 13px',border:0,borderRadius:6,cursor:'pointer',fontWeight:600};
@@ -67,18 +68,21 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    hasActivity:comparisonHasActivity,
  }: {hasActivity:false};
  const narrative=executiveNarrative(financials,effectivePrior,notes.sector);
+ const summary=useMemo(()=>simpleExecutiveSummary(financials,metrics),[financials,metrics]);
  const monthlyRows=notes.comparisonMode==='months'&&financialsForRange?
    buildMonthlyComparison(notes.selectedMonths,financialsForRange):[];
  const monthlyKpis=buildMonthKpiRows(selected,monthlyRows);
  const monthlyFindings=monthlyComparisonFindings(monthlyRows);
  const exportError=loading?'Espera a que cargue el reporte.':
    !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
+   normalizeClientSections(notes.clientSections).length===0?'Selecciona al menos una sección para compartir con el cliente.':
    ['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod?'Selecciona un período comparativo válido.':
    notes.comparisonMode==='months'&&monthlyRows.length<2?'Selecciona al menos dos meses para la comparación mes a mes.':'';
  function makeReportPayload(){
    return {businessName,from,to,clientId,industryLabel:getSector(notes.sector),
      metrics:selected,metricValues:metrics,prior:effectivePrior,
-     financials,narrative,notes,comparisonPeriod,comparison,comparisonHasActivity,
+     financials,narrative,notes,clientSections:normalizeClientSections(notes.clientSections),
+     comparisonPeriod,comparison,comparisonHasActivity,
      monthlyRows,monthlyKpis,monthlyFindings};
  }
 
@@ -110,6 +114,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
       agreements:row.agreements||'',followupDate:row.followup_date||'',
       comparisonMode:row.comparison_mode||'previous',comparisonFrom:row.comparison_from||'',comparisonTo:row.comparison_to||'',
       selectedMonths:normalizeSelectedMonths(row.selected_months||[]),
+      clientSections:normalizeClientSections(row.client_sections),
      });
     }
    }catch(e){if(active)setError('No se pudieron recuperar las notas: '+(e.message||String(e)));}
@@ -137,6 +142,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     agreements:notes.agreements.trim().slice(0,8000),
     followup_date:notes.followupDate||null,
     selected_months:normalizeSelectedMonths(notes.selectedMonths),
+    client_sections:normalizeClientSections(notes.clientSections),
     comparison_mode:notes.comparisonMode,comparison_from:notes.comparisonFrom||null,
     comparison_to:notes.comparisonTo||null,
     updated_by:auth.data.user.id,updated_at:new Date().toISOString(),
@@ -242,6 +248,46 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    <List entries={warnings}/>
    <p style={{fontSize:12}}>Las conclusiones deben considerarse provisionales hasta verificar estas partidas. No se registran ajustes automáticos.</p>
   </div>}
+  {section('Resumen ejecutivo — sencillo y fácil de entender',<>
+    <p style={{fontSize:12,color:'#64748B'}}>Este texto se genera a partir de las ventas, gastos y ganancia neta del período. No utiliza conclusiones de mercado no verificadas.</p>
+    <div style={{borderLeft:'3px solid #50769B',padding:'10px 15px',background:'#F3F7FB',borderRadius:5}}>
+      {summary.map((sentence,i)=><p key={i} style={{fontSize:13,lineHeight:1.6,margin:'5px 0'}}>{sentence}</p>)}
+    </div>
+  </>)}
+  {section('Seleccionar las partes que deseas compartir con el cliente',<>
+    <p style={{fontSize:12,color:'#64748B'}}>
+      El reporte completo se conserva en TBS. Estas selecciones afectan solamente el contenido
+      de los documentos PDF y Word que descargues o envíes al cliente. Las advertencias contables
+      no se pueden ocultar cuando exista alguna validación pendiente.
+    </p>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:9}}>
+      {EXECUTIVE_SECTIONS.map(item=><label key={item.key} style={{
+        display:'flex',gap:8,padding:'10px 12px',alignItems:'start',
+        border:'1px solid #DAE4EC',borderRadius:7,cursor:'pointer',
+        background:notes.clientSections.includes(item.key)?'#EFF6FD':'#FFF'}}>
+        <input aria-label={'Compartir '+item.label} type="checkbox"
+          checked={notes.clientSections.includes(item.key)}
+          onChange={e=>change('clientSections',e.target.checked?
+            normalizeClientSections([...notes.clientSections,item.key]):
+            notes.clientSections.filter(key=>key!==item.key))}/>
+        <span>
+          <strong style={{display:'block',fontSize:12}}>{item.label}</strong>
+          <small style={{color:item.confidential?'#98521A':'#64748B',fontSize:11}}>
+            {item.confidential?'Confidencial: ':''}{item.description}
+          </small>
+        </span>
+      </label>)}
+    </div>
+    <div style={{display:'flex',gap:8,marginTop:12,alignItems:'center',flexWrap:'wrap'}}>
+      <button type="button" style={{...button,background:'#EEF3F8',color:'#17365D'}}
+        onClick={()=>change('clientSections',[...DEFAULT_CLIENT_SECTIONS])}>Restablecer selección recomendada</button>
+      <span style={{fontSize:12,color:'#64748B'}}>
+        {notes.clientSections.length} sección(es) seleccionadas.
+        {' '}Las notas y acuerdos internos están excluidos por defecto.
+      </span>
+    </div>
+    {notes.clientSections.length===0&&<p style={{color:'#B91C1C',fontSize:12}}>Selecciona al menos una sección antes de exportar o enviar.</p>}
+  </>)}
   {section('Comparar meses y períodos',<>
     <p style={{fontSize:12,color:'#64748B'}}>Elige el período de referencia. Las cuentas de resultados reflejan actividad de cada intervalo; efectivo, activos, pasivos y A/R se comparan al cierre de cada uno. No se suman balances de meses diferentes.</p>
     <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'end'}}>
@@ -442,8 +488,12 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
         maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
       <h3 style={{color:'#17365D',marginTop:0}}>Enviar Reporte Financiero Ejecutivo en PDF</h3>
       <p style={{color:'#64748B',fontSize:12}}>
-        Revisa el destinatario y el mensaje. Se adjuntará un PDF válido del reporte
+        Revisa el destinatario, las secciones seleccionadas y el mensaje. Se adjuntará un PDF válido del reporte
         del cliente {businessName}, desde {from} hasta {to}. No se enviará automáticamente.
+      </p>
+      <p style={{fontSize:11,background:'#EFF6FD',padding:10,borderRadius:6}}>
+        <strong>Secciones incluidas:</strong> {EXECUTIVE_SECTIONS.filter(item=>notes.clientSections.includes(item.key))
+          .map(item=>item.label).join(' · ')}
       </p>
       <label style={{fontSize:12,display:'block',marginBottom:11}}>Correo del cliente
         <input type="email" aria-label="Correo del cliente" style={{...field,display:'block',marginTop:4}}
