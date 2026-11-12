@@ -1,6 +1,7 @@
 // True editable Office Open XML (.docx), not HTML renamed with a Word extension.
 // Loaded on demand so accounting pages do not download the Word library.
 import {metricDisplay,executivePdfFilename} from './tbsExecutiveReportPdf.js';
+import {includeExecutiveSection,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 const str=v=>String(v??'');
 export async function buildExecutiveWord(payload){
  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,HeadingLevel}=await import('docx');
@@ -21,6 +22,7 @@ export async function buildExecutiveWord(payload){
  const contents=[];
  const add=(heading,rows)=>{contents.push(title(heading),...bullets(rows));};
  const intro=payload.financials||{},numbers=payload.metricValues||{};
+ const include=key=>includeExecutiveSection(payload,key);
  contents.push(
   p('TWELVE BUSINESS STRATEGIES LLC',{bold:true,size:19,color:'52769A'}),
   p('REPORTE FINANCIERO EJECUTIVO',{bold:true,size:35,color:'17365D'}),
@@ -28,10 +30,10 @@ export async function buildExecutiveWord(payload){
   p('Periodo principal: '+payload.from+' al '+payload.to),
   p('Industria: '+payload.industryLabel),
  );
- contents.push(title('Resumen ejecutivo'));
- contents.push(p('Ventas: '+metricDisplay('revenue',numbers.revenue)+
-  ' | Gastos: '+metricDisplay('expenses',numbers.expenses)+
-  ' | Ganancia neta: '+metricDisplay('net_income',numbers.net_income)));
+ if(include('summary')){
+  contents.push(title('Resumen ejecutivo - en palabras sencillas'));
+  contents.push(...simpleExecutiveSummary(intro,numbers).map(line=>p(line)));
+ }
  const flags=[];
  if(Math.abs(intro.balanceDifference||0)>=.01)flags.push('Balance Sheet con diferencia contable.');
  if(intro.reconciliationAlerts>0)flags.push('Existen conciliaciones por validar.');
@@ -39,12 +41,14 @@ export async function buildExecutiveWord(payload){
  if(intro.uncategorizedCount>0)flags.push(intro.uncategorizedCount+' transacciones sin categorizar.');
  contents.push(p(flags.length?'Validaciones pendientes: '+flags.join(' '):
   'No se identificaron alertas especificas en esta vista. Esto no representa una auditoria.'));
- contents.push(title('Indicadores financieros seleccionados'));
- contents.push(table(['Indicador','Resultado','Explicacion'],(payload.metrics||[]).map(k=>[
-  k.label,metricDisplay(k.key,numbers[k.key]),k.meaning,
- ])));
+ if(include('indicators')){
+  contents.push(title('Indicadores financieros seleccionados'));
+  contents.push(table(['Indicador','Resultado','Explicacion'],(payload.metrics||[]).map(k=>[
+   k.label,metricDisplay(k.key,numbers[k.key]),k.meaning,
+  ])));
+ }
 
- if((payload.monthlyRows||[]).length>=2){
+ if(include('comparison')&&(payload.monthlyRows||[]).length>=2){
   contents.push(title('Comparacion de meses seleccionados'));
   const months=payload.monthlyRows;
   for(let i=0;i<months.length;i+=4){
@@ -63,7 +67,7 @@ export async function buildExecutiveWord(payload){
   }
   contents.push(p('El segundo valor en cada celda, cuando existe, es el cambio frente al mes anterior seleccionado. Las cuentas de Balance Sheet son saldos a fecha de cierre.',{size:19}));
   add('Hallazgos mes a mes',payload.monthlyFindings);
- }else if(payload.comparisonPeriod&&payload.comparison?.length){
+ }else if(include('comparison')&&payload.comparisonPeriod&&payload.comparison?.length){
   contents.push(title('Comparacion de periodos'));
   contents.push(p('Comparado: '+payload.comparisonPeriod.from+' al '+payload.comparisonPeriod.to));
   contents.push(table(['Indicador','Comparado','Principal','Variacion'],
@@ -72,9 +76,10 @@ export async function buildExecutiveWord(payload){
       x.changePercent!==null?x.changePercent.toFixed(2)+'%':metricDisplay(x.key,x.delta)])));
  }
  const n=payload.narrative||{},notes=payload.notes||{};
- add('Hallazgos financieros',n.findings);
- add('Oportunidades',n.opportunities);
- add('Amenazas y riesgos',n.risks);
+ if(include('findings'))add('Hallazgos financieros',n.findings);
+ if(include('opportunities'))add('Oportunidades',n.opportunities);
+ if(include('risks'))add('Amenazas y riesgos',n.risks);
+ if(include('market')){
  contents.push(title('Analisis del mercado y sector'));
  contents.push(p('Oportunidad a estudiar: '+str(n.sectorOpportunities||'Por evaluar.')));
  contents.push(p('Amenaza por monitorear: '+str(n.sectorThreats||'Por evaluar.')));
@@ -82,13 +87,16 @@ export async function buildExecutiveWord(payload){
  contents.push(p('Fuente aportada: '+str(notes.marketSource||'Sin fuente registrada')+
   (notes.marketSourceDate?' | Fecha: '+notes.marketSourceDate:'')));
  contents.push(p('Las hipotesis sectoriales no son estadisticas externas verificadas automaticamente.',{size:18}));
- add('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
- add('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
- add('Preguntas de discusion con los duenos',n.questions);
+ }
+ if(include('shortTerm'))add('Estrategias a corto plazo (0-90 dias)',n.shortTerm);
+ if(include('mediumTerm'))add('Estrategias a mediano plazo (3-12 meses)',n.mediumTerm);
+ if(include('questions'))add('Preguntas de discusion con los duenos',n.questions);
+ if(include('meetingNotes')){
  contents.push(title('Minuta y compromisos'));
  contents.push(p('Hallazgos discutidos: '+str(notes.ownerDiscussion||'Pendiente.')));
  contents.push(p('Acuerdos, responsables y fechas: '+str(notes.agreements||'Pendiente.')));
  contents.push(p('Proxima reunion: '+str(notes.followupDate||'Por definir.')));
+ }
  contents.push(p('Reporte de gestion basado en la contabilidad disponible en TBS Accounting Engine. No constituye auditoria ni garantias de resultados.',{size:18,color:'66748A'}));
  const doc=new Document({
   creator:'Twelve Business Strategies LLC',
