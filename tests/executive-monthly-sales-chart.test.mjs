@@ -57,11 +57,11 @@ test('PDF contains graph/table and total only when monthly sales sharing is sele
  const series=monthlySalesSeries('2026-01-01','2026-04-30',calc);
  const report={...context,monthlySalesRows:series.rows,monthlySalesTotal:series.totalSales};
  const visible=pageText(createExecutivePdf(report));
- assert.match(visible,/Ventas mensuales/);
+ assert.match(visible,/Ventas, gastos y ganancia neta/);
  assert.match(visible,/TOTAL/);
  assert.match(visible,/Cambio/);
  const excluded=pageText(createExecutivePdf({...report,clientSections:['summary']}));
- assert.doesNotMatch(excluded,/Tabla de ventas mensuales/);
+ assert.doesNotMatch(excluded,/Tabla mensual de ventas, gastos y ganancia neta/);
 });
 test('Word export has same monthly-sales section and remains real DOCX',async()=>{
  const series=monthlySalesSeries('2026-01-01','2026-04-30',calc);
@@ -70,11 +70,11 @@ test('Word export has same monthly-sales section and remains real DOCX',async()=
  assert.equal(bytes.subarray(0,4).toString('hex'),'504b0304');
  assert.ok(bytes.length>1800);
  const word=readFileSync(new URL('../src/tbsExecutiveReportWord.js',import.meta.url),'utf8');
- assert.match(word,/Ventas mensuales - grafica y tabla/);
+ assert.match(word,/Ventas, gastos y ganancia neta - barras verticales por mes/);
 });
 test('React report renders monthly sales regardless of optional month-to-month comparison',()=>{
  const ui=readFileSync(new URL('../src/TBSExecutiveFinancialReport.jsx',import.meta.url),'utf8');
- assert.match(ui,/Ventas mensuales — gráfica y tabla/);
+ assert.match(ui,/Resultados mensuales — gráfica de barras verticales y tabla/);
  assert.match(ui,/monthlySalesSeries\(from,to,financialsForRange\)/);
  assert.match(ui,/monthlySalesRows:monthlySales.rows/);
 });
