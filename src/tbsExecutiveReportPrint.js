@@ -20,7 +20,18 @@ function barChart(heading,entries){
     '<div class="chartvalue">'+money(value)+'</div></div>';
  }).join('')+'</div>';
 }
-export function executiveReportPrintHtml({businessName,from,to,industryLabel,metrics=[],metricValues={},prior,narrative,financials,notes}){
+export function executiveReportPrintHtml({businessName,from,to,industryLabel,metrics=[],metricValues={},prior,narrative,financials,notes,comparisonPeriod=null,comparison=[],comparisonHasActivity=false}){
+ const comparisonTable=comparisonPeriod&&comparison.length?
+  '<section><h2>Comparación de períodos seleccionados</h2>'+
+  '<p class="sub"><strong>Principal:</strong> '+htmlEscape(from)+' al '+htmlEscape(to)+
+  ' · <strong>Comparado:</strong> '+htmlEscape(comparisonPeriod.from)+' al '+htmlEscape(comparisonPeriod.to)+'</p>'+
+  '<table><thead><tr><th>Indicador</th><th class="value">Comparado</th><th class="value">Principal</th><th class="value">Diferencia</th><th class="value">Variación %</th></tr></thead><tbody>'+
+  comparison.map(r=>'<tr><td>'+htmlEscape(r.label)+'</td><td class="value">'+htmlEscape(metricValue(r.key,{[r.key]:r.prior}))+'</td>'+
+    '<td class="value">'+htmlEscape(metricValue(r.key,{[r.key]:r.current}))+'</td>'+
+    '<td class="value">'+(r.delta===null?'N/D':r.changePoints!==null?htmlEscape(r.changePoints.toFixed(2)+' pp'):money(r.delta))+'</td>'+
+    '<td class="value">'+(r.changePercent===null?'N/D':htmlEscape(r.changePercent.toFixed(2)+'%'))+'</td></tr>').join('')+
+  '</tbody></table><p class="sub">Diferencias de márgenes expresadas en puntos porcentuales (pp). Cuando el valor base es cero, no se calcula variación porcentual.</p>'+
+  (!comparisonHasActivity?'<p class="flag">El período comparado no presenta suficiente actividad en P&L; interpretar con cautela.</p>':'')+'</section>':'';
  const selectedMetrics=metrics.map(x=>'<tr><td><strong>'+htmlEscape(x.label)+'</strong><div class="meaning">'+htmlEscape(x.meaning)+'</div></td><td class="value">'+htmlEscape(metricValue(x.key,metricValues))+'</td></tr>').join('');
  const reportIssues=[];
  if(Math.abs(financials.balanceDifference||0)>=.01)reportIssues.push('Balance Sheet con diferencia de '+money(financials.balanceDifference));
@@ -30,7 +41,7 @@ export function executiveReportPrintHtml({businessName,from,to,industryLabel,met
  const source=notes.marketSource?.trim();
  const sourceDate=notes.marketSourceDate;
  const reportReady=reportIssues.length===0?'No se detectaron las alertas específicas evaluadas; esto no certifica cierre contable.':reportIssues.join('; ')+'.';
- const prevLabel=prior?.hasActivity?'Comparativo anterior: '+prior.from+' a '+prior.to+' (misma duración).':'No hay datos suficientes para un comparativo previo confiable.';
+ const prevLabel=comparisonPeriod?'Comparación seleccionada: '+comparisonPeriod.from+' a '+comparisonPeriod.to+'.':'Sin comparación seleccionada.';
  return '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Reporte financiero ejecutivo - '+htmlEscape(businessName)+'</title>'+
   '<style>@page{size:letter;margin:0.58in}*{box-sizing:border-box}body{font:11pt Calibri,Arial,sans-serif;color:#243247;margin:0;line-height:1.36}h1{font-size:20pt;color:#17365D;margin:0 0 5px}h2{font-size:12.5pt;color:#17365D;border-bottom:1px solid #D4E0EB;margin:17px 0 7px;padding-bottom:5px}h3{font-size:10pt;color:#314967;margin:0 0 9px}p{margin:5px 0 8px}header{border-bottom:4px solid #17365D;padding-bottom:12px;margin-bottom:16px}.sub{color:#5D6A7D;font-size:9.5pt}.eyebrow{color:#3F6690;font-size:9pt;letter-spacing:1px;font-weight:bold;text-transform:uppercase}table{width:100%;border-collapse:collapse;font-size:9pt;margin:8px 0}th,td{padding:7px 9px;border-bottom:1px solid #D9E3EB;text-align:left;vertical-align:top}.value{text-align:right;white-space:nowrap;font-weight:bold;color:#17365D}.meaning{font-weight:normal;font-size:8.5pt;color:#69778A}.flag{padding:10px 12px;border:1px solid #F3D5B4;background:#FFFAF3;color:#89501B;font-size:9pt}.note{background:#F3F7FA;padding:10px 12px;font-size:9pt}.charts{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:10px}.chart{border:1px solid #E0E6EF;padding:10px;min-height:140px}.chartline{margin:8px 0}.chartlabel{font-size:8pt}.barbg{height:9px;background:#EDF1F5;border-radius:3px;overflow:hidden}.bar{height:100%;background:#527FAD}.chartvalue{font-size:8pt;text-align:right}.columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}ul{padding-left:18px;margin:7px 0}li{margin-bottom:5px}.section{break-inside:avoid-page}.page-break{page-break-before:always}footer{margin-top:20px;border-top:1px solid #DDE3EA;padding-top:8px;color:#66748A;font-size:8.5pt}@media screen{body{max-width:850px;margin:28px auto;padding:20px;box-shadow:0 0 10px #E6E9EC}}</style></head><body>'+
   '<header><div class="eyebrow">Twelve Business Strategies | Análisis y consultoría</div><h1>Reporte Financiero Ejecutivo</h1>'+
@@ -40,6 +51,7 @@ export function executiveReportPrintHtml({businessName,from,to,industryLabel,met
   '<p>Reporte de gestión basado en los registros contabilizados del período. La ganancia neta del P&L es '+money(metricValues.net_income||0)+' sobre ventas de '+money(metricValues.revenue||0)+'.</p>'+
   (reportIssues.length?'<div class="flag"><strong>Validación contable pendiente:</strong> '+htmlEscape(reportReady)+'</div>':'<div class="note">'+htmlEscape(reportReady)+'</div>')+'</section>'+
   '<section><h2>Indicadores financieros seleccionados</h2><table><thead><tr><th>Indicador / qué significa</th><th class="value">Resultado</th></tr></thead><tbody>'+selectedMetrics+'</tbody></table></section>'+
+  comparisonTable+
   '<section class="section"><h2>Gráficas financieras</h2><div class="charts">'+
   barChart('Resultados del período',[{label:'Ventas',value:metricValues.revenue},{label:'Gastos totales',value:metricValues.expenses},{label:'Ganancia neta',value:metricValues.net_income}])+
   barChart('Cuentas al cierre',[{label:'Efectivo contable',value:metricValues.cash},{label:'A/R contable',value:metricValues.receivables},{label:'Pasivos contables',value:metricValues.liabilities}])+
