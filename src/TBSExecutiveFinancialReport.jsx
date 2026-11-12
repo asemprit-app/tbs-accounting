@@ -1,10 +1,13 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
 import {KPI_OPTIONS,DEFAULT_KPIS,INDUSTRY_OPTIONS,executiveMetrics,executiveNarrative,comparisonChange} from './tbsExecutiveReportRules.js';
-import {printExecutiveFinancialReport} from './tbsExecutiveReportPrint.js';
+import {executivePdfBlob,executivePdfFilename,blobToPdfBase64} from './tbsExecutiveReportPdf.js';
+import {downloadExecutiveWord} from './tbsExecutiveReportWord.js';
+import {executiveEmailMessage,executiveEmailSubject,validRecipientEmail} from './tbsExecutiveEmail.js';
+import {MAX_MONTHS,addSelectedMonth,normalizeSelectedMonths,buildMonthlyComparison,buildMonthKpiRows,monthlyComparisonFindings} from './tbsExecutiveMonths.js';
 import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from './tbsExecutiveComparison.js';
 
-const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:''});
+const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[]});
 const field={width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #CBD5E1',borderRadius:6,fontSize:13};
 const panel={background:'#fff',border:'1px solid #DFE5ED',borderRadius:9,padding:17,marginTop:14};
 const button={background:'#17365D',color:'#fff',padding:'9px 13px',border:0,borderRadius:6,cursor:'pointer',fontWeight:600};
@@ -33,13 +36,22 @@ function BarChart({title,items}){
   <div style={{color:'#64748B',fontSize:10,marginTop:10}}>Las barras muestran magnitudes positivas; los números negativos mantienen su signo.</div>
  </div>;
 }
-export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,onClose}){
+export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose}){
  const [notes,setNotes]=useState(blankNotes);
+ const [monthToAdd,setMonthToAdd]=useState('');
+ const [emailOpen,setEmailOpen]=useState(false);
+ const [emailTo,setEmailTo]=useState('');
+ const [emailSubject,setEmailSubject]=useState('');
+ const [emailMessage,setEmailMessage]=useState('');
+ const [confirmRecipient,setConfirmRecipient]=useState(false);
+ const [emailSending,setEmailSending]=useState(false);
+ const [exportingWord,setExportingWord]=useState(false);
+ const [exportingPdf,setExportingPdf]=useState(false);
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
  const metrics=useMemo(()=>executiveMetrics(financials),[financials]);
  const selected=KPI_OPTIONS.filter(k=>notes.selectedKpis.includes(k.key));
- const comparisonPeriod=notes.comparisonMode==='none'?null:
+ const comparisonPeriod=['none','months'].includes(notes.comparisonMode)?null:
    notes.comparisonMode==='previous'?prior?.from&&prior?.to?{from:prior.from,to:prior.to}:null:
    validComparisonRange(notes.comparisonFrom,notes.comparisonTo)?
      {from:notes.comparisonFrom,to:notes.comparisonTo}:null;
@@ -55,6 +67,21 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    hasActivity:comparisonHasActivity,
  }: {hasActivity:false};
  const narrative=executiveNarrative(financials,effectivePrior,notes.sector);
+ const monthlyRows=notes.comparisonMode==='months'&&financialsForRange?
+   buildMonthlyComparison(notes.selectedMonths,financialsForRange):[];
+ const monthlyKpis=buildMonthKpiRows(selected,monthlyRows);
+ const monthlyFindings=monthlyComparisonFindings(monthlyRows);
+ const exportError=loading?'Espera a que cargue el reporte.':
+   !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
+   ['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod?'Selecciona un período comparativo válido.':
+   notes.comparisonMode==='months'&&monthlyRows.length<2?'Selecciona al menos dos meses para la comparación mes a mes.':'';
+ function makeReportPayload(){
+   return {businessName,from,to,clientId,industryLabel:getSector(notes.sector),
+     metrics:selected,metricValues:metrics,prior:effectivePrior,
+     financials,narrative,notes,comparisonPeriod,comparison,comparisonHasActivity,
+     monthlyRows,monthlyKpis,monthlyFindings};
+ }
+
 
  const warnings=[];
  if(Math.abs(financials.balanceDifference||0)>=.01)warnings.push('Balance Sheet con diferencia de '+money(financials.balanceDifference));
@@ -66,7 +93,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  }
  useEffect(()=>{
   let active=true;
-  setLoading(true);setError('');setNotice('');setDirty(false);setNotes(blankNotes());
+  setLoading(true);setError('');setNotice('');setDirty(false);setNotes(blankNotes());setEmailOpen(false);
   (async()=>{
    try{
     const r=await supabase.from('tbs_executive_report_notes').select('*')
@@ -82,6 +109,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
       marketSourceDate:row.market_source_date||'',ownerDiscussion:row.owner_discussion||'',
       agreements:row.agreements||'',followupDate:row.followup_date||'',
       comparisonMode:row.comparison_mode||'previous',comparisonFrom:row.comparison_from||'',comparisonTo:row.comparison_to||'',
+      selectedMonths:normalizeSelectedMonths(row.selected_months||[]),
      });
     }
    }catch(e){if(active)setError('No se pudieron recuperar las notas: '+(e.message||String(e)));}
@@ -94,6 +122,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
   if(loading||saving)return;
   if(!notes.selectedKpis.length){setError('Selecciona al menos un indicador.');return;}
   if(['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod){setError('Selecciona un período comparativo válido.');return;}
+  if(notes.comparisonMode==='months'&&monthlyRows.length<2){setError('Selecciona al menos dos meses para comparar.');return;}
   setError('');setNotice('');setSaving(true);
   try{
    const auth=await supabase.auth.getUser();
@@ -107,6 +136,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     owner_discussion:notes.ownerDiscussion.trim().slice(0,8000),
     agreements:notes.agreements.trim().slice(0,8000),
     followup_date:notes.followupDate||null,
+    selected_months:normalizeSelectedMonths(notes.selectedMonths),
     comparison_mode:notes.comparisonMode,comparison_from:notes.comparisonFrom||null,
     comparison_to:notes.comparisonTo||null,
     updated_by:auth.data.user.id,updated_at:new Date().toISOString(),
@@ -118,16 +148,68 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
   }catch(e){setError('No se pudo guardar: '+(e.message||String(e)));}
   finally{setSaving(false);}
  }
- function printReport(){
-  if(!notes.selectedKpis.length){setError('Selecciona al menos un indicador.');return;}
-  if(['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod){setError('Selecciona un período comparativo válido.');return;}
-  try{
-   printExecutiveFinancialReport({
-    businessName,from,to,industryLabel:getSector(notes.sector),
-    metrics:selected,metricValues:metrics,prior:effectivePrior,narrative,financials,notes,
-    comparisonPeriod,comparison,comparisonHasActivity,
-   });
-  }catch(e){setError(e.message||String(e));}
+ function saveBlob(blob,filename){
+   const url=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),5000);
+ }
+ async function downloadPdf(){
+   if(exportError){setError(exportError);return;}
+   setExportingPdf(true);setError('');
+   try{
+     const payload=makeReportPayload();
+     const blob=executivePdfBlob(payload);
+     saveBlob(blob,executivePdfFilename(payload));
+     setNotice('PDF generado correctamente con los períodos y las notas actuales.');
+   }catch(e){setError('No se pudo generar el PDF: '+(e.message||String(e)));}
+   finally{setExportingPdf(false);}
+ }
+ async function downloadWord(){
+   if(exportError){setError(exportError);return;}
+   setExportingWord(true);setError('');
+   try{
+     await downloadExecutiveWord(makeReportPayload());
+     setNotice('Word editable (.docx) generado correctamente.');
+   }catch(e){setError('No se pudo generar Word: '+(e.message||String(e)));}
+   finally{setExportingWord(false);}
+ }
+ function prepareEmail(){
+   if(!isStaff){setError('Solo el personal autorizado de TBS puede enviar reportes.');return;}
+   if(exportError){setError(exportError);return;}
+   setEmailSubject(executiveEmailSubject(businessName,from,to));
+   setEmailMessage(executiveEmailMessage(businessName,from,to,
+     notes.comparisonMode==='months'?normalizeSelectedMonths(notes.selectedMonths):[]));
+   setEmailTo('');setConfirmRecipient(false);setEmailOpen(true);setError('');setNotice('');
+ }
+ async function sendReportEmail(){
+   if(!isStaff||emailSending)return;
+   if(exportError){setError(exportError);return;}
+   if(!validRecipientEmail(emailTo)){setError('Confirma un único correo electrónico válido del cliente.');return;}
+   if(!confirmRecipient){setError('Confirma que revisaste el destinatario y el reporte antes de enviarlo.');return;}
+   if(!emailSubject.trim()||!emailMessage.trim()){setError('El asunto y el mensaje son obligatorios.');return;}
+   setEmailSending(true);setError('');setNotice('');
+   try{
+     const auth=await supabase.auth.getSession();
+     const token=auth?.data?.session?.access_token;
+     if(auth.error||!token)throw Error('Tu sesión venció. Inicia sesión de nuevo.');
+     // Native jsPDF is created once per send and validated as nonblank; no HTML
+     // print window or screenshot is attached to the email.
+     const blob=executivePdfBlob(makeReportPayload());
+     const pdfBase64=await blobToPdfBase64(blob);
+     const response=await fetch('/api/send-executive-report',{
+       method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+       body:JSON.stringify({
+         clientId,from,to,toEmail:emailTo.trim(),subject:emailSubject.trim(),
+         message:emailMessage,pdfBase64,
+       }),
+     });
+     const result=await response.json().catch(()=>({}));
+     if(!response.ok||!result.accepted)throw Error(result.error||'El servicio de correo no aceptó el reporte.');
+     setEmailOpen(false);setConfirmRecipient(false);
+     setNotice('El proveedor de correo aceptó el envío del PDF a '+result.to+
+       (result.id?' (referencia '+result.id+').':'.')+' La entrega final depende del destinatario.');
+   }catch(e){setError('No se pudo enviar el reporte: '+(e.message||String(e)));}
+   finally{setEmailSending(false);}
  }
  const section=(title,content)=> <div style={panel}><h3 style={{margin:'0 0 8px',color:'#17365D',fontSize:15}}>{title}</h3>{content}</div>;
  const trend=effectivePrior?.hasActivity?comparisonChange(metrics.revenue,effectivePrior.revenue):null;
