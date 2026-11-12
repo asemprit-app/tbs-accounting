@@ -150,6 +150,34 @@ export function createExecutivePdf(payload){
      r.changePercent!==null?r.changePercent.toFixed(1)+'%':money(r.delta),
   ]),[180,115,115,maxW-410]);
  }
+ if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length>0){
+  const monthly=payload.monthlySalesRows;
+  heading('Ventas mensuales - grafica de barras');
+  const largest=Math.max(1,...monthly.map(r=>Math.abs(Number(r.sales)||0)));
+  for(const row of monthly){
+    ensure(32);
+    font(8.5,true);doc.text(normalize(row.label+(row.partialMonth?' *':'')),left,y);y+=10;
+    doc.setFillColor(232,239,246);doc.rect(left,y,maxW*.73,10,'F');
+    const length=Math.max(0,Math.min(1,Math.abs(Number(row.sales)||0)/largest))*maxW*.73;
+    if(length>0){
+      doc.setFillColor(...(row.sales<0?[175,78,67]:[61,110,162]));
+      doc.rect(left,y,length,10,'F');
+    }
+    font(8,false);doc.text(money(row.sales),right,y+9,{align:'right'});
+    y+=20;
+  }
+  heading('Tabla de ventas mensuales');
+  const details=monthly.map(row=>[
+    row.label+(row.partialMonth?' *':''),
+    money(row.sales),
+    row.change===null?'-':(row.change>0?'+':'')+money(row.change),
+    row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
+  ]);
+  details.push(['TOTAL',money(payload.monthlySalesTotal),'-','-']);
+  table(['Mes','Ventas','Cambio USD','Cambio %'],details,[132,141,122,maxW-395]);
+  if(monthly.some(row=>row.partialMonth))text('* Mes parcial: solamente los dias dentro del periodo seleccionado.',{size:8,color:grey});
+  text('Variacion porcentual N/D cuando el mes previo tiene ventas cero o negativas. La barra roja indica ventas netas negativas.',{size:8,color:grey});
+ }
  if(include('charts')){
  bars('Ventas, gastos y ganancia neta',[
   {label:'Ventas',value:m.revenue},{label:'Gastos',value:m.expenses},{label:'Ganancia neta',value:m.net_income},

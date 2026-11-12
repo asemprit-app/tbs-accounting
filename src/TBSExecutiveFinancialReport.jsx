@@ -7,6 +7,8 @@ import {executiveEmailMessage,executiveEmailSubject,validRecipientEmail} from '.
 import {MAX_MONTHS,addSelectedMonth,normalizeSelectedMonths,buildMonthlyComparison,buildMonthKpiRows,monthlyComparisonFindings} from './tbsExecutiveMonths.js';
 import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from './tbsExecutiveComparison.js';
 import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
+import {monthlySalesSeries} from './tbsExecutiveMonthlySales.js';
+import TBSMonthlySalesVisual from './TBSMonthlySalesVisual.jsx';
 
 const blankNotes=()=>({sector:'general',selectedKpis:[...DEFAULT_KPIS],marketContext:'',marketSource:'',marketSourceDate:'',ownerDiscussion:'',agreements:'',followupDate:'',comparisonMode:'previous',comparisonFrom:'',comparisonTo:'',selectedMonths:[],clientSections:[...DEFAULT_CLIENT_SECTIONS]});
 const field={width:'100%',boxSizing:'border-box',padding:9,border:'1px solid #CBD5E1',borderRadius:6,fontSize:13};
@@ -73,8 +75,11 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    buildMonthlyComparison(notes.selectedMonths,financialsForRange):[];
  const monthlyKpis=buildMonthKpiRows(selected,monthlyRows);
  const monthlyFindings=monthlyComparisonFindings(monthlyRows);
+ let monthlySales={rows:[],totalSales:0,error:''};
+ try{monthlySales=monthlySalesSeries(from,to,financialsForRange);}catch(e){monthlySales={rows:[],totalSales:0,error:e.message||String(e)};}
  const exportError=loading?'Espera a que cargue el reporte.':
    !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
+   notes.clientSections.includes('monthlySales')&&monthlySales.error?monthlySales.error:
    normalizeClientSections(notes.clientSections).length===0?'Selecciona al menos una sección para compartir con el cliente.':
    ['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod?'Selecciona un período comparativo válido.':
    notes.comparisonMode==='months'&&monthlyRows.length<2?'Selecciona al menos dos meses para la comparación mes a mes.':'';
@@ -83,7 +88,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      metrics:selected,metricValues:metrics,prior:effectivePrior,
      financials,narrative,notes,clientSections:normalizeClientSections(notes.clientSections),
      comparisonPeriod,comparison,comparisonHasActivity,
-     monthlyRows,monthlyKpis,monthlyFindings};
+     monthlyRows,monthlyKpis,monthlyFindings,
+     monthlySalesRows:monthlySales.rows,monthlySalesTotal:monthlySales.totalSales};
  }
 
 
@@ -425,6 +431,9 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    </div>
    {trend!==null&&<p style={{fontSize:12,color:'#64748B'}}>Variación de ventas frente al período seleccionado: <strong>{trend>0?'+':''}{trend.toFixed(1)}%</strong>. No es una comparación contra el mercado.</p>}
   </>)}
+  {section('Ventas mensuales — gráfica y tabla',monthlySales.error?
+    <p style={{color:'#B91C1C',fontSize:12}}>{monthlySales.error}</p>:
+    <TBSMonthlySalesVisual data={monthlySales} from={from} to={to}/>)}
   {section('Gráficas para la reunión',<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(290px,1fr))',gap:12}}>
    <BarChart title="Ingresos, gastos y ganancia neta" items={[{label:'Ventas',value:metrics.revenue},{label:'Gastos',value:metrics.expenses},{label:'Ganancia neta',value:metrics.net_income}]}/>
    <BarChart title="Balances contables al cierre" items={[{label:'Efectivo',value:metrics.cash},{label:'A/R',value:metrics.receivables},{label:'Pasivos',value:metrics.liabilities}]}/>

@@ -75,6 +75,29 @@ export async function buildExecutiveWord(payload){
       x.delta===null?'N/D':x.changePoints!==null?x.changePoints.toFixed(2)+' pp':
       x.changePercent!==null?x.changePercent.toFixed(2)+'%':metricDisplay(x.key,x.delta)])));
  }
+ if(include('monthlySales')&&Array.isArray(payload.monthlySalesRows)&&payload.monthlySalesRows.length){
+  const monthly=payload.monthlySalesRows;
+  contents.push(title('Ventas mensuales - grafica y tabla'));
+  const maximum=Math.max(1,...monthly.map(row=>Math.abs(Number(row.sales)||0)));
+  contents.push(p('Grafica de barras: ventas por mes',{bold:true,size:20}));
+  contents.push(table(['Mes','Barra de ventas','Importe'],monthly.map(row=>[
+    row.label+(row.partialMonth?' *':''),
+    (row.sales<0?'- ':'')+'■'.repeat(Math.round(Math.abs(Number(row.sales)||0)/maximum*20)),
+    metricDisplay('revenue',row.sales),
+  ])));
+  contents.push(p('Tabla de ventas mensuales y variaciones',{bold:true,size:20}));
+  contents.push(table(['Mes','Ventas','Cambio','Variacion'],[
+    ...monthly.map(row=>[
+      row.label+(row.partialMonth?' *':''),
+      metricDisplay('revenue',row.sales),
+      row.change===null?'-':(row.change>0?'+':'')+metricDisplay('revenue',row.change),
+      row.changePercent===null?'N/D':(row.changePercent>0?'+':'')+row.changePercent.toFixed(1)+'%',
+    ]),
+    ['TOTAL',metricDisplay('revenue',payload.monthlySalesTotal),'-','-'],
+  ]));
+  if(monthly.some(row=>row.partialMonth))contents.push(p('* Mes parcial: solo los dias incluidos en el periodo seleccionado.',{size:18}));
+  contents.push(p('Variacion porcentual N/D cuando las ventas del mes previo son cero o negativas.',{size:18}));
+ }
  if(include('charts')){
   contents.push(title('Graficas financieras'));
   const charts=[
