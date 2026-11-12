@@ -221,13 +221,15 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      <h2 style={{fontSize:22,color:'#17365D',margin:'5px 0'}}>Reporte Financiero Ejecutivo</h2>
      <div style={{fontSize:13}}><strong>{businessName}</strong> · {from} al {to}</div>
      <div style={{fontSize:12,color:'#64748B',marginTop:5}}>
-      {comparisonPeriod?'Comparación seleccionada: '+comparisonPeriod.from+' al '+comparisonPeriod.to:notes.comparisonMode==='none'?'Sin comparación':'Selecciona un período comparativo válido'}
+      {notes.comparisonMode==='months'?monthlyRows.length+' meses seleccionados para comparar':comparisonPeriod?'Comparación seleccionada: '+comparisonPeriod.from+' al '+comparisonPeriod.to:notes.comparisonMode==='none'?'Sin comparación':'Selecciona un período comparativo válido'}
      </div>
     </div>
     <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'start'}}>
      <button style={{...button,color:'#17365D',background:'#EBF0F5'}} onClick={onClose}>Volver a Reports</button>
      <button style={{...button,background:'#507290'}} disabled={loading||saving} onClick={saveNotes}>{saving?'Guardando…':'Guardar análisis'}</button>
-     <button style={button} onClick={printReport}>Imprimir / Guardar PDF</button>
+     <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
+     <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
     </div>
    </div>
    {loading&&<p style={{fontSize:12,color:'#64748B'}}>Cargando notas de este período…</p>}
@@ -248,6 +250,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
           onChange={e=>change('comparisonMode',e.target.value)}>
           <option value="previous">Período anterior equivalente</option>
           <option value="month">Mes específico</option>
+          <option value="months">Comparar varios meses seleccionados</option>
           <option value="custom">Período personalizado</option>
           <option value="none">Sin comparación</option>
         </select>
@@ -261,6 +264,28 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
             setDirty(true);
           }}/>
       </label>}
+      {notes.comparisonMode==='months'&&<div style={{minWidth:290,flex:'1 1 290px'}}>
+        <label style={{fontSize:12,display:'block'}}>Añadir mes para comparar (máximo {MAX_MONTHS})
+          <div style={{display:'flex',gap:8,marginTop:5}}>
+            <input type="month" aria-label="Añadir mes" value={monthToAdd} style={{...field,maxWidth:190}}
+              onChange={e=>setMonthToAdd(e.target.value)}/>
+            <button type="button" style={button} disabled={!monthToAdd||notes.selectedMonths.length>=MAX_MONTHS}
+              onClick={()=>{
+                const selectedMonths=addSelectedMonth(notes.selectedMonths,monthToAdd);
+                change('selectedMonths',selectedMonths);setMonthToAdd('');
+              }}>Añadir</button>
+          </div>
+        </label>
+        <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:9}}>
+          {notes.selectedMonths.map(month=><button type="button" key={month} title={'Quitar '+month}
+            onClick={()=>change('selectedMonths',notes.selectedMonths.filter(item=>item!==month))}
+            style={{border:'1px solid #C7D8E6',borderRadius:18,background:'#EEF5FC',
+              color:'#17365D',padding:'6px 9px',cursor:'pointer',fontSize:12}}>
+            {month} ×
+          </button>)}
+          {notes.selectedMonths.length===0&&<span style={{fontSize:12,color:'#64748B'}}>Todavía no hay meses seleccionados.</span>}
+        </div>
+      </div>}
       {notes.comparisonMode==='custom'&&<>
         <label style={{fontSize:12}}>Desde
           <input aria-label="Comparación desde" type="date" style={{...field,display:'block',marginTop:4}}
@@ -274,6 +299,42 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     </div>
     {['month','custom'].includes(notes.comparisonMode)&&!comparisonPeriod&&
       <p style={{color:'#B91C1C',fontSize:12}}>Selecciona un mes o intervalo válido antes de guardar o imprimir.</p>}
+    {notes.comparisonMode==='months'&&<div style={{marginTop:12}}>
+      {monthlyRows.length<2&&<p style={{color:'#B91C1C',fontSize:12}}>
+        Selecciona al menos dos meses. Puedes elegir meses no consecutivos, de diferentes años, hasta un máximo de 12.
+      </p>}
+      {monthlyRows.length>=2&&<>
+        <p style={{fontSize:12,color:'#64748B'}}>
+          Valores de cada mes elegido, ordenados cronológicamente. La cifra pequeña indica
+          el cambio respecto al mes anterior seleccionado. Los balances son al cierre de cada mes.
+        </p>
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead><tr style={{background:'#EDF3F8',color:'#17365D'}}>
+              <th style={{padding:8,textAlign:'left',position:'sticky',left:0,background:'#EDF3F8'}}>Indicador</th>
+              {monthlyRows.map(r=><th key={r.month} style={{padding:8,textAlign:'right',whiteSpace:'nowrap'}}>{r.label}</th>)}
+            </tr></thead>
+            <tbody>{monthlyKpis.map(row=><tr key={row.key} style={{borderBottom:'1px solid #E1E7EE'}}>
+              <td style={{padding:8,whiteSpace:'nowrap',fontWeight:600,position:'sticky',left:0,background:'white'}}>{row.label}</td>
+              {row.values.map((amount,i)=>{
+                const c=row.changes[i];
+                const changeLabel=!c||c.delta===null?'—':
+                  c.changePoints!==null?(c.changePoints>0?'+':'')+c.changePoints.toFixed(2)+' pp':
+                  c.changePercent!==null?(c.changePercent>0?'+':'')+c.changePercent.toFixed(1)+'%':'N/D';
+                return <td key={monthlyRows[i].month} style={{padding:8,textAlign:'right',whiteSpace:'nowrap'}}>
+                  <strong>{value(row.key,amount)}</strong>
+                  {i>0&&<div style={{fontSize:10,color:c?.delta<0?'#AB3C29':'#4D6988'}}>{changeLabel} vs anterior</div>}
+                </td>;
+              })}
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <div style={{marginTop:11}}>
+          <h4 style={{color:'#17365D',margin:'3px 0'}}>Hallazgos mes a mes</h4>
+          <List entries={monthlyFindings} empty="No hay actividad suficiente para interpretar cambios entre los meses seleccionados."/>
+        </div>
+      </>}
+    </div>}
     {comparisonPeriod&&<p style={{fontSize:12,color:'#17365D'}}>
       <strong>Período principal:</strong> {from} al {to} · <strong>Período comparado:</strong> {comparisonPeriod.from} al {comparisonPeriod.to}
       {comparisonHasActivity?'':' · Sin movimientos suficientes de ingresos/gastos en el período comparado'}
@@ -368,7 +429,9 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    </label>
    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
     <button style={button} disabled={loading||saving} onClick={saveNotes}>Guardar reunión y acuerdos</button>
-    <button style={{...button,background:'#507290'}} onClick={printReport}>Imprimir / Guardar PDF</button>
+    <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
+     <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
    </div>
   </>)}
   <p style={{fontSize:11,lineHeight:1.5,color:'#64748B'}}>
