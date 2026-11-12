@@ -1653,7 +1653,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             clients={clients} isStaff={isStaff} businessName={businessName}
           />
         )}
-        {!portalLimited && tab === 'reports' && <ReportsView clientId={clientId} transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
+        {!portalLimited && tab === 'reports' && <ReportsView isStaff={isStaff} clientId={clientId} transactions={transactions} invoices={invoices} glName={glName} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} invoiceReimbursableSubtotal={invoiceReimbursableSubtotal} accounts={accounts} journalEntries={journalEntries} businessName={businessName} reconciliations={reconciliations} />}
         {!portalLimited && tab === 'accounts' && <ChartOfAccountsView accounts={accounts} setAccounts={setAccounts} confirmAccountImpact={confirmAccountImpact} isMaster={businessName === 'Twelve Business Strategies'} />}
         {!portalLimited && tab === 'rules' && <RulesView rules={rules} setRules={setRules} accounts={accounts} />}
         {!portalLimited && tab === 'journal' && <JournalEntriesView journalEntries={journalEntries} setJournalEntries={setJournalEntries} confirmJournalImpact={confirmJournalImpact} accounts={accounts} />}
@@ -6325,7 +6325,7 @@ function naturalAmount(gl, amount, accounts) {
   return { amount, type: acct?.type || 'Expense' };
 }
 
-function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
+function ReportsView({ isStaff, clientId, transactions, invoices, glName, invoiceTotal, invoiceSubtotal, invoiceRevenueSubtotal, invoiceReimbursableSubtotal, accounts, journalEntries, businessName, reconciliations }) {
   const cardSourceSigns = useMemo(() => inferCreditCardSourceSigns(accounts,transactions,journalEntries,reconciliations),[accounts,transactions,journalEntries,reconciliations]);
   const [preset, setPreset] = useState('this_month');
   const [selectedReport, setSelectedReport] = useState('pnl');
@@ -6931,7 +6931,7 @@ function ReportsView({ clientId, transactions, invoices, glName, invoiceTotal, i
         </div>
       </Card>
       {showExecutiveReport ? <TBSExecutiveFinancialReport
-        clientId={clientId} businessName={businessName} from={from} to={to}
+        isStaff={isStaff} clientId={clientId} businessName={businessName} from={from} to={to}
         financials={executiveFinancials} prior={priorFinancial} financialsForRange={financialsForExecutiveRange}
         onClose={()=>setShowExecutiveReport(false)}
       /> : <>
