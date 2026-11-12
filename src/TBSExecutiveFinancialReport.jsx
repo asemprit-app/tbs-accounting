@@ -434,6 +434,48 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
    </div>
   </>)}
+  {emailOpen&&isStaff&&<div role="presentation" style={{position:'fixed',inset:0,
+    background:'rgba(10,23,39,0.56)',zIndex:100,display:'flex',alignItems:'center',
+    justifyContent:'center',padding:18}}>
+    <div role="dialog" aria-modal="true" aria-label="Enviar Reporte Financiero Ejecutivo"
+      style={{background:'white',borderRadius:10,padding:22,maxWidth:650,width:'100%',
+        maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.2)'}}>
+      <h3 style={{color:'#17365D',marginTop:0}}>Enviar Reporte Financiero Ejecutivo en PDF</h3>
+      <p style={{color:'#64748B',fontSize:12}}>
+        Revisa el destinatario y el mensaje. Se adjuntará un PDF válido del reporte
+        del cliente {businessName}, desde {from} hasta {to}. No se enviará automáticamente.
+      </p>
+      <label style={{fontSize:12,display:'block',marginBottom:11}}>Correo del cliente
+        <input type="email" aria-label="Correo del cliente" style={{...field,display:'block',marginTop:4}}
+          placeholder="correo@cliente.com" autoComplete="off" value={emailTo}
+          onChange={e=>{setEmailTo(e.target.value);setConfirmRecipient(false);}}/>
+      </label>
+      <label style={{fontSize:12,display:'block',marginBottom:11}}>Asunto
+        <input aria-label="Asunto del email" style={{...field,display:'block',marginTop:4}}
+          value={emailSubject} onChange={e=>setEmailSubject(e.target.value)}/>
+      </label>
+      <label style={{fontSize:12,display:'block',marginBottom:10}}>Mensaje editable para el cliente
+        <textarea aria-label="Mensaje del reporte" rows={10}
+          style={{...field,display:'block',marginTop:4,resize:'vertical'}}
+          value={emailMessage} onChange={e=>setEmailMessage(e.target.value)}/>
+      </label>
+      <p style={{fontSize:11,color:'#64748B'}}>
+        El mensaje incluye cómo comunicarse con Twelve Business Strategies LLC:
+        admin@twelvestrategies.com. El remitente se obtiene de la configuración segura de correo de TBS.
+      </p>
+      <label style={{fontSize:12,display:'flex',gap:8,alignItems:'start',margin:'13px 0',cursor:'pointer'}}>
+        <input type="checkbox" checked={confirmRecipient}
+          onChange={e=>setConfirmRecipient(e.target.checked)}/>
+        Confirmo que revisé el destinatario, los números y el archivo PDF antes de enviarlo.
+      </label>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:9,flexWrap:'wrap'}}>
+        <button type="button" style={{...button,background:'#E9EEF4',color:'#17365D'}}
+          disabled={emailSending} onClick={()=>{setEmailOpen(false);setConfirmRecipient(false);}}>Cancelar</button>
+        <button type="button" style={button} disabled={emailSending||!confirmRecipient||!validRecipientEmail(emailTo)}
+          onClick={sendReportEmail}>{emailSending?'Enviando…':'Enviar PDF al cliente'}</button>
+      </div>
+    </div>
+  </div>}
   <p style={{fontSize:11,lineHeight:1.5,color:'#64748B'}}>
    Fuente financiera: TBS Accounting Engine. Las cifras están sujetas a clasificaciones, conciliaciones y ajustes posteriores.
    El efectivo se identifica según el nombre de las cuentas. Las referencias de mercado son aportadas por la gerencia;
