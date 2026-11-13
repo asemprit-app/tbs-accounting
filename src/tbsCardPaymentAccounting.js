@@ -9,6 +9,20 @@ const days = date => {
 };
 const isAsset = type => type === 'Asset';
 const isLiability = type => type === 'Liability';
+// A payment can be present in both statement feeds even when an earlier
+// categorization points to a third GL. Match those only on one-to-one evidence:
+// exact cents, same calendar day and explicit payment descriptions on BOTH
+// feeds. This changes reporting postings only, never saved transactions.
+const identifiedBankCardPayment = description =>
+  /(?:telepago|(?:visa|mastercard|credit.?card|tarjeta|card).{0,25}(?:pago|payment|pmt)|(?:pago|payment|pmt).{0,25}(?:visa|mastercard|credit.?card|tarjeta|card))/i.test(String(description || ''));
+const identifiedCardReceipt = description =>
+  /(?:telepago|payment received|thank you|gracias|card payment)/i.test(String(description || ''));
+export function isIdentifiedMirroredPayment(bank, card) {
+  return days(bank.date) === days(card.date) &&
+    identifiedBankCardPayment(bank.description) &&
+    identifiedCardReceipt(card.description);
+}
+
 
 export function sourceBalanceMovement(transaction, accountsByCode, signsByGL = new Map()) {
   const raw = Number(transaction.amount) || 0;
@@ -46,7 +60,8 @@ export function matchMirroredCardPayments(transactions, accounts, signsByGL = ne
       if (Math.abs(days(b.date) - days(c.date)) > 5) continue;
       // Both statements must explicitly identify the opposite account. Also
       // support older card imports categorized back to their own card account.
-      if (b.gl !== c.sourceGL || (c.gl !== b.sourceGL && c.gl !== c.sourceGL)) continue;
+      const reciprocal = b.gl === c.sourceGL && (c.gl === b.sourceGL || c.gl === c.sourceGL);
+      if (!reciprocal && !isIdentifiedMirroredPayment(b,c)) continue;
       candidates.push({bankId:b.id,cardId:c.id,amount:Math.abs(Number(b.amount)),bankGL:b.sourceGL,cardGL:c.sourceGL});
     }
   }
