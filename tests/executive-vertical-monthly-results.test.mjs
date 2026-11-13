@@ -82,5 +82,7 @@ test('new report selections include vertical monthly results and top expenses',(
  assert.ok(DEFAULT_CLIENT_SECTIONS.includes('monthlySales'));
  assert.ok(DEFAULT_CLIENT_SECTIONS.includes('topExpenses'));
  assert.ok(EXECUTIVE_SECTIONS.find(s=>s.key==='monthlySales').label.includes('Resultados mensuales'));
- assert.equal(EXECUTIVE_SECTIONS.length,14);
+ assert.equal(EXECUTIVE_SECTIONS.length,15);
+ assert.ok(EXECUTIVE_SECTIONS.some(section=>section.key==='operational'));
+ assert.equal(DEFAULT_CLIENT_SECTIONS.includes('operational'),true);
 });
