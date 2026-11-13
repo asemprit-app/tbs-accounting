@@ -43,7 +43,11 @@ test('App hides Journal Entries by default, offers explicit opt-in and resets pa
  const view=app.slice(start,end>start?end:undefined);
  assert.match(view,/const \[showJournalEntries, setShowJournalEntries\] = useState\(false\)/);
  assert.match(view,/visibleTransactionRows\(filteredTransactions, journalEntryRows, showJournalEntries\)/);
- assert.match(view,/journalEntryMatchesTransactionFilters\(r, filters, search\)/);
- assert.match(view,/\[filters, search, showJournalEntries\]/);
+ assert.match(view,/journalEntryMatchesTransactionFilters\(r, filters, search, matchMode\)/);
+ assert.match(view,/\[filters, search, matchMode, showJournalEntries\]/);
  assert.match(view,/Include Journal Entries/);
+ assert.match(view,/const \[matchMode, setMatchMode\] = useState\('any'\)/);
+ assert.match(view,/transactionMatchesFilters\(t, filters, search, \{/);
+ assert.match(view,/Match any selected filter \(OR\)/);
+ assert.match(view,/Match all selected filters \(AND\)/);
 });
