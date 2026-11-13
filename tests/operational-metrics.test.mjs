@@ -30,7 +30,7 @@ test('sum, average and last monthly measurements do not mix aggregation',()=>{
  assert.equal(rows.length,3);
  assert.equal(rows[0].result,500);
  assert.equal(rows[0].revenuePerUnit,130);
- assert.equal(rows[0].trendPct,100*(260-240)/240);
+ assert.ok(Math.abs(rows[0].trendPct-100*(260-240)/240)<1e-9);
  assert.equal(rows[1].result,80);
  assert.equal(rows[1].revenuePerUnit,null);
  assert.equal(rows[2].result,16);
