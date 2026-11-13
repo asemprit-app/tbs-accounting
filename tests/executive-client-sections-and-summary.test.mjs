@@ -30,7 +30,9 @@ test('default client delivery excludes confidential meeting notes and unverified
  assert.equal(includeExecutiveSection({clientSections:DEFAULT_CLIENT_SECTIONS},'summary'),true);
  assert.equal(includeExecutiveSection({clientSections:DEFAULT_CLIENT_SECTIONS},'meetingNotes'),false);
  assert.deepEqual(normalizeClientSections(['meetingNotes','summary','invalid','summary']),['summary','meetingNotes']);
- assert.equal(EXECUTIVE_SECTIONS.length,14);
+ assert.equal(EXECUTIVE_SECTIONS.length,15);
+ assert.ok(EXECUTIVE_SECTIONS.some(section=>section.key==='operational'));
+ assert.equal(DEFAULT_CLIENT_SECTIONS.includes('operational'),true);
  assert.equal(DEFAULT_CLIENT_SECTIONS.includes('monthlySales'),true);
 });
 test('executive summary communicates revenue, expense, net profit and a priority without invented market numbers',()=>{
