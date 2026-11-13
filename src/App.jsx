@@ -1,6 +1,7 @@
 import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
+import { journalEntryMatchesTransactionFilters, visibleTransactionRows } from './tbsTransactionListFilter.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
@@ -2075,6 +2076,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   const [importCardGL, setImportCardGL] = useState('');
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' });
   const [search, setSearch] = useState('');
+  const [showJournalEntries, setShowJournalEntries] = useState(false);
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [bulkGL, setBulkGL] = useState(null);
@@ -2154,12 +2156,14 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     const isDebitSide = acct && (acct.type === 'Asset' || acct.type === 'Expense');
     return isDebitSide ? (debit - credit) : (credit - debit);
   }
-  // Journal Entries se muestran mezcladas en esta pantalla solo para que se vean junto al resto de la actividad
-  // de la cuenta (como en Wave) — pero se siguen editando desde la pestaña Journal Entries, no aquí.
+  // Transactions are the default dataset. Journal Entry lines are displayed
+  // only when the user explicitly chooses to include them; unlike transactions,
+  // they have no bank source, reconciliation mark, or transaction status.
   const journalEntryRows = useMemo(() => {
+    if (!showJournalEntries) return [];
     const rows = [];
     (journalEntries || []).forEach(je => {
-      je.lines.forEach((l, idx) => {
+      (je.lines || []).forEach((l, idx) => {
         if (!l.gl) return;
         rows.push({
           id: `je-${je.id}-${idx}`, date: je.date,
@@ -2168,17 +2172,13 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
         });
       });
     });
-    return rows.filter(r => {
-      if (filters.dateFrom && r.date < filters.dateFrom) return false;
-      if (filters.dateTo && r.date > filters.dateTo) return false;
-      if (search.trim() && !r.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
-      return true;
-    });
-  }, [journalEntries, filters.dateFrom, filters.dateTo, search, accounts]);
+    return rows.filter(r => journalEntryMatchesTransactionFilters(r, filters, search));
+  }, [showJournalEntries, journalEntries, filters, search, accounts]);
 
   const combinedRows = useMemo(() => {
-    return [...filteredTransactions, ...journalEntryRows].sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredTransactions, journalEntryRows]);
+    return visibleTransactionRows(filteredTransactions, journalEntryRows, showJournalEntries)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [filteredTransactions, journalEntryRows, showJournalEntries]);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const totalPages = Math.max(1, Math.ceil(combinedRows.length / PAGE_SIZE));
@@ -2187,7 +2187,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     const start = (page - 1) * PAGE_SIZE;
     return reversed.slice(start, start + PAGE_SIZE);
   }, [combinedRows, page]);
-  useEffect(() => { setPage(1); }, [filters, search]);
+  useEffect(() => { setPage(1); }, [filters, search, showJournalEntries]);
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -2882,7 +2882,19 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
             <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
-        {filtersActive && <div style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>{filteredTransactions.length} of {transactions.length} transactions</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 13, color: '#52647B' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showJournalEntries} onChange={e => setShowJournalEntries(e.target.checked)} />
+            Include Journal Entries
+          </label>
+          <span>By default, searches show transactions only. Journal Entries are managed in their own tab.</span>
+        </div>
+        {(filtersActive || showJournalEntries) && (
+          <div role="status" style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>
+            {filteredTransactions.length} of {transactions.length} transactions
+            {showJournalEntries ? ` · ${journalEntryRows.length} matching journal lines` : ''}
+          </div>
+        )}
       </Card>
 
       {ruleSuggestions.length > 0 && (
