@@ -130,3 +130,33 @@ test('Panda like card payment kept to one ledger movement with two statement dat
   assert.equal(sum(postings,'BANK'),-1189.82);
   assert.equal(sum(postings,'CARD'),-1189.82);
 });
+
+test('NSM approved bank/card reconciliation survives miscategorized Aug $10,000 mirror',()=>{
+ const chart=[{code:'1010',type:'Asset'},{code:'2020',type:'Liability'},{code:'3410',type:'Equity'}];
+ const bankSide={id:'nsm-bank-aug',date:'2026-08-05',description:'TELEPAGO VISA BANCO POPULAR',sourceGL:'1010',gl:'3410',amount:-10000};
+ const cardSide={id:'nsm-card-aug',date:'2026-08-05',description:'SU TELEPAGO ... GRACIAS',sourceGL:'2020',gl:'1010',amount:10000};
+ const {postings,matches}=cardAwareTransactionPostings([bankSide,cardSide],chart);
+ assert.equal(matches.length,1);
+ assert.equal(potentiallyUnmatchedCardTransfers([bankSide,cardSide],chart).length,0);
+ assert.equal(sum(postings,'1010'),-10000);
+ assert.equal(sum(postings,'2020'),-10000);
+ assert.equal(sum(postings,'3410'),0);
+});
+test('NSM historical mirrored card feeds routed through wrong third account still count once',()=>{
+ const chart=[{code:'1010',type:'Asset'},{code:'2020',type:'Liability'},{code:'2010',type:'Liability'}];
+ const b={id:'b',date:'2026-03-10',description:'TELEPAGO VISA BANCO POPULAR',sourceGL:'1010',gl:'2010',amount:-7170.68};
+ const c={id:'c',date:'2026-03-10',description:'SU TELEPAGO ... GRACIAS',sourceGL:'2020',gl:'2010',amount:7170.68};
+ const {postings,matches}=cardAwareTransactionPostings([b,c],chart);
+ assert.equal(matches.length,1);
+ assert.equal(sum(postings,'1010'),-7170.68);
+ assert.equal(sum(postings,'2020'),-7170.68);
+ assert.equal(sum(postings,'2010'),0);
+});
+test('matching mislabeled card payments requires explicit same-day evidence and uniqueness',()=>{
+ const chart=[{code:'1010',type:'Asset'},{code:'2020',type:'Liability'},{code:'3410',type:'Equity'}];
+ const b={id:'b',date:'2026-08-05',description:'TELEPAGO VISA BANCO POPULAR',sourceGL:'1010',gl:'3410',amount:-10000};
+ const c={id:'c',date:'2026-08-05',description:'SU TELEPAGO ... GRACIAS',sourceGL:'2020',gl:'1010',amount:10000};
+ assert.equal(matchMirroredCardPayments([b,{...c,date:'2026-08-06'}],chart).length,0);
+ assert.equal(matchMirroredCardPayments([{...b,description:'Unrelated expense'},c],chart).length,0);
+ assert.equal(matchMirroredCardPayments([b,{...c,id:'c1'},{...c,id:'c2'}],chart).length,0);
+});
