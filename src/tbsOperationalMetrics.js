@@ -1,7 +1,7 @@
 // Independent operational production data; no journal entries or accounting
 // account mappings are created by these functions.
 export function isoMonth(value) {
- const match=String(value||'').match(/^(\\d{4})-(\\d{2})/);
+ const match=String(value||'').match(/^([0-9]{4})-([0-9]{2})/);
  if(!match)return '';
  const year=Number(match[1]),month=Number(match[2]);
  if(year<2000||year>2100||month<1||month>12)return '';
