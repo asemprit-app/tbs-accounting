@@ -9,6 +9,8 @@ import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from 
 import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
 import {monthlySalesSeries} from './tbsExecutiveMonthlySales.js';
 import TBSMonthlySalesVisual from './TBSMonthlySalesVisual.jsx';
+import {useOperationalData} from './TBSOperationalKPIs.jsx';
+import {operationalMetricSummary,operationalMetricFormat} from './tbsOperationalMetrics.js';
 import {fiveLargestExpenses} from './tbsExecutiveExpenseFocus.js';
 import {BarChart as VerticalBarChart,Bar,XAxis,YAxis,CartesianGrid,ResponsiveContainer,Tooltip,ReferenceLine,Cell} from 'recharts';
 
@@ -48,6 +50,7 @@ function BarChart({title,items}){
 }
 export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose}){
  const [notes,setNotes]=useState(blankNotes);
+ const {definitions:operationalDefinitions,values:operationalValues,loading:operationalLoading,error:operationalError} = useOperationalData(clientId);
  const [monthToAdd,setMonthToAdd]=useState('');
  const [emailOpen,setEmailOpen]=useState(false);
  const [emailTo,setEmailTo]=useState('');
@@ -85,7 +88,12 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  let monthlySales={rows:[],totalSales:0,error:''};
  try{monthlySales=monthlySalesSeries(from,to,financialsForRange);}catch(e){monthlySales={rows:[],totalSales:0,totalExpenses:0,totalNet:0,error:e.message||String(e)};}
  const topExpenses=fiveLargestExpenses(financials.expenseRows,financials.expenses);
- const exportError=loading?'Espera a que cargue el reporte.':
+ const operationalRows=useMemo(()=>
+  operationalMetricSummary(operationalDefinitions,operationalValues,from,to,financials?.revenue),
+  [operationalDefinitions,operationalValues,from,to,financials?.revenue]);
+ const exportError=operationalLoading&&notes.clientSections.includes('operational')?'Espera a que se carguen los indicadores operacionales.':
+   operationalError&&notes.clientSections.includes('operational')?'Los indicadores operacionales no se pudieron cargar: '+operationalError:
+   loading?'Espera a que cargue el reporte.':
    !notes.selectedKpis.length?'Selecciona al menos un indicador financiero.':
    notes.clientSections.includes('monthlySales')&&monthlySales.error?monthlySales.error:
    normalizeClientSections(notes.clientSections).length===0?'Selecciona al menos una sección para compartir con el cliente.':
@@ -99,7 +107,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      monthlyRows,monthlyKpis,monthlyFindings,
      monthlySalesRows:monthlySales.rows,monthlySalesTotal:monthlySales.totalSales,
      monthlyExpenseTotal:monthlySales.totalExpenses,monthlyNetTotal:monthlySales.totalNet,
-     topExpenses};
+     topExpenses,operationalRows};
  }
 
 
@@ -440,6 +448,26 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     </div>)}
    </div>
    {trend!==null&&<p style={{fontSize:12,color:'#64748B'}}>Variación de ventas frente al período seleccionado: <strong>{trend>0?'+':''}{trend.toFixed(1)}%</strong>. No es una comparación contra el mercado.</p>}
+  </>)}
+  {operationalRows.length>0&&section('Productividad e indicadores operacionales',<>
+   <p style={{fontSize:12,color:'#64748B'}}>
+    Información mensual registrada para este cliente. Las ventas por unidad solo se calculan cuando
+    el período abarca meses completos y todos los meses tienen mediciones.
+   </p>
+   <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+    <thead><tr style={{background:'#EDF3F8',color:'#17365D'}}>
+     <th style={{textAlign:'left',padding:9}}>Indicador</th>
+     <th style={{textAlign:'right',padding:9}}>Resultado</th>
+     <th style={{textAlign:'right',padding:9}}>Meses cubiertos</th>
+     <th style={{textAlign:'right',padding:9}}>Ventas por unidad</th>
+    </tr></thead>
+    <tbody>{operationalRows.map(r=><tr key={r.metricId} style={{borderBottom:'1px solid #E2E8F0'}}>
+     <td style={{padding:8}}>{r.name}</td>
+     <td style={{textAlign:'right',padding:8}}>{operationalMetricFormat(r.result,r.unit)}</td>
+     <td style={{textAlign:'right',padding:8}}>{r.periodCount} / {r.expectedMonths}</td>
+     <td style={{textAlign:'right',padding:8}}>{r.revenuePerUnit===null?'N/D':money(r.revenuePerUnit)}</td>
+    </tr>)}</tbody>
+   </table></div>
   </>)}
   {section('Resultados mensuales — gráfica de barras verticales y tabla',monthlySales.error?
     <p style={{color:'#B91C1C',fontSize:12}}>{monthlySales.error}</p>:
