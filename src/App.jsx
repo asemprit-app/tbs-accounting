@@ -2,7 +2,7 @@ import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { reconciliationBookPresentation, reconciliationOutstandingExplanation } from './tbsReconciliationBookPresentation.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
-import { journalEntryMatchesTransactionFilters, visibleTransactionRows } from './tbsTransactionListFilter.js';
+import { transactionMatchesFilters, journalEntryMatchesTransactionFilters, visibleTransactionRows } from './tbsTransactionListFilter.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
@@ -2078,6 +2078,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' });
   const [search, setSearch] = useState('');
   const [showJournalEntries, setShowJournalEntries] = useState(false);
+  const [matchMode, setMatchMode] = useState('any');
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [bulkGL, setBulkGL] = useState(null);
@@ -2097,31 +2098,12 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   }, [reconciliations]);
 
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      if (filters.dateFrom && t.date < filters.dateFrom) return false;
-      if (filters.dateTo && t.date > filters.dateTo) return false;
-      if (filters.gl === '__uncat__' && t.gl) return false;
-      if (filters.gl === '__uncat_income__' && (t.gl || t.amount < 0)) return false;
-      if (filters.gl === '__uncat_expense__' && (t.gl || t.amount >= 0)) return false;
-      if (filters.gl && !filters.gl.startsWith('__uncat') && t.gl !== filters.gl) return false;
-      if (filters.sourceGL === '__unassigned__' && t.sourceGL) return false;
-      if (filters.sourceGL && filters.sourceGL !== '__unassigned__' && t.sourceGL !== filters.sourceGL) return false;
-      if (filters.status && t.status !== filters.status) return false;
-      const abs = Math.abs(t.amount);
-      if (filters.amount.trim() && Math.abs(abs - Number(filters.amount)) > 0.005) return false;
-      if (filters.sign === 'positive' && t.amount < 0) return false;
-      if (filters.sign === 'negative' && t.amount >= 0) return false;
-      if (filters.reconciled) {
-        const isReconciled = reconciledIds.has(t.id);
-        const isPending = pendingReconciliationIds.has(t.id) || (pendingReviewIds || []).includes(t.id);
-        if (filters.reconciled === 'reconciled' && !isReconciled) return false;
-        if (filters.reconciled === 'pending' && !isPending) return false;
-        if (filters.reconciled === 'none' && (isReconciled || isPending)) return false;
-      }
-      if (search.trim() && !t.description.toUpperCase().includes(search.trim().toUpperCase())) return false;
-      return true;
-    });
-  }, [transactions, filters, search, reconciledIds, pendingReconciliationIds, pendingReviewIds]);
+    // By default, any selected criterion is enough to include a transaction.
+    // From/To together count as one date-range criterion.
+    return transactions.filter(t => transactionMatchesFilters(t, filters, search, {
+      matchMode, reconciledIds, pendingReconciliationIds, pendingReviewIds,
+    }));
+  }, [transactions, filters, search, matchMode, reconciledIds, pendingReconciliationIds, pendingReviewIds]);
   const filtersActive = filters.dateFrom || filters.dateTo || filters.gl || filters.sourceGL || filters.status || filters.amount.trim() || filters.reconciled || filters.sign || search.trim();
 
   const quickPeriods = useMemo(() => {
@@ -2173,8 +2155,8 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
         });
       });
     });
-    return rows.filter(r => journalEntryMatchesTransactionFilters(r, filters, search));
-  }, [showJournalEntries, journalEntries, filters, search, accounts]);
+    return rows.filter(r => journalEntryMatchesTransactionFilters(r, filters, search, matchMode));
+  }, [showJournalEntries, journalEntries, filters, search, matchMode, accounts]);
 
   const combinedRows = useMemo(() => {
     return visibleTransactionRows(filteredTransactions, journalEntryRows, showJournalEntries)
@@ -2188,7 +2170,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     const start = (page - 1) * PAGE_SIZE;
     return reversed.slice(start, start + PAGE_SIZE);
   }, [combinedRows, page]);
-  useEffect(() => { setPage(1); }, [filters, search, showJournalEntries]);
+  useEffect(() => { setPage(1); }, [filters, search, matchMode, showJournalEntries]);
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -2884,11 +2866,20 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 13, color: '#52647B' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Filter matching
+            <select aria-label="Filter matching" value={matchMode} onChange={e => setMatchMode(e.target.value)}>
+              <option value="any">Match any selected filter (OR)</option>
+              <option value="all">Match all selected filters (AND)</option>
+            </select>
+          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={showJournalEntries} onChange={e => setShowJournalEntries(e.target.checked)} />
             Include Journal Entries
           </label>
-          <span>By default, searches show transactions only. Journal Entries are managed in their own tab.</span>
+          <span>{matchMode === 'any'
+            ? 'Results include transactions matching at least one selected filter.'
+            : 'Results include only transactions matching every selected filter.'} Journal Entries remain hidden unless included.</span>
         </div>
         {(filtersActive || showJournalEntries) && (
           <div role="status" style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>
