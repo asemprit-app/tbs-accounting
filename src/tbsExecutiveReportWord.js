@@ -42,6 +42,18 @@ export async function buildExecutiveWord(payload){
  if(intro.uncategorizedCount>0)flags.push(intro.uncategorizedCount+' transacciones sin categorizar.');
  contents.push(p(flags.length?'Validaciones pendientes: '+flags.join(' '):
   'No se identificaron alertas especificas en esta vista. Esto no representa una auditoria.'));
+ if(include('operational')&&Array.isArray(payload.operationalRows)&&payload.operationalRows.length){
+  contents.push(title('Indicadores operacionales y productividad'));
+  contents.push(p('Valores mensuales aportados por la gerencia del negocio. Ventas por unidad requiere cobertura completa de meses.',{size:19}));
+  contents.push(table(['Indicador','Resultado','Meses','Ventas/unidad'],payload.operationalRows.map(r=>[
+   r.name,
+   Number(r.result).toLocaleString('en-US',{maximumFractionDigits:2})+(r.unit==='%'?'%':' '+r.unit),
+   r.periodCount+'/'+r.expectedMonths,
+   r.revenuePerUnit===null?'N/D':metricDisplay('revenue',r.revenuePerUnit),
+  ])));
+  if(payload.operationalRows.some(r=>!r.coverageComplete))
+   contents.push(p('N/D: faltan meses o el intervalo es parcial.',{size:19}));
+ }
  if(include('indicators')){
   contents.push(title('Indicadores financieros seleccionados'));
   contents.push(table(['Indicador','Resultado','Explicacion'],(payload.metrics||[]).map(k=>[
