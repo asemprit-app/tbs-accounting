@@ -1,5 +1,6 @@
 import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
+import { reconciliationBookPresentation, reconciliationOutstandingExplanation } from './tbsReconciliationBookPresentation.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { journalEntryMatchesTransactionFilters, visibleTransactionRows } from './tbsTransactionListFilter.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
@@ -11425,12 +11426,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('gl')}>Account {reconSort.column === 'gl' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('periodEnd')}>As of {reconSort.column === 'periodEnd' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('statementBalance')}>Statement {reconSort.column === 'statementBalance' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
-            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('ledgerBalance')}>Book {reconSort.column === 'ledgerBalance' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
+            <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('ledgerBalance')}>Book (verified) {reconSort.column === 'ledgerBalance' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('difference')}>Difference {reconSort.column === 'difference' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th>
             <th style={{ padding: '6px 4px', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleReconSort('status')}>Status {reconSort.column === 'status' ? (reconSort.dir === 'asc' ? '▲' : '▼') : ''}</th><th></th>
           </tr></thead>
           <tbody>
-            {sortedReconciliations.map(r => (
+            {sortedReconciliations.map(r => {
+              const state = reconciliationReviewState(r);
+              const presentation = reconciliationBookPresentation(r, state);
+              return (
               <tr key={r.id} style={{ borderBottom: '1px solid #F0F1F3', background: selected.includes(r.id) ? '#F0F5FA' : 'transparent' }}>
                 <td style={{ padding: '6px 4px' }}>
                   <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggleSelect(r.id)} />
@@ -11438,23 +11442,33 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 <td style={{ padding: '6px 4px' }}>{r.gl} — {accounts.find(a => a.code === r.gl)?.name || ''}</td>
                 <td style={{ padding: '6px 4px' }}>{r.periodEnd}</td>
                 <td style={{ padding: '6px 4px' }}>{money(r.statementBalance)}</td>
-                <td style={{ padding: '6px 4px' }} title="Cleared balance from verified transactions (not every bank/card feed row)">
-                  {money(reconciliationReviewState(r).clearedBalance)}
-                  {reconciliationReviewState(r).outstandingCount > 0 &&
-                    <div style={{fontSize:10,color:'#64748B'}}>{reconciliationReviewState(r).outstandingCount} uncleared · {money(reconciliationReviewState(r).outstandingAmount)}</div>}
+                <td style={{ padding: '6px 4px' }} title="Book Balance reflects verified transactions for this statement, not all bank/card feed rows.">
+                  {money(state.clearedBalance)}
+                  {presentation.outstandingInfo && (
+                    <span role="note" aria-label={reconciliationOutstandingExplanation(presentation, state.outstandingAmount)}
+                      title={reconciliationOutstandingExplanation(presentation, state.outstandingAmount)}
+                      style={{fontSize:13,color:'#64748B',marginLeft:6,cursor:'help'}}>ⓘ</span>
+                  )}
+                  {presentation.outstandingWarning && (
+                    <div style={{fontSize:10,color:'#92400E'}}
+                      title={reconciliationOutstandingExplanation(presentation, state.outstandingAmount)}>
+                      {state.outstandingCount} outstanding · {money(state.outstandingAmount)}
+                    </div>
+                  )}
                 </td>
-                <td style={{ padding: '6px 4px' }} title={r.status !== 'PASS' ? 'Current difference; reconciliation remains pending until review is saved.' : ''}>
-                  {money(reconciliationCurrentVariance(r))}
+                <td style={{ padding: '6px 4px' }} title={presentation.approved ? 'Approved: statement and verified Book Balance match.' : 'Current verified difference; review and save this reconciliation.'}>
+                  {money(presentation.currentDifference)}
                 </td>
-                <td style={{ padding: '6px 4px' }}><span style={{ color: r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) < .01 ? '#0F6E56' : '#B00020', fontWeight: 700, fontSize: 12 }}>
-                  {r.status === 'PASS' && Math.abs(reconciliationCurrentVariance(r)) >= .01 ? 'CLEARED BALANCE CHANGED — review required' : r.status === 'PASS' ? 'APPROVED' : Math.abs(reconciliationCurrentVariance(r)) < .01 ? 'BALANCED — save review' : 'PENDING REVIEW'}
+                <td style={{ padding: '6px 4px' }}><span style={{ color: presentation.approved ? '#0F6E56' : '#B00020', fontWeight: 700, fontSize: 12 }}>
+                  {presentation.statusLabel}
                 </span></td>
                 <td style={{ padding: '6px 4px', display: 'flex', gap: 6 }}>
-                  {(r.status !== 'PASS' || Math.abs(reconciliationCurrentVariance(r)) >= .01) && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
+                  {presentation.needsReview && <button onClick={() => openReview(r.id)} style={iconBtn}>Review transactions</button>}
                   <button onClick={() => deleteOne(r.id)} style={iconBtn}><Trash2 size={14} /></button>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
         {reconciliations.length === 0 && <div style={{ fontSize: 14, color: '#6B7280', padding: 8 }}>No reconciliations yet.</div>}
@@ -11464,6 +11478,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const r = reconciliations.find(x => x.id === reviewingId);
         if (!r) return null;
         const reviewState=reconciliationReviewState(r,verified);
+        const bookPresentation=reconciliationBookPresentation(r,reviewState);
         const openingBalance=reviewState.openingBalance;
         const periodTx=reviewState.periodPostings;
         const availableDates = Array.from(new Set(periodTx.map(t => t.date))).sort();
@@ -11529,9 +11544,12 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
                 not included in the cleared balance. A $0.00 difference means the selected transactions balance;
                 use Recalculate to save their verification and approval. Do not mark outstanding entries just to clear the list.
               </div>
-              {reviewState.outstandingCount>0 && <div style={{background:'#FFF8E8',padding:9,marginBottom:10,fontSize:12,borderRadius:6,color:'#805500'}}>
-                {reviewState.outstandingCount} outstanding transaction(s), net {money(reviewState.outstandingAmount)}.
-                Full ledger including outstanding: {money(reviewState.fullLedgerBalance)}.
+              {reviewState.outstandingCount>0 && <div role="note"
+                style={{background:bookPresentation.approved?'#F7F8FA':'#FFF8E8',
+                  padding:9,marginBottom:10,fontSize:12,borderRadius:6,
+                  color:bookPresentation.approved?'#52647B':'#805500'}}>
+                {reconciliationOutstandingExplanation(bookPresentation,reviewState.outstandingAmount)}
+                {' '}Full ledger including unverified items: {money(reviewState.fullLedgerBalance)}.
               </div>}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10, padding: 8, background: '#F7F8FA', borderRadius: 6 }}>
                 <div><label style={{ fontSize: 12, color: '#6B7280', display: 'block' }}>Search description</label>
