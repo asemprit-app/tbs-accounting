@@ -122,6 +122,18 @@ export function createExecutivePdf(payload){
  text(problems.length?'Datos preliminares: '+problems.join('; ')+'.':'No se identificaron alertas especificas en esta vista; esto no certifica una auditoria.',{
   size:9,color:problems.length?orange:grey,
  });
+ if(include('operational')&&Array.isArray(payload.operationalRows)&&payload.operationalRows.length){
+  heading('Indicadores operacionales y productividad');
+  text('Resultados mensuales aportados para este negocio. Las ventas por unidad requieren cobertura completa de meses y periodo.',{size:8.5,color:grey});
+  table(['Indicador','Resultado','Meses','Ventas por unidad'],payload.operationalRows.map(r=>[
+   r.name,
+   r.result.toLocaleString('en-US',{maximumFractionDigits:2})+(r.unit==='%'?'%':' '+r.unit),
+   r.periodCount+'/'+r.expectedMonths,
+   r.revenuePerUnit===null?'N/D':money(r.revenuePerUnit),
+  ]),[176,118,70,maxW-364]);
+  if(payload.operationalRows.some(r=>!r.coverageComplete))
+   text('N/D: hay meses sin medicion o el intervalo contable incluye meses parciales.',{size:8,color:grey});
+ }
  if(include('indicators')){
   heading('Indicadores financieros seleccionados');
   table(['Indicador','Resultado','Que significa'],(payload.metrics||[]).map(x=>
