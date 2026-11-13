@@ -23,6 +23,7 @@ import TBSMonthlyCloseOverview from './TBSMonthlyCloseOverview.jsx';
 import TBSClientRequests from './TBSClientRequests';
 import TBSCheckTemplatesAdmin from './TBSCheckTemplatesAdmin';
 import TBSStaffInvite from './TBSStaffInvite.jsx';
+import {TBSOperationalKPIs,TBSOperationalKPIReport} from './TBSOperationalKPIs.jsx';
 import TBSStaffPasswordSetup from './TBSStaffPasswordSetup.jsx';
 import { isSupervisor } from './tbsStaffPermissions.js';
 import TBSRetentionsView from './TBSRetentionsView.jsx';
@@ -1619,6 +1620,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             }
           }}/>}
         {isSupervisor && tab === 'staff-access' && <TBSStaffInvite />}
+        {isStaff && tab === 'operational-kpis' && <TBSOperationalKPIs clientId={selectedClientId} businessName={businessName} />}
         {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin clients={clients} selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
@@ -1799,6 +1801,7 @@ function Sidebar({ tab, setTab, reviewCount, isStaff, isSupervisor, portalLimite
     { id: 'products', label: 'Products & Services', icon: Package },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
+    ...(isStaff ? [{ id: 'operational-kpis', label: 'Operational KPIs', icon: BarChart3 }] : []),
     { id: 'accounts', label: 'Chart of Accounts', icon: BookOpen },
     { id: 'rules', label: 'Rules', icon: ListChecks },
     { id: 'journal', label: 'Journal Entries', icon: FileText },
@@ -6939,6 +6942,7 @@ function ReportsView({ isStaff, canExecutive = false, clientId, transactions, in
         </div>
       </Card>
 
+      <TBSOperationalKPIReport clientId={clientId} from={from} to={to} sales={totalRevenue}/>
       {canExecutive && <Card style={{marginBottom:20,border:'1px solid #C6D6E8',background:'#F4F8FC'}}>
         <div style={{display:'flex',gap:14,justifyContent:'space-between',alignItems:'center',flexWrap:'wrap'}}>
           <div>
