@@ -193,20 +193,20 @@ export function TBSOperationalKPIs({clientId,businessName,onPendingChange}) {
     <h3 style={{marginTop:0,color:'#17365D'}}>{editingId?'Editar indicador':'Crear un indicador'}</h3>
     <form onSubmit={saveDefinition}>
      <label>Nombre del indicador (ej. Recetas dispensadas, Pacientes atendidos, Ocupación)</label>
-     <input required maxLength={100} value={metricName} onChange={e=>{setMetricName(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input} placeholder="Pacientes atendidos"/>
+     <input disabled={saving} required maxLength={100} value={metricName} onChange={e=>{setMetricName(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input} placeholder="Pacientes atendidos"/>
      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}>
-      <div><label>Unidad</label><input required maxLength={40} value={unit} onChange={e=>{setUnit(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input} placeholder="pacientes"/></div>
-      <div><label>Resumen entre meses</label><select value={aggregation} onChange={e=>{setAggregation(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input}>
+      <div><label>Unidad</label><input disabled={saving} required maxLength={40} value={unit} onChange={e=>{setUnit(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input} placeholder="pacientes"/></div>
+      <div><label>Resumen entre meses</label><select disabled={saving} value={aggregation} onChange={e=>{setAggregation(e.target.value);setDirtyDefinition(true);setNotice('');}} style={input}>
        <option value="sum">Sumar (recetas, visitas, pacientes)</option>
        <option value="average">Promedio (ocupación, porcentajes)</option>
        <option value="last">Último mes (saldo/censo)</option>
       </select></div>
      </div>
      <label style={{display:'block',marginTop:12}}>Descripción opcional</label>
-     <textarea maxLength={600} value={description} onChange={e=>{setDescription(e.target.value);setDirtyDefinition(true);setNotice('');}} rows={2} style={input}/>
+     <textarea disabled={saving} maxLength={600} value={description} onChange={e=>{setDescription(e.target.value);setDirtyDefinition(true);setNotice('');}} rows={2} style={input}/>
      <div style={{display:'flex',gap:10,marginTop:12}}>
       <button disabled={saving||loading} style={btn}>{editingId?'Actualizar indicador':'Crear indicador'}</button>
-      {editingId&&<button type="button" onClick={()=>{if(!dirtyDefinition||window.confirm('Descartar cambios del indicador sin guardar?'))clearDefinition();}}>Cancelar</button>}
+      {editingId&&<button disabled={saving} type="button" onClick={()=>{if(!dirtyDefinition||window.confirm('Descartar cambios del indicador sin guardar?'))clearDefinition();}}>Cancelar</button>}
      </div>
     </form>
     <h4>Indicadores del cliente</h4>
@@ -223,16 +223,16 @@ export function TBSOperationalKPIs({clientId,businessName,onPendingChange}) {
     <h3 style={{marginTop:0,color:'#17365D'}}>Registrar resultado mensual</h3>
     <form onSubmit={saveValue}>
      <label>Indicador</label>
-     <select required value={metricId} onChange={e=>chooseMetric(e.target.value)} style={input}>
+     <select disabled={saving} required value={metricId} onChange={e=>chooseMetric(e.target.value)} style={input}>
       <option value="">Seleccione</option>
       {active.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
      </select>
      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}>
-      <div><label>Mes</label><input required type="month" value={month} onChange={e=>chooseMonth(e.target.value)} style={input}/></div>
-      <div><label>Resultado ({selected?.unit||'unidad'})</label><input required type="number" step="any" value={number} onChange={e=>{setNumber(e.target.value);setDirtyValue(true);setNotice('');}} style={input}/></div>
+      <div><label>Mes</label><input disabled={saving} required type="month" value={month} onChange={e=>chooseMonth(e.target.value)} style={input}/></div>
+      <div><label>Resultado ({selected?.unit||'unidad'})</label><input disabled={saving} required type="number" step="any" value={number} onChange={e=>{setNumber(e.target.value);setDirtyValue(true);setNotice('');}} style={input}/></div>
      </div>
      <label style={{display:'block',marginTop:12}}>Observaciones (opcionales)</label>
-     <textarea maxLength={800} rows={2} value={notes} onChange={e=>{setNotes(e.target.value);setDirtyValue(true);setNotice('');}} style={input}/>
+     <textarea disabled={saving} maxLength={800} rows={2} value={notes} onChange={e=>{setNotes(e.target.value);setDirtyValue(true);setNotice('');}} style={input}/>
      <button disabled={saving||loading||!active.length} style={{...btn,marginTop:12}}>{currentValue?'Actualizar mes':'Guardar mes'}</button>
     </form>
     {focus[0]&&<div style={{marginTop:18}}>
@@ -247,6 +247,7 @@ export function TBSOperationalKPIs({clientId,businessName,onPendingChange}) {
      </div>
     </div>}
     <h4>Historial {selected?.name||''}</h4>
+    <p style={{fontSize:12,color:'#53667B'}}>{loading?'Consultando mediciones...':values.length+' mediciones almacenadas para este cliente en Supabase.'}{!metricId?' Seleccione un indicador para consultar su historial.':''}</p>
     <div style={{maxHeight:340,overflowY:'auto'}}>
      <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
       <thead><tr><th>Mes</th><th>Resultado</th><th>Nota</th><th></th></tr></thead>
