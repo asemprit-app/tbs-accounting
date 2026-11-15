@@ -1,7 +1,7 @@
 // Presentation selection affects client-facing PDF, Word and email attachments.
 // All report analysis remains visible to TBS staff in the internal screen.
 export const EXECUTIVE_SECTIONS=Object.freeze([
- {key:'summary',label:'Resumen ejecutivo sencillo',description:'Resultado del período y prioridades principales'},
+ {key:'summary',label:'Resumen ejecutivo',description:'Resultado del período y prioridades principales'},
  {key:'indicators',label:'Indicadores financieros',description:'Valores y explicación de cada indicador'},
  {key:'comparison',label:'Comparaciones de meses y períodos',description:'Meses seleccionados o comparación personalizada'},
  {key:'monthlySales',label:'Resultados mensuales: gráfica y tabla',description:'Barras verticales de ventas, gastos y ganancia neta por mes'},
@@ -44,7 +44,7 @@ export function simpleExecutiveSummary(financials={},metrics={}){
     'El resultado neto fue de '+amount(0)+'.').replace(' .','.') );
   if(revenue>0&&Number.isFinite(Number(metrics.net_margin))){
    const margin=Number(metrics.net_margin);
-   if(margin>=0)paragraphs.push('En términos sencillos, de cada $100 vendidos quedaron aproximadamente $'+margin.toFixed(2)+' después de los gastos registrados.');
+   if(margin>=0)paragraphs.push('De cada $100 vendidos, quedaron aproximadamente $'+margin.toFixed(2)+' después de los gastos registrados.');
    else paragraphs.push('Los gastos superaron las ventas: por cada $100 vendidos se perdió aproximadamente $'+Math.abs(margin).toFixed(2)+'.');
   }
   if(net<0)paragraphs.push('La prioridad inmediata es revisar los gastos y las actividades menos rentables para reducir las pérdidas.');
