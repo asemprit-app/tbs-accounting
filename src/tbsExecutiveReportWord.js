@@ -32,7 +32,7 @@ export async function buildExecutiveWord(payload){
   p('Industria: '+payload.industryLabel),
  );
  if(include('summary')){
-  contents.push(title('Resumen ejecutivo - en palabras sencillas'));
+  contents.push(title('Resumen ejecutivo'));
   contents.push(...simpleExecutiveSummary(intro,numbers).map(line=>p(line)));
  }
  const flags=[];
