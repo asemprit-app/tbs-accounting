@@ -1,6 +1,7 @@
 import React, {useEffect,useMemo,useState} from 'react';
 import {supabase} from './supabaseClient';
 import {CLOSE_TASKS,closeTaskCounts,REQUIRED_CLOSE_TASK_KEYS} from './tbsCloseRules.js';
+import {resolveCloseTaskAssignees,defaultCloseTaskAssigneeId,DEFAULT_MONTHLY_CLOSE_RESPONSIBLE,DEFAULT_REPORT_DELIVERY_RESPONSIBLE} from './tbsMonthlyCloseAssignees.js';
 import {canRequestCloseReview,canApproveClose,reviewsForMonth,reviewCounts} from './tbsCloseReviewWorkflow.js';
 
 const defaults=CLOSE_TASKS.map(task=>[task.key,task.title]);
@@ -80,11 +81,18 @@ export default function TBSControlCenter({clientId,view='close'}){
  }
  async function initialize(){
    await perform(async()=>{
+     // Validate both staff accounts before creating a checklist to avoid unassigned defaults.
+     const directory=get(await supabase.rpc('tbs_staff_directory'));
+     const defaultAssignees=resolveCloseTaskAssignees(directory||[]);
      let row=get(await supabase.from('tbs_monthly_closes').select('id').eq('client_id',clientId).eq('period_start',start).maybeSingle());
      if(!row)row=get(await supabase.from('tbs_monthly_closes').insert({client_id:clientId,period_start:start,period_end:end,status:'IN_PROGRESS'}).select('id').single());
      const existing=get(await supabase.from('tbs_close_tasks').select('task_key').eq('close_id',row.id));
      const keys=new Set((existing||[]).map(x=>x.task_key));
-     const missing=defaults.filter(([key])=>!keys.has(key)).map(([task_key,task_title])=>({close_id:row.id,task_key,title:task_title,status:'PENDING'}));
+     const missing=defaults.filter(([key])=>!keys.has(key))
+       .map(([task_key,task_title])=>({
+         close_id:row.id,task_key,title:task_title,status:'PENDING',
+         assigned_to:defaultCloseTaskAssigneeId(task_key,defaultAssignees),
+       }));
      if(missing.length)get(await supabase.from('tbs_close_tasks').insert(missing));
    },'Monthly close checklist initialized.');
  }
@@ -163,6 +171,7 @@ export default function TBSControlCenter({clientId,view='close'}){
   {notice&&<p style={{color:'#166534'}}>{notice}</p>}
   {view==='close'?<>
     <p style={{fontSize:13,color:'#475569'}}>Checklist of ten activities in the same order for every client. Mark DONE when verified or N/A when not applicable. Completing a task is a manual attestation, not an automatic balance validation.</p>
+    <p style={{fontSize:12,color:'#475569'}}>Responsable predeterminado de las tareas: <strong>{DEFAULT_MONTHLY_CLOSE_RESPONSIBLE}</strong>. Excepción: <strong>Client report delivered</strong> — <strong>{DEFAULT_REPORT_DELIVERY_RESPONSIBLE}</strong>. Las asignaciones se pueden cambiar individualmente.</p>
     {!close&&<button style={btn} disabled={busy} onClick={initialize}>Create monthly close</button>}
     {close&&<div style={panel}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
