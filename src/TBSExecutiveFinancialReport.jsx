@@ -273,7 +273,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    <List entries={warnings}/>
    <p style={{fontSize:12}}>Las conclusiones deben considerarse provisionales hasta verificar estas partidas. No se registran ajustes automáticos.</p>
   </div>}
-  {section('Resumen ejecutivo — sencillo y fácil de entender',<>
+  {section('Resumen ejecutivo',<>
     <p style={{fontSize:12,color:'#64748B'}}>Este texto se genera a partir de las ventas, gastos y ganancia neta del período. No utiliza conclusiones de mercado no verificadas.</p>
     <div style={{borderLeft:'3px solid #50769B',padding:'10px 15px',background:'#F3F7FB',borderRadius:5}}>
       {summary.map((sentence,i)=><p key={i} style={{fontSize:13,lineHeight:1.6,margin:'5px 0'}}>{sentence}</p>)}
@@ -499,7 +499,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     <strong style={{fontSize:13,color:'#17365D'}}>Hallazgos y prioridades</strong>
     <List entries={topExpenses.findings}/>
    </>)}
-  {section('Hallazgos — interpretación sencilla',<List entries={narrative.findings}/>)}
+  {section('Hallazgos principales',<List entries={narrative.findings}/>)}
   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(290px,1fr))',gap:13,marginTop:14}}>
    <div style={{...panel,marginTop:0}}><h3 style={{color:'#17365D',marginTop:0}}>Oportunidades</h3><List entries={narrative.opportunities}/></div>
    <div style={{...panel,marginTop:0}}><h3 style={{color:'#17365D',marginTop:0}}>Amenazas y riesgos</h3><List entries={narrative.risks}/></div>
