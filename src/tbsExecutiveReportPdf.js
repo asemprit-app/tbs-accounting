@@ -115,7 +115,7 @@ export function createExecutivePdf(payload){
  if(f.arMismatch)problems.push('Diferencia del mayor A/R contra submayor');
  if(f.uncategorizedCount>0)problems.push(f.uncategorizedCount+' transacciones sin categorizar');
  if(include('summary')){
-  heading('Resumen ejecutivo - en palabras sencillas');
+  heading('Resumen ejecutivo');
   simpleExecutiveSummary(f,m).forEach(p=>text(p,{size:10}));
  }
  // Accounting validation warnings cannot be suppressed by section selection.
