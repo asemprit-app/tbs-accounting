@@ -4,6 +4,7 @@ import {KPI_OPTIONS,DEFAULT_KPIS,INDUSTRY_OPTIONS,executiveMetrics,executiveNarr
 import {executivePdfBlob,executivePdfFilename,blobToPdfBase64} from './tbsExecutiveReportPdf.js';
 import {downloadExecutiveWord} from './tbsExecutiveReportWord.js';
 import {executiveEmailMessage,executiveEmailSubject,validRecipientEmail} from './tbsExecutiveEmail.js';
+import {resolveExecutiveClientRecipient} from './tbsExecutiveClientRecipient.js';
 import {MAX_MONTHS,addSelectedMonth,normalizeSelectedMonths,buildMonthlyComparison,buildMonthKpiRows,monthlyComparisonFindings} from './tbsExecutiveMonths.js';
 import {monthRange,validComparisonRange,comparisonRows,comparisonFindings} from './tbsExecutiveComparison.js';
 import {EXECUTIVE_SECTIONS,DEFAULT_CLIENT_SECTIONS,normalizeClientSections,simpleExecutiveSummary} from './tbsExecutiveSections.js';
@@ -54,6 +55,8 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  const [monthToAdd,setMonthToAdd]=useState('');
  const [emailOpen,setEmailOpen]=useState(false);
  const [emailTo,setEmailTo]=useState('');
+ const [recipientStatus,setRecipientStatus]=useState('');
+ const [resolvingEmail,setResolvingEmail]=useState(false);
  const [emailSubject,setEmailSubject]=useState('');
  const [emailMessage,setEmailMessage]=useState('');
  const [confirmRecipient,setConfirmRecipient]=useState(false);
@@ -203,17 +206,42 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
    }catch(e){setError('No se pudo generar Word: '+(e.message||String(e)));}
    finally{setExportingWord(false);}
  }
- function prepareEmail(){
+ async function prepareEmail(){
    if(!isStaff){setError('Solo el personal autorizado de TBS puede enviar reportes.');return;}
    if(exportError){setError(exportError);return;}
+   if(resolvingEmail)return;
+   setResolvingEmail(true);
    setEmailSubject(executiveEmailSubject(businessName,from,to));
    setEmailMessage(executiveEmailMessage(businessName,from,to,
      notes.comparisonMode==='months'?normalizeSelectedMonths(notes.selectedMonths):[],
      normalizeClientSections(notes.clientSections)));
-   setEmailTo('');setConfirmRecipient(false);setEmailOpen(true);setError('');setNotice('');
+   setEmailTo('');setRecipientStatus('');setConfirmRecipient(false);
+   setError('');setNotice('');
+   try{
+     // The linked customer profile of the TBS workspace is the recipient source.
+     // clients.sending_email and clients.reply_to_email are invoice sender settings.
+     const tbs=await supabase.from('clients').select('id')
+       .eq('name','Twelve Business Strategies').maybeSingle();
+     if(tbs.error)throw tbs.error;
+     if(!tbs.data?.id){
+       setRecipientStatus('missing');
+     }else{
+       const linked=await supabase.from('customers').select('linked_client_id,email')
+         .eq('client_id',tbs.data.id).eq('linked_client_id',clientId);
+       if(linked.error)throw linked.error;
+       const chosen=resolveExecutiveClientRecipient(linked.data||[],clientId);
+       setEmailTo(chosen.email);
+       setRecipientStatus(chosen.status);
+     }
+   }catch(err){
+     setRecipientStatus('unavailable');
+   }finally{
+     setResolvingEmail(false);
+     setEmailOpen(true);
+   }
  }
  async function sendReportEmail(){
-   if(!isStaff||emailSending)return;
+   if(!isStaff||emailSending||resolvingEmail)return;
    if(exportError){setError(exportError);return;}
    if(!validRecipientEmail(emailTo)){setError('Confirma un único correo electrónico válido del cliente.');return;}
    if(!confirmRecipient){setError('Confirma que revisaste el destinatario y el reporte antes de enviarlo.');return;}
@@ -260,7 +288,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      <button style={{...button,background:'#507290'}} disabled={loading||saving} onClick={saveNotes}>{saving?'Guardando…':'Guardar análisis'}</button>
      <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
      <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
-     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||resolvingEmail||exportingPdf||exportingWord} onClick={prepareEmail}>{resolvingEmail?'Buscando correo del cliente…':'Enviar PDF por email'}</button>}
     </div>
    </div>
    {loading&&<p style={{fontSize:12,color:'#64748B'}}>Cargando notas de este período…</p>}
@@ -548,7 +576,7 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     <button style={button} disabled={loading||saving} onClick={saveNotes}>Guardar reunión y acuerdos</button>
     <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
      <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
-     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||exportingPdf||exportingWord} onClick={prepareEmail}>Enviar PDF por email</button>}
+     {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||resolvingEmail||exportingPdf||exportingWord} onClick={prepareEmail}>{resolvingEmail?'Buscando correo del cliente…':'Enviar PDF por email'}</button>}
    </div>
   </>)}
   {emailOpen&&isStaff&&<div role="presentation" style={{position:'fixed',inset:0,
@@ -569,8 +597,13 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
       <label style={{fontSize:12,display:'block',marginBottom:11}}>Correo del cliente
         <input type="email" aria-label="Correo del cliente" style={{...field,display:'block',marginTop:4}}
           placeholder="correo@cliente.com" autoComplete="off" value={emailTo}
-          onChange={e=>{setEmailTo(e.target.value);setConfirmRecipient(false);}}/>
+          onChange={e=>{setEmailTo(e.target.value);setRecipientStatus('manual');setConfirmRecipient(false);}}/>
       </label>
+      {recipientStatus==='found'&&<p role="status" style={{fontSize:12,color:'#166534'}}>Correo predeterminado cargado del perfil del cliente en Twelve Business Strategies. Verifique el destinatario antes de enviarlo.</p>}
+      {recipientStatus==='missing'&&<p role="status" style={{fontSize:12,color:'#805500'}}>Este cliente no tiene un correo registrado en su perfil vinculado de Twelve Business Strategies. Ingrese y confirme el destinatario.</p>}
+      {recipientStatus==='invalid'&&<p role="alert" style={{fontSize:12,color:'#B91C1C'}}>El correo del perfil del cliente no tiene un formato válido. Corríjalo en Customers o ingrese manualmente un destinatario válido.</p>}
+      {recipientStatus==='ambiguous'&&<p role="alert" style={{fontSize:12,color:'#B91C1C'}}>El cliente tiene más de un correo diferente en sus perfiles vinculados. Seleccione y confirme manualmente el destinatario antes de enviar.</p>}
+      {recipientStatus==='unavailable'&&<p role="alert" style={{fontSize:12,color:'#B91C1C'}}>No fue posible consultar el correo del perfil del cliente. Puede introducirlo manualmente y verificarlo antes de enviar.</p>}
       <label style={{fontSize:12,display:'block',marginBottom:11}}>Asunto
         <input aria-label="Asunto del email" style={{...field,display:'block',marginTop:4}}
           value={emailSubject} onChange={e=>setEmailSubject(e.target.value)}/>
