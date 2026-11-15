@@ -968,6 +968,7 @@ function Workspace({ clientId, isStaff, isSupervisor, clients, selectedClientId,
   const portalLimited = accessRole !== 'staff';
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [kpiGuard,setKpiGuard]=useState({saving:false,dirty:false});
   const [tab, setTab] = useState(()=>{
     if(portalLimited)return 'payroll';
     const requested=window.sessionStorage.getItem('tbs_open_tab_once');
@@ -977,6 +978,14 @@ function Workspace({ clientId, isStaff, isSupervisor, clients, selectedClientId,
     }
     return 'dashboard';
   });
+  function canLeaveKpi(){
+    if(tab!=='operational-kpis')return true;
+    if(kpiGuard.saving){window.alert('Espere a que termine la verificación del KPI antes de salir.');return false;}
+    return !kpiGuard.dirty||window.confirm('Hay cambios de KPI sin guardar o verificar. ¿Desea descartarlos y salir?');
+  }
+  function navigateTab(next){if(next===tab||canLeaveKpi())setTab(next);}
+  function switchClientGuarded(id){if(id===selectedClientId||canLeaveKpi())onSwitchClient(id);}
+  function logoutGuarded(){if(canLeaveKpi())onLogout();}
   const [transactions, setTransactionsRaw] = useState([]);
   const [invoices, setInvoicesRaw] = useState([]);
   const [customers, setCustomersRaw] = useState([]);
@@ -1593,8 +1602,8 @@ async function fetchAllRows(table, clientId, orderCol) {
 
   return (
     <div style={{ display: 'flex', minHeight: '640px', fontFamily: 'system-ui, sans-serif', background: '#F4F6F8', color: '#1F2933' }}>
-      <Sidebar tab={tab} setTab={setTab} reviewCount={summary.review} isStaff={isStaff} isSupervisor={isSupervisor} portalLimited={portalLimited} clients={clients}
-        selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={onLogout} userEmail={userEmail} businessName={businessName} />
+      <Sidebar tab={tab} setTab={navigateTab} reviewCount={summary.review} isStaff={isStaff} isSupervisor={isSupervisor} portalLimited={portalLimited} clients={clients}
+        selectedClientId={selectedClientId} onSwitchClient={switchClientGuarded} onAddClient={onAddClient} onEditClient={onEditClient} onDeleteClient={onDeleteClient} addClientBusy={addClientBusy} onLogout={logoutGuarded} userEmail={userEmail} businessName={businessName} />
       <div style={{ flex: 1, padding: '24px 28px', overflow: 'auto' }}>
         {portalLimited && (
           <div style={{ background: '#EAF3DE', color: '#27500A', padding: '9px 12px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>
@@ -1622,7 +1631,7 @@ async function fetchAllRows(table, clientId, orderCol) {
             }
           }}/>}
         {isSupervisor && tab === 'staff-access' && <TBSStaffInvite />}
-        {isStaff && tab === 'operational-kpis' && <TBSOperationalKPIs clientId={selectedClientId} businessName={businessName} />}
+        {isStaff && tab === 'operational-kpis' && <TBSOperationalKPIs clientId={selectedClientId} businessName={businessName} onPendingChange={setKpiGuard} />}
         {isStaff && tab === 'tbs-review' && <TBSControlCenter clientId={selectedClientId} view="review" />}
         {isStaff && tab === 'check-templates' && <TBSCheckTemplatesAdmin clients={clients} selectedClientId={selectedClientId} onSwitchClient={onSwitchClient} />}
         {!portalLimited && tab === 'dashboard' && <Dashboard summary={summary} transactions={transactions} invoices={invoices} accounts={accounts} journalEntries={journalEntries} invoiceTotal={invoiceTotal} invoiceSubtotal={invoiceSubtotal} invoiceRevenueSubtotal={invoiceRevenueSubtotal} />}
