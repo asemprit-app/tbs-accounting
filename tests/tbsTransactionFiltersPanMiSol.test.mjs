@@ -13,10 +13,11 @@ test('Pan Mi Sol: default filters require both September AND category',()=>{
  assert.equal(transactionMatchesFilters(septemberExpense,filters),true);
  assert.equal(transactionMatchesFilters(augustIncome,filters),false);
 });
-test('explicit OR is always limited by the selected dates',()=>{
- assert.equal(transactionMatchesFilters(septemberIncome,filters,'',{matchMode:'any'}),true);
- assert.equal(transactionMatchesFilters(septemberExpense,filters,'',{matchMode:'any'}),true);
- assert.equal(transactionMatchesFilters({...septemberExpense,date:'2026-08-20'},filters,'',{matchMode:'any'}),false);
+test('explicit OR combines non-date criteria but always respects the selected dates',()=>{
+ const orFilters={...filters,status:'AUTO'};
+ assert.equal(transactionMatchesFilters(septemberIncome,orFilters,'',{matchMode:'any'}),true);
+ assert.equal(transactionMatchesFilters(septemberExpense,orFilters,'',{matchMode:'any'}),true);
+ assert.equal(transactionMatchesFilters({...septemberExpense,date:'2026-08-20'},orFilters,'',{matchMode:'any'}),false);
 });
 test('date-only filters and invalid ranges cannot leak unrelated records',()=>{
  assert.equal(transactionMatchesFilters(septemberIncome,{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),true);
