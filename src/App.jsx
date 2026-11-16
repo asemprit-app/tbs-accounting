@@ -3,6 +3,7 @@ import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { reconciliationBookPresentation, reconciliationOutstandingExplanation } from './tbsReconciliationBookPresentation.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { transactionMatchesFilters, journalEntryMatchesTransactionFilters, visibleTransactionRows, transactionPageSelectionIds } from './tbsTransactionListFilter.js';
+import {fetchAllClientRows} from './tbsPaginatedClientRows.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
@@ -1042,23 +1043,7 @@ function Workspace({ clientId, isStaff, isSupervisor, clients, selectedClientId,
   const [statementClient, setStatementClient] = useState(null);
 
 async function fetchAllRows(table, clientId, orderCol) {
-  const pageSize = 1000;
-  let allRows = [];
-  let page = 0;
-  while (true) {
-    let q = supabase.from(table).select('*').eq('client_id', clientId);
-    // A unique, deterministic order is required when fetching 1000-row pages.
-    // Many transactions share the same date; ordering by date alone can cause
-    // duplicate/missing records across page boundaries.
-    q = orderCol ? q.order(orderCol).order('id') : q.order('id');
-    q = q.range(page * pageSize, page * pageSize + pageSize - 1);
-    const { data, error } = await q;
-    if (error) return { data: null, error };
-    allRows = allRows.concat(data || []);
-    if (!data || data.length < pageSize) break;
-    page++;
-  }
-  return { data: allRows, error: null };
+  return fetchAllClientRows(supabase,table,clientId,orderCol);
 }
 
   useEffect(() => {
