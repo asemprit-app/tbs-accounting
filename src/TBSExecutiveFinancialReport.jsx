@@ -49,7 +49,7 @@ function BarChart({title,items}){
   </div>
  </div>;
 }
-export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose}){
+export default function TBSExecutiveFinancialReport({clientId,businessName,from,to,financials,prior,financialsForRange,isStaff=false,onClose,onOpenPeriod}){
  const [notes,setNotes]=useState(blankNotes);
  const {definitions:operationalDefinitions,values:operationalValues,loading:operationalLoading,error:operationalError} = useOperationalData(clientId);
  const [monthToAdd,setMonthToAdd]=useState('');
@@ -65,6 +65,16 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
  const [exportingPdf,setExportingPdf]=useState(false);
  const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[dirty,setDirty]=useState(false);
+ const [historyOpen,setHistoryOpen]=useState(false);
+ const [historyLoading,setHistoryLoading]=useState(true);
+ const [historyError,setHistoryError]=useState('');
+ const [savedHistory,setSavedHistory]=useState([]);
+ const [archiveHistory,setArchiveHistory]=useState([]);
+ const [staffEmails,setStaffEmails]=useState({});
+ const [historyRefresh,setHistoryRefresh]=useState(0);
+ const [downloadingArchive,setDownloadingArchive]=useState('');
+ const historyStamp=timestamp=>timestamp?new Date(timestamp).toLocaleString('es-PR',{dateStyle:'medium',timeStyle:'short'}):'N/D';
+ const historyActor=id=>staffEmails[id]||'Personal TBS';
  const metrics=useMemo(()=>executiveMetrics(financials),[financials]);
  const selected=KPI_OPTIONS.filter(k=>notes.selectedKpis.includes(k.key));
  const comparisonPeriod=['none','months'].includes(notes.comparisonMode)?null:
@@ -150,6 +160,35 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
   return()=>{active=false;};
  },[clientId,from,to]);
 
+ useEffect(()=>{
+  let active=true;
+  setHistoryLoading(true);setHistoryError('');
+  (async()=>{
+   try{
+    const [analyses,archives,directory]=await Promise.all([
+     supabase.from('tbs_executive_report_notes')
+      .select('id,period_from,period_to,sector,created_at,updated_at,updated_by')
+      .eq('client_id',clientId).order('updated_at',{ascending:false}).limit(100),
+     supabase.from('tbs_executive_report_archives')
+      .select('id,period_from,period_to,sent_at,sent_by,recipient_email,subject,filename,storage_path,sha256,provider_message_id')
+      .eq('client_id',clientId).order('sent_at',{ascending:false}).limit(100),
+     supabase.rpc('tbs_staff_directory'),
+    ]);
+    if(analyses.error)throw analyses.error;
+    if(archives.error)throw archives.error;
+    if(!active)return;
+    setSavedHistory(analyses.data||[]);
+    setArchiveHistory(archives.data||[]);
+    if(!directory.error && Array.isArray(directory.data)){
+     setStaffEmails(Object.fromEntries(directory.data.map(person=>[person.id,person.email])));
+    }
+   }catch(e){
+    if(active)setHistoryError('No se pudo consultar el historial: '+(e.message||String(e)));
+   }finally{if(active)setHistoryLoading(false);}
+  })();
+  return()=>{active=false;};
+ },[clientId,historyRefresh]);
+
  async function saveNotes(){
   if(loading||saving)return;
   if(!notes.selectedKpis.length){setError('Selecciona al menos un indicador.');return;}
@@ -178,13 +217,31 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      .upsert(row,{onConflict:'client_id,period_from,period_to'});
    if(result.error)throw result.error;
    setDirty(false);setNotice('Reporte y notas guardados para este cliente y período.');
+   setHistoryRefresh(value=>value+1);
   }catch(e){setError('No se pudo guardar: '+(e.message||String(e)));}
   finally{setSaving(false);}
+ }
+ function openSavedPeriod(periodFrom,periodTo){
+   if(dirty&&!window.confirm('Hay cambios sin guardar en el análisis actual. ¿Deseas descartarlos para abrir otro período?'))return;
+   if(!onOpenPeriod){setError('No se pudo cambiar el período del reporte.');return;}
+   setHistoryOpen(false);setError('');setNotice('');
+   onOpenPeriod(periodFrom,periodTo);
  }
  function saveBlob(blob,filename){
    const url=URL.createObjectURL(blob),a=document.createElement('a');
    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
    setTimeout(()=>URL.revokeObjectURL(url),5000);
+ }
+ async function downloadArchive(row){
+  if(downloadingArchive)return;
+  if(!row.storage_path?.startsWith(clientId+'/')){setError('La ruta del archivo no corresponde al cliente seleccionado.');return;}
+  setDownloadingArchive(row.id);setError('');
+  try{
+   const result=await supabase.storage.from('tbs-executive-reports').download(row.storage_path);
+   if(result.error||!result.data)throw result.error||new Error('No se obtuvo el archivo.');
+   saveBlob(result.data,row.filename||'Reporte_Ejecutivo_Archivado.pdf');
+  }catch(e){setError('No se pudo descargar la copia archivada: '+(e.message||String(e)));}
+  finally{setDownloadingArchive('');}
  }
  async function downloadPdf(){
    if(exportError){setError(exportError);return;}
@@ -266,7 +323,11 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
      if(!response.ok||!result.accepted)throw Error(result.error||'El servicio de correo no aceptó el reporte.');
      setEmailOpen(false);setConfirmRecipient(false);
      setNotice('El proveedor de correo aceptó el envío del PDF a '+result.to+
-       (result.id?' (referencia '+result.id+').':'.')+' La entrega final depende del destinatario.');
+       (result.id?' (referencia '+result.id+').':'.')+
+       (result.archived?' Se conservó una copia PDF en el archivo del cliente.':
+       ' AVISO: '+(result.archiveWarning||'La copia PDF no se pudo registrar en el historial.'))+
+       ' La entrega final depende del destinatario.');
+     setHistoryRefresh(value=>value+1);
    }catch(e){setError('No se pudo enviar el reporte: '+(e.message||String(e)));}
    finally{setEmailSending(false);}
  }
@@ -286,16 +347,56 @@ export default function TBSExecutiveFinancialReport({clientId,businessName,from,
     <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'start'}}>
      <button style={{...button,color:'#17365D',background:'#EBF0F5'}} onClick={onClose}>Volver a Reports</button>
      <button style={{...button,background:'#507290'}} disabled={loading||saving} onClick={saveNotes}>{saving?'Guardando…':'Guardar análisis'}</button>
+     <button style={{...button,background:'#E6EDF5',color:'#17365D'}} onClick={()=>setHistoryOpen(v=>!v)}>{historyOpen?'Ocultar historial':'Historial de reportes'}</button>
      <button style={button} disabled={exportingPdf||exportingWord||emailSending} onClick={downloadPdf}>{exportingPdf?'Generando PDF…':'Descargar PDF'}</button>
      <button style={{...button,background:'#507290'}} disabled={exportingWord||exportingPdf||emailSending} onClick={downloadWord}>{exportingWord?'Generando Word…':'Descargar Word'}</button>
      {isStaff&&<button style={{...button,background:'#0F6E56'}} disabled={emailSending||resolvingEmail||exportingPdf||exportingWord} onClick={prepareEmail}>{resolvingEmail?'Buscando correo del cliente…':'Enviar PDF por email'}</button>}
     </div>
    </div>
    {loading&&<p style={{fontSize:12,color:'#64748B'}}>Cargando notas de este período…</p>}
+   <p style={{fontSize:12,color:'#506579',margin:'9px 0 0'}}>
+    {historyLoading?'Consultando último análisis guardado…':savedHistory.length?
+      <>Último análisis guardado: <strong>{savedHistory[0].period_from} al {savedHistory[0].period_to}</strong>
+      {' · '}Actualizado {historyStamp(savedHistory[0].updated_at)} por {historyActor(savedHistory[0].updated_by)}.</>:
+      'Este cliente no tiene análisis guardados.'}
+   </p>
    {dirty&&<p style={{fontSize:12,color:'#946200'}}>Cambios sin guardar: el PDF mostrará el borrador actual, pero debes guardar para conservarlo en TBS.</p>}
    {error&&<p role="alert" style={{fontSize:12,color:'#B91C1C'}}>{error}</p>}
    {notice&&<p role="status" style={{fontSize:12,color:'#0F6E56'}}>{notice}</p>}
   </div>
+  {historyOpen&&section('Historial de reportes',<>
+   <p style={{fontSize:12,color:'#64748B'}}>Los análisis guardados se organizan por cliente y período. Al abrir uno, las cifras financieras se recalculan con los registros contables actuales. Los PDF enviados y archivados son copias fijas del documento original.</p>
+   <button type="button" style={{...button,background:'#E6EDF5',color:'#17365D'}} onClick={()=>setHistoryRefresh(v=>v+1)} disabled={historyLoading}>Actualizar historial</button>
+   {historyLoading&&<p style={{fontSize:12}}>Consultando historial…</p>}
+   {historyError&&<p role="alert" style={{color:'#B91C1C',fontSize:12}}>{historyError}</p>}
+   <h4 style={{color:'#17365D',marginBottom:8}}>Análisis guardados por período</h4>
+   {!historyLoading&&savedHistory.length===0&&<p style={{fontSize:12,color:'#64748B'}}>No hay análisis guardados para este cliente.</p>}
+   <div style={{display:'grid',gap:8}}>
+    {savedHistory.map(row=><div key={row.id} style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',padding:10,border:'1px solid #E1E7EF',borderRadius:7}}>
+     <div style={{fontSize:12}}>
+      <strong>{row.period_from} al {row.period_to}</strong>
+      <div style={{color:'#64748B',marginTop:4}}>Actualizado: {historyStamp(row.updated_at)} · {historyActor(row.updated_by)}</div>
+     </div>
+     <button type="button" style={{...button,padding:'7px 10px'}} onClick={()=>openSavedPeriod(row.period_from,row.period_to)} disabled={loading||saving||emailSending||((row.period_from===from)&&(row.period_to===to))}>
+      {row.period_from===from&&row.period_to===to?'Período actual':'Abrir análisis'}
+     </button>
+    </div>)}
+   </div>
+   <h4 style={{color:'#17365D',margin:'20px 0 8px'}}>PDF enviados y archivados</h4>
+   {!historyLoading&&archiveHistory.length===0&&<p style={{fontSize:12,color:'#64748B'}}>Todavía no hay copias PDF de correos aceptados por el proveedor desde la activación del archivo.</p>}
+   <div style={{display:'grid',gap:8}}>
+    {archiveHistory.map(row=><div key={row.id} style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',padding:10,border:'1px solid #E1E7EF',borderRadius:7}}>
+     <div style={{fontSize:12,minWidth:0}}>
+      <strong>{row.period_from} al {row.period_to}</strong>
+      <div style={{color:'#64748B',marginTop:4}}>Envío aceptado: {historyStamp(row.sent_at)} · {historyActor(row.sent_by)}</div>
+      <div style={{color:'#64748B',marginTop:3}}>Destinatario: {row.recipient_email}</div>
+     </div>
+     <button type="button" style={{...button,padding:'7px 10px'}} onClick={()=>downloadArchive(row)} disabled={Boolean(downloadingArchive)}>
+      {downloadingArchive===row.id?'Descargando…':'Descargar PDF original'}
+     </button>
+    </div>)}
+   </div>
+  </>)}
   {warnings.length>0&&<div style={{...panel,background:'#FFFAF0',borderColor:'#E8C58A'}}>
    <h3 style={{color:'#965500',marginTop:0}}>Validaciones contables pendientes</h3>
    <List entries={warnings}/>

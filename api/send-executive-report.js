@@ -2,6 +2,7 @@
 // Staff-only JWT validation, client existence, PDF header/pages/EOF and bounded
 // attachment size. No emails are sent on page load, report preview, or save.
 import {ensureCompanyContact,validRecipientEmail} from '../src/tbsExecutiveEmail.js';
+import {randomUUID,createHash} from 'node:crypto';
 
 const respond=(res,status,body)=>res.status(status).json(body);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -67,13 +68,44 @@ export default async function handler(req,res){
    subject:body.subject.trim(),text:ensureCompanyContact(body.message),
    attachments:[{filename,content:body.pdfBase64,content_type:'application/pdf'}],
   };
+  // Store the exact PDF bytes before contacting the mail provider. If secure
+  // archival fails, no email is sent without an auditable original copy.
+  const storagePath=body.clientId+'/'+randomUUID()+'.pdf';
+  const archiveUpload=await fetch(url+'/storage/v1/object/tbs-executive-reports/'+storagePath,{
+   method:'POST',
+   headers:{...headers,'Content-Type':'application/pdf','x-upsert':'false'},
+   body:pdf,
+  });
+  if(!archiveUpload.ok){
+   return respond(res,503,{error:'No se pudo guardar el PDF en el archivo privado. No se envió el correo.'});
+  }
+  const sha256=createHash('sha256').update(pdf).digest('hex');
   const response=await fetch('https://api.resend.com/emails',{
    method:'POST',headers:{Authorization:'Bearer '+resend,'Content-Type':'application/json'},
    body:JSON.stringify(data),
   });
   const result=await response.json().catch(()=>({}));
   if(!response.ok)return respond(res,502,{error:result.message||result.error||'Email provider rejected the request.'});
-  return respond(res,200,{accepted:true,to:body.toEmail.trim().toLowerCase(),id:result.id||null,filename});
+  // Only provider-accepted messages are added to the visible sent-report ledger.
+  const archiveMetadata={
+   client_id:body.clientId,period_from:body.from,period_to:body.to,
+   recipient_email:body.toEmail.trim().toLowerCase(),
+   subject:body.subject.trim(),provider_message_id:result.id||null,
+   storage_path:storagePath,filename,sha256,bytes:pdf.length,sent_by:user.id,
+  };
+  let archived=false;
+  try{
+   const record=await fetch(url+'/rest/v1/tbs_executive_report_archives',{
+    method:'POST',
+    headers:{...headers,'Content-Type':'application/json',Prefer:'return=minimal'},
+    body:JSON.stringify(archiveMetadata),
+   });
+   archived=record.ok;
+  }catch(_archiveError){archived=false;}
+  return respond(res,200,{
+   accepted:true,to:body.toEmail.trim().toLowerCase(),id:result.id||null,filename,
+   archived,archiveWarning:archived?null:'El correo fue aceptado y el PDF almacenado, pero falta registrar la entrada del historial. Contacte a TBS para reconciliarlo.',
+  });
  }catch(err){
   return respond(res,503,{error:'Executive email service temporarily unavailable.'});
  }
