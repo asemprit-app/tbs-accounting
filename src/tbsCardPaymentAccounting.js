@@ -100,12 +100,60 @@ export function potentiallyUnmatchedCardTransfers(transactions, accounts, signsB
   return audit;
 }
 
+
+/**
+ * A transfer imported from BOTH asset-account statements has four apparent
+ * postings if each feed is read as a separate two-sided journal entry:
+ * each bank's source plus the reciprocal category on the other bank.
+ * Keep the two independent source movements; suppress BOTH duplicate
+ * category legs only when exact, unambiguous, same-day reciprocal evidence
+ * exists. Leave one-sided transfers and ambiguous matches untouched.
+ */
+export function matchMirroredAssetTransfers(transactions=[],accounts=[]) {
+  const byCode=new Map(accounts.map(a=>[a.code,a]));
+  const inbound=new Map(),outbound=new Map();
+  const key=t=>JSON.stringify([t.client_id||'',t.date,t.sourceGL,t.gl,Math.abs(cents(t.amount))]);
+  for(const t of transactions) {
+    if(!t.id||!t.date||!t.sourceGL||!t.gl||t.sourceGL===t.gl||
+      !isAsset(byCode.get(t.sourceGL)?.type)||
+      !isAsset(byCode.get(t.gl)?.type))continue;
+    const signed=cents(t.amount);
+    if(!signed)continue;
+    const group=signed>0?inbound:outbound;
+    const bucket=key(t);
+    if(!group.has(bucket))group.set(bucket,[]);
+    group.get(bucket).push(t);
+  }
+  const matches=[];
+  for(const [outKey,outRows] of outbound) {
+    if(outRows.length!==1)continue;
+    const outgoing=outRows[0];
+    const reverse=JSON.stringify([outgoing.client_id||'',outgoing.date,
+      outgoing.gl,outgoing.sourceGL,Math.abs(cents(outgoing.amount))]);
+    const inboundRows=inbound.get(reverse)||[];
+    if(inboundRows.length!==1)continue;
+    const incoming=inboundRows[0];
+    if(outgoing.id===incoming.id)continue;
+    matches.push({outgoingId:outgoing.id,incomingId:incoming.id,
+      amount:Math.abs(Number(outgoing.amount)),
+      fromGL:outgoing.sourceGL,toGL:incoming.sourceGL,date:outgoing.date});
+  }
+  return matches;
+}
+
 export function cardAwareTransactionPostings(transactions, accounts, signsByGL = new Map()) {
   const byCode = new Map(accounts.map(a => [a.code,a]));
   const matches = matchMirroredCardPayments(transactions,accounts,signsByGL);
+  const bankTransfers = matchMirroredAssetTransfers(transactions,accounts);
   const byId = new Map(transactions.map(t => [t.id,t]));
   const laterCategoryToSkip = new Set();
   const correctingPostings = new Map();
+  for(const transfer of bankTransfers) {
+    // The bank feeds already carry both sides. A category posting from
+    // either feed would double-count the transfer in Reports.
+    laterCategoryToSkip.add(transfer.outgoingId);
+    laterCategoryToSkip.add(transfer.incomingId);
+  }
 
   for (const match of matches) {
     const bank = byId.get(match.bankId), card = byId.get(match.cardId);
@@ -149,5 +197,5 @@ export function cardAwareTransactionPostings(transactions, accounts, signsByGL =
     const correction = correctingPostings.get(t.id);
     if (correction) postings.push(correction);
   }
-  return {postings,matches};
+  return {postings,matches,bankTransfers};
 }
