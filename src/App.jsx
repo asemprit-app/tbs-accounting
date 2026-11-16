@@ -6383,6 +6383,17 @@ function ReportsView({ isStaff, canExecutive = false, clientId, transactions, in
   const [customDateError, setCustomDateError] = useState('');
   const { from, to } = getPeriodRange(preset, appliedCustomFrom, appliedCustomTo);
 
+  function openExecutiveSavedPeriod(periodFrom,periodTo){
+    if(!isValidIsoDate(periodFrom)||!isValidIsoDate(periodTo)||periodFrom>periodTo)return;
+    setCustomFrom(periodFrom);
+    setCustomTo(periodTo);
+    setAppliedCustomFrom(periodFrom);
+    setAppliedCustomTo(periodTo);
+    setCustomDateError('');
+    setPreset('custom');
+    setShowExecutiveReport(true);
+  }
+
   function applyCustomPeriod() {
     if (!isValidIsoDate(customFrom) || !isValidIsoDate(customTo)) {
       setCustomDateError('Enter a complete From and To date.');
@@ -6976,6 +6987,7 @@ function ReportsView({ isStaff, canExecutive = false, clientId, transactions, in
         isStaff={isStaff} clientId={clientId} businessName={businessName} from={from} to={to}
         financials={executiveFinancials} prior={priorFinancial} financialsForRange={financialsForExecutiveRange}
         onClose={()=>setShowExecutiveReport(false)}
+        onOpenPeriod={openExecutiveSavedPeriod}
       /> : <>
 
       {(reconciliationDrift.length > 0 || receivableMismatch) && (
