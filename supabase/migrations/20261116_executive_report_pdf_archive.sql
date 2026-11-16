@@ -15,7 +15,7 @@ create table if not exists public.tbs_executive_report_archives (
  sent_by uuid not null references auth.users(id),
  sent_at timestamptz not null default now(),
  constraint tbs_executive_archive_period_valid check (period_from <= period_to),
- constraint tbs_executive_archive_path_valid check (storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\\.pdf$')
+ constraint tbs_executive_archive_path_valid check (storage_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}[.]pdf$')
 );
 create index if not exists tbs_executive_archives_client_sent_idx
  on public.tbs_executive_report_archives (client_id,sent_at desc);
@@ -43,5 +43,5 @@ create policy "tbs_executive_pdf_supervisor_insert"
  with check (
   bucket_id='tbs-executive-reports'
   and (select public.tbs_is_supervisor())
-  and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\\.pdf$'
+  and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}[.]pdf$'
  );
