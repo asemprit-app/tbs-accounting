@@ -15,7 +15,7 @@ const transactions=[
 ];
 test('selected category OR account OR description returns every related transaction exactly once',()=>{
  const f={...blank,gl:'6200',sourceGL:'2020'};
- const results=transactions.filter(tx=>transactionMatchesFilters(tx,f,'FARMACIA'));
+ const results=transactions.filter(tx=>transactionMatchesFilters(tx,f,'FARMACIA',{matchMode:'any'}));
  assert.deepEqual(results.map(tx=>tx.id),['a','b','c']);
  assert.equal(results.length,new Set(results.map(tx=>tx.id)).size);
 });
@@ -28,13 +28,16 @@ test('the From and To fields form one date-range criterion, not two broad OR cri
  const f={...blank,dateFrom:'2026-09-01',dateTo:'2026-09-30'};
  assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,f)).map(t=>t.id),['b']);
  const includingCategory={...f,gl:'6200'};
- assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,includingCategory)).map(t=>t.id),['a','b']);
- assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,includingCategory,'',{matchMode:'all'})),[]);
+ // The selected month remains a hard boundary, even for explicit OR.
+ assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,includingCategory)).map(t=>t.id),[]);
+ assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,includingCategory,'',{matchMode:'any'})),[]);
+ const sameMonthCategory={...f,gl:'2020'};
+ assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,sameMonthCategory)).map(t=>t.id),['b']);
 });
 test('amount sign, status, and reconciliation eligibility can each independently match',()=>{
  const f={...blank,amount:'120',status:'REVIEW',reconciled:'reconciled'};
  const reconciledIds=new Set(['b']);
- const got=transactions.filter(tx=>transactionMatchesFilters(tx,f,'',{reconciledIds}));
+ const got=transactions.filter(tx=>transactionMatchesFilters(tx,f,'',{matchMode:'any',reconciledIds}));
  assert.deepEqual(got.map(tx=>tx.id),['a','b','c']);
  assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,{...blank,sign:'negative'})).map(tx=>tx.id),['a','d']);
  assert.deepEqual(transactions.filter(tx=>transactionMatchesFilters(tx,{...blank,amount:'-120'})).map(tx=>tx.id),['a']);

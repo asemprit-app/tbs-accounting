@@ -1,17 +1,12 @@
-// A single source of truth for the Transactions search. The date-from/to
-// pair is ONE range criterion; other selected criteria can be combined using
-// "any" (OR, default) or "all" (AND).
+// A single source of truth for the Transactions search. Date limits always
+// constrain the results. Other selected criteria combine with "all" (AND,
+// default) or explicit "any" (OR) within those dates.
 //
 // Journal Entry rows are optional and lack bank source, transaction status and
 // reconciliation metadata. Those missing attributes never constitute a match.
 function activeChecks(entry, filters = {}, search = '', isJournal = false, reconciledIds = new Set(),
                       pendingReconciliationIds = new Set(), pendingReviewIds = []) {
   const checks = [];
-  if (filters.dateFrom || filters.dateTo) {
-    checks.push(Boolean(entry.date) &&
-      (!filters.dateFrom || entry.date >= filters.dateFrom) &&
-      (!filters.dateTo || entry.date <= filters.dateTo));
-  }
   if (filters.gl) {
     const gl = filters.gl;
     if (isJournal && gl.startsWith('__uncat')) {
@@ -61,16 +56,22 @@ function activeChecks(entry, filters = {}, search = '', isJournal = false, recon
 }
 
 export function transactionMatchesFilters(entry, filters = {}, search = '',
-  { matchMode = 'any', isJournal = false, reconciledIds = new Set(),
+  { matchMode = 'all', isJournal = false, reconciledIds = new Set(),
     pendingReconciliationIds = new Set(), pendingReviewIds = [] } = {}) {
   if (!entry) return false;
+  // Treat the date range as a boundary, never as an optional OR criterion:
+  // choosing September plus a category must not return rows from other months.
+  if ((filters.dateFrom || filters.dateTo) && !entry.date) return false;
+  if (filters.dateFrom && entry.date < filters.dateFrom) return false;
+  if (filters.dateTo && entry.date > filters.dateTo) return false;
+  if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo) return false;
   const checks = activeChecks(entry, filters, search, isJournal,
     reconciledIds, pendingReconciliationIds, pendingReviewIds);
   if (!checks.length) return true;
   return matchMode === 'all' ? checks.every(Boolean) : checks.some(Boolean);
 }
 
-export function journalEntryMatchesTransactionFilters(entry, filters = {}, search = '', matchMode = 'any') {
+export function journalEntryMatchesTransactionFilters(entry, filters = {}, search = '', matchMode = 'all') {
   if (!entry?.isJE) return false;
   return transactionMatchesFilters(entry, filters, search, { matchMode, isJournal: true });
 }
@@ -79,4 +80,10 @@ export function visibleTransactionRows(transactions = [], journalEntries = [], s
   // Only actual transactions by default. JE display requires explicit opt-in.
   // Both datasets must already be filtered before merging.
   return showJournalEntries ? [...transactions, ...journalEntries] : [...transactions];
+}
+
+// The table checkbox selects only visible bank rows on the current page.
+// Journal Entries are informational and cannot be bulk-edited as transactions.
+export function transactionPageSelectionIds(pagedRows=[]) {
+ return pagedRows.filter(row=>row && !row.isJE).map(row=>row.id);
 }

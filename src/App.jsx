@@ -2,7 +2,8 @@ import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
 import { reconciliationBookPresentation, reconciliationOutstandingExplanation } from './tbsReconciliationBookPresentation.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
-import { transactionMatchesFilters, journalEntryMatchesTransactionFilters, visibleTransactionRows } from './tbsTransactionListFilter.js';
+import { transactionMatchesFilters, journalEntryMatchesTransactionFilters, visibleTransactionRows, transactionPageSelectionIds } from './tbsTransactionListFilter.js';
+import {fetchAllClientRows} from './tbsPaginatedClientRows.js';
 import { eligibleSupplierInvoices, consolidateSupplierInvoices } from './tbsConsolidatedSupplierCheck.js';
 import { reportMonthOptions } from './tbsReportMonthOptions.js';
 import { drawRegisterPdf, assertNonblankPdfPages } from './tbsRegisterPdf.js';
@@ -1042,20 +1043,7 @@ function Workspace({ clientId, isStaff, isSupervisor, clients, selectedClientId,
   const [statementClient, setStatementClient] = useState(null);
 
 async function fetchAllRows(table, clientId, orderCol) {
-  const pageSize = 1000;
-  let allRows = [];
-  let page = 0;
-  while (true) {
-    let q = supabase.from(table).select('*').eq('client_id', clientId);
-    if (orderCol) q = q.order(orderCol);
-    q = q.range(page * pageSize, page * pageSize + pageSize - 1);
-    const { data, error } = await q;
-    if (error) return { data: null, error };
-    allRows = allRows.concat(data || []);
-    if (!data || data.length < pageSize) break;
-    page++;
-  }
-  return { data: allRows, error: null };
+  return fetchAllClientRows(supabase,table,clientId,orderCol);
 }
 
   useEffect(() => {
@@ -2087,7 +2075,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' });
   const [search, setSearch] = useState('');
   const [showJournalEntries, setShowJournalEntries] = useState(false);
-  const [matchMode, setMatchMode] = useState('any');
+  const [matchMode, setMatchMode] = useState('all');
   const [selected, setSelected] = useState([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState([]);
   const [bulkGL, setBulkGL] = useState(null);
@@ -2107,8 +2095,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
   }, [reconciliations]);
 
   const filteredTransactions = useMemo(() => {
-    // By default, any selected criterion is enough to include a transaction.
-    // From/To together count as one date-range criterion.
+    // Dates always constrain rows; all other criteria are combined by default.
     return transactions.filter(t => transactionMatchesFilters(t, filters, search, {
       matchMode, reconciledIds, pendingReconciliationIds, pendingReviewIds,
     }));
@@ -2132,6 +2119,10 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     const yearOpts = Array.from(years).sort().reverse().map(y => ({ value: `y:${y}`, label: y, from: `${y}-01-01`, to: `${y}-12-31` }));
     return { monthOpts, yearOpts };
   }, [transactions]);
+  // Keep the Period dropdown in sync with manual dates and Clear filters,
+  // so selecting the same month again always triggers a new filter.
+  const quickPeriodValue=[...quickPeriods.yearOpts,...quickPeriods.monthOpts]
+    .find(option=>option.from===filters.dateFrom&&option.to===filters.dateTo)?.value||'';
   function formatLocalDate2(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
@@ -2179,7 +2170,10 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     const start = (page - 1) * PAGE_SIZE;
     return reversed.slice(start, start + PAGE_SIZE);
   }, [combinedRows, page]);
-  useEffect(() => { setPage(1); }, [filters, search, matchMode, showJournalEntries]);
+  const pageTransactionIds=transactionPageSelectionIds(pagedRows);
+  // Changes to a filter must not leave hidden rows selected for bulk edits.
+  useEffect(() => { setPage(1); setSelected([]); }, [filters, search, matchMode, showJournalEntries]);
+  useEffect(() => { setPage(current=>Math.min(current,totalPages)); }, [totalPages]);
   function normalizeDesc(d) {
     return d.toUpperCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -2211,9 +2205,10 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
   function toggleSelectAll() {
-    const visibleIds = filteredTransactions.map(t => t.id);
-    const allSelected = visibleIds.every(id => selected.includes(id)) && visibleIds.length > 0;
-    setSelected(allSelected ? selected.filter(id => !visibleIds.includes(id)) : Array.from(new Set([...selected, ...visibleIds])));
+    const allSelected = pageTransactionIds.length > 0 &&
+      pageTransactionIds.every(id=>selected.includes(id));
+    setSelected(allSelected ? selected.filter(id=>!pageTransactionIds.includes(id)) :
+      Array.from(new Set([...selected,...pageTransactionIds])));
   }
   function applyBulkCategory() {
     if (bulkGL === null || selected.length === 0) return;
@@ -2820,7 +2815,7 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
           </div>
           <div>
             <label style={{ fontSize: 13, color: '#6B7280', display: 'block' }}>Period</label>
-            <select onChange={e => applyQuickPeriod(e.target.value)} defaultValue="">
+            <select value={quickPeriodValue} onChange={e => applyQuickPeriod(e.target.value)}>
               <option value="">Custom range...</option>
               <optgroup label="Years">
                 {quickPeriods.yearOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2871,15 +2866,15 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
               <option value="negative">Negative only</option>
             </select></div>
           {filtersActive && (
-            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' }); setSearch(''); }} style={iconBtn}>Clear filters</button>
+            <button onClick={() => { setFilters({ dateFrom: '', dateTo: '', gl: '', sourceGL: '', status: '', amount: '', reconciled: '', sign: '' }); setSearch(''); setMatchMode('all'); }} style={iconBtn}>Clear filters</button>
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 13, color: '#52647B' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             Filter matching
             <select aria-label="Filter matching" value={matchMode} onChange={e => setMatchMode(e.target.value)}>
-              <option value="any">Match any selected filter (OR)</option>
               <option value="all">Match all selected filters (AND)</option>
+              <option value="any">Match any other selected filter within dates (OR)</option>
             </select>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -2887,9 +2882,12 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
             Include Journal Entries
           </label>
           <span>{matchMode === 'any'
-            ? 'Results include transactions matching at least one selected filter.'
-            : 'Results include only transactions matching every selected filter.'} Journal Entries remain hidden unless included.</span>
+            ? 'Date range always applies; other filters match at least one criterion.'
+            : 'Only transactions meeting every selected criterion appear.'} Journal Entries remain hidden unless included.</span>
         </div>
+        {filters.dateFrom&&filters.dateTo&&filters.dateFrom>filters.dateTo&&(
+          <div role="alert" style={{fontSize:13,color:'#B91C1C',marginTop:8}}>From must be earlier than or equal to To.</div>
+        )}
         {(filtersActive || showJournalEntries) && (
           <div role="status" style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>
             {filteredTransactions.length} of {transactions.length} transactions
@@ -2959,7 +2957,8 @@ function TransactionsView({ transactions, setTransactions, confirmTransactionImp
             <tr style={{ textAlign: 'left', color: '#6B7280', borderBottom: '1px solid #E2E5E9' }}>
               <th style={{ padding: '6px 4px' }}>
                 <input type="checkbox"
-                  checked={filteredTransactions.length > 0 && filteredTransactions.every(t => selected.includes(t.id))}
+                  aria-label="Select transactions on this page"
+                  checked={pageTransactionIds.length > 0 && pageTransactionIds.every(id => selected.includes(id))}
                   onChange={toggleSelectAll} />
               </th>
               <th style={{ padding: '6px 4px' }}>Date</th>
