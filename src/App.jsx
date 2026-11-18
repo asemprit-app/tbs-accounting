@@ -1,5 +1,6 @@
 import { accountRunningBalance } from './tbsAccountRunningBalance.js';
 import { clearedReconciliationSnapshot } from './tbsReconciliationCleared.js';
+import { reconciliationResidualGuidance } from './tbsReconciliationResidualGuidance.js';
 import { reconciliationBookPresentation, reconciliationOutstandingExplanation } from './tbsReconciliationBookPresentation.js';
 import { bankReconciliationDrift, receivableLedgerBridge } from './tbsAccountingDiagnostics.js';
 import { transactionMatchesFilters, journalEntryMatchesTransactionFilters, visibleTransactionRows, transactionPageSelectionIds } from './tbsTransactionListFilter.js';
@@ -11312,7 +11313,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
   }
 
   function runReconciliation() {
-    if (!form.gl || !form.statementBalance) { setError('Select the account and enter the statement balance.'); return; }
+    if (!form.gl || form.statementBalance === '' || !Number.isFinite(Number(form.statementBalance))) { setError('Select the account and enter a valid statement balance (including $0.00).'); return; }
     setError('');
     const statementBalance = Number(form.statementBalance);
     const nsmCalc = usePreviousStatementOpening(form.gl) ? nsmLedgerFor(form.gl, form.periodEnd) : null;
@@ -11518,6 +11519,15 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
         const verifiedDebits = verifiedTx.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
         const verifiedCredits = verifiedTx.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0);
         const liveDiff = reviewState.difference;
+        const residualGuidance=reconciliationResidualGuidance({
+          openingBalance:reviewState.openingBalance,
+          clearedBalance:reviewState.clearedBalance,
+          statementBalance:r.statementBalance,
+          checkedCount:reviewState.checkedCount,
+          outstandingCount:reviewState.outstandingCount,
+          periodCount:periodTx.length,
+          accountType:accounts.find(a=>a.code===r.gl)?.type,
+        });
         const reviewFiltersActive = reviewFilters.dateFrom || reviewFilters.dateTo || reviewFilters.description.trim() || reviewFilters.amount.trim() || reviewSign || reviewDates.length > 0;
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
@@ -11532,7 +11542,7 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               </div>
               <div style={{ display: 'flex', gap: 20, fontSize: 14, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span>Statement: <strong>{money(r.statementBalance)}</strong></span>
-                {usePreviousStatementOpening(r.gl) && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
+                {reviewState.previous && <span>Opening balance: <strong>{money(openingBalance)}</strong></span>}
                 <span>Book (verified only): <strong>{money(liveLedger)}</strong></span>
                 <span style={{ color: Math.abs(liveDiff) < 0.01 ? '#0F6E56' : '#B00020', fontWeight: 600 }}>Difference: {money(liveDiff)}</span>
                 <span style={{ color: '#6B7280' }}>{currentVerified.length} of {periodTx.length} verified · {reviewState.outstandingCount} outstanding</span>
@@ -11553,8 +11563,28 @@ function ReconciliationView({ reconciliations, setReconciliations, transactions,
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>
                 Mark only the transactions appearing on this statement. Unchecked entries are carried forward as outstanding,
                 not included in the cleared balance. A $0.00 difference means the selected transactions balance;
-                use Recalculate to save their verification and approval. Do not mark outstanding entries just to clear the list.
+                use Save balanced review to save their verification and approval. Do not mark outstanding entries just to clear the list.
               </div>
+              {residualGuidance&&<div role="alert"
+                style={{background:'#FFF8E8',padding:12,marginBottom:12,fontSize:13,
+                  borderRadius:6,border:'1px solid #E8C58A',color:'#805500'}}>
+                <strong>Todos los movimientos disponibles están marcados, pero la conciliación todavía no cuadra.</strong>
+                <div style={{marginTop:6}}>
+                  Falta explicar <strong>{money(residualGuidance.amount)}</strong>. Con el saldo anterior de
+                  {' '}{money(residualGuidance.openingBalance)}, la actividad neta registrada es
+                  {' '}{money(residualGuidance.actualMovement)} y produce
+                  {' '}{money(residualGuidance.clearedBalance)}. Para llegar al estado de
+                  {' '}{money(residualGuidance.statementBalance)}, la actividad neta debe ser
+                  {' '}{money(residualGuidance.expectedMovement)}.
+                </div>
+                <div style={{marginTop:6}}>{residualGuidance.hint}</div>
+                <div style={{marginTop:6}}>
+                  Compare el estado de cuenta con Transactions de este mismo período,
+                  incluyendo el importe, la fecha y la cuenta de origen. Corrija únicamente
+                  movimientos respaldados por el estado y guarde de nuevo la revisión.
+                  No agregue un ajuste solo para forzar el balance.
+                </div>
+              </div>}
               {reviewState.outstandingCount>0 && <div role="note"
                 style={{background:bookPresentation.approved?'#F7F8FA':'#FFF8E8',
                   padding:9,marginBottom:10,fontSize:12,borderRadius:6,
